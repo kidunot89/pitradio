@@ -83,8 +83,10 @@ def build() -> int:
         "--include-package-data=faster_whisper",
         "--include-package=ctranslate2",
         "--include-package-data=ctranslate2",
-        "--include-package=sounddevice",
-        "--include-package-data=sounddevice",
+        # sounddevice is a single module, not a package — --include-package
+        # is a fatal error for it. Its PortAudio DLL lives in the separate
+        # _sounddevice_data package, added below.
+        "--include-module=sounddevice",
         "--include-package=pystray",
         "--include-package=PIL",
         "--product-name=PitRadio",
