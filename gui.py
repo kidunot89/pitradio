@@ -1,0 +1,359 @@
+"""Main window: status, live log, and the shell the other tabs hang off.
+
+Closing the window hides it rather than exiting — the hook keeps running and
+the tray icon is how you get back. Quit, from the tray or the File menu, is the
+only thing that actually stops the app.
+
+This module never imports winapi. That is what lets the whole GUI be launched
+on a development Mac with `--gui-only` to check layout and the event pump,
+which is otherwise untestable away from the target machine.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import queue
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+import gui_settings
+import state as state_mod
+from state import AppState
+
+log = logging.getLogger(__name__)
+
+POLL_MS = 100
+
+
+class App:
+    def __init__(
+        self,
+        root: tk.Tk,
+        store,
+        app_state: AppState,
+        version: str,
+        *,
+        worker=None,
+        checker=None,
+        recorder=None,
+        transcriber=None,
+        hook=None,
+        use_tray: bool = True,
+    ):
+        self.root = root
+        self.store = store
+        self.state = app_state
+        self.version = version
+        self.worker = worker
+        self.checker = checker
+        self.recorder = recorder
+        self.transcriber = transcriber
+        self.hook = hook
+        self.tray = None
+        self._quitting = False
+        self._log_lines = 0
+
+        root.title(f"Push2Talk {version}")
+        root.minsize(720, 520)
+        if store.config.gui.geometry:
+            # A saved geometry can be off-screen or malformed after a monitor
+            # change; falling back to the default beats failing to open.
+            with contextlib.suppress(tk.TclError):
+                root.geometry(store.config.gui.geometry)
+        root.protocol("WM_DELETE_WINDOW", self.hide_window)
+
+        self._build()
+
+        if use_tray:
+            self._start_tray()
+
+        if store.config.gui.start_minimized:
+            root.after(200, self.hide_window)
+
+        root.after(POLL_MS, self._drain)
+
+    # -- construction ----------------------------------------------------
+
+    def _build(self) -> None:
+        self.enabled_var = tk.BooleanVar(value=self.state.enabled)
+        self.status_var = tk.StringVar(value=self.state.status)
+        self.exe_var = tk.StringVar(value="—")
+        self.profile_var = tk.StringVar(value="—")
+        self.last_var = tk.StringVar(value="—")
+
+        self.header = ttk.Frame(self.root, padding=(12, 10))
+        self.header.pack(fill="x")
+
+        ttk.Label(self.header, textvariable=self.status_var,
+                  font=("Segoe UI", 16, "bold")).pack(side="left")
+        ttk.Checkbutton(self.header, text="Enabled", variable=self.enabled_var,
+                        command=lambda: self.set_enabled(self.enabled_var.get())
+                        ).pack(side="right")
+
+        self.warning_var = tk.StringVar(value="")
+        self.warning_label = ttk.Label(
+            self.root, textvariable=self.warning_var, foreground="#b34700",
+            wraplength=900, justify="left", padding=(12, 0, 12, 6),
+        )
+
+        self.update_frame = ttk.Frame(self.root, padding=(12, 6))
+        self.update_var = tk.StringVar(value="")
+        ttk.Label(self.update_frame, textvariable=self.update_var).pack(side="left")
+        ttk.Button(self.update_frame, text="Install now",
+                   command=self.install_update).pack(side="right")
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        self._build_status_tab()
+        gui_settings.build_settings_tab(self)
+        gui_settings.build_profiles_tab(self)
+        gui_settings.build_vocabulary_tab(self)
+        gui_settings.build_audio_tab(self)
+        gui_settings.build_history_tab(self)
+        gui_settings.build_updates_tab(self)
+
+        self._refresh_warnings()
+
+    def _build_status_tab(self) -> None:
+        frame = ttk.Frame(self.notebook, padding=12)
+        self.notebook.add(frame, text="Status")
+
+        grid = ttk.Frame(frame)
+        grid.pack(fill="x")
+        for row, (label, var) in enumerate(
+            (("Focused app", self.exe_var),
+             ("Profile in use", self.profile_var),
+             ("Last message", self.last_var)),
+        ):
+            ttk.Label(grid, text=f"{label}:", width=16).grid(row=row, column=0, sticky="w")
+            ttk.Label(grid, textvariable=var, foreground="#333").grid(
+                row=row, column=1, sticky="w")
+        grid.columnconfigure(1, weight=1)
+
+        ttk.Label(
+            frame,
+            text=("Hold the trigger key while a sim is focused. The executable name "
+                  "shown above is the key to use when adding a profile for it."),
+            foreground="#666", wraplength=880, justify="left",
+        ).pack(fill="x", pady=(10, 6))
+
+        log_frame = ttk.LabelFrame(frame, text="Log", padding=6)
+        log_frame.pack(fill="both", expand=True)
+
+        self.log_text = tk.Text(log_frame, height=14, wrap="none", state="disabled",
+                                font=("Consolas", 9))
+        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=scroll.set)
+        self.log_text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(6, 0))
+        ttk.Button(buttons, text="Open log folder",
+                   command=gui_settings.open_log_folder).pack(side="left")
+        ttk.Button(buttons, text="Open config folder",
+                   command=lambda: gui_settings.open_folder(self.store.path.parent)
+                   ).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Quit", command=self.quit).pack(side="right")
+
+    def _start_tray(self) -> None:
+        try:
+            import tray as tray_mod
+
+            self.tray = tray_mod.Tray(self)
+            self.tray.start()
+        except Exception as exc:
+            log.warning("tray icon unavailable: %s", exc)
+            self.tray = None
+
+    # -- event pump ------------------------------------------------------
+
+    def _drain(self) -> None:
+        """Pull everything the worker/hook published since the last tick.
+
+        Bounded per tick so a burst of log lines can't stall the UI thread.
+        """
+        for _ in range(200):
+            try:
+                kind, payload = self.state.events.get_nowait()
+            except queue.Empty:
+                break
+            self._handle(kind, payload)
+        self.root.after(POLL_MS, self._drain)
+
+    def _handle(self, kind: str, payload) -> None:
+        if kind == state_mod.EV_LOG:
+            self._append_log(str(payload))
+        elif kind == state_mod.EV_STATUS:
+            snap = self.state.snapshot()
+            self.status_var.set(snap["status"])
+            self.exe_var.set(snap["exe"] or "—")
+            self.profile_var.set(snap["profile"])
+            if self.tray is not None:
+                self.tray.refresh(snap["status"], snap["enabled"])
+        elif kind == state_mod.EV_HISTORY:
+            gui_settings.add_history_row(self, payload)
+            self.last_var.set(payload.text if payload.typed else "(nothing sent)")
+        elif kind == state_mod.EV_LEVEL:
+            gui_settings.set_level(self, float(payload))
+        elif kind == state_mod.EV_UPDATE:
+            self._show_update(payload)
+
+    def _append_log(self, line: str) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", line + "\n")
+        self._log_lines += 1
+
+        limit = max(50, self.store.config.gui.log_lines)
+        if self._log_lines > limit:
+            self.log_text.delete("1.0", f"{self._log_lines - limit}.0")
+            self._log_lines = limit
+
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _refresh_warnings(self) -> None:
+        messages = []
+        if self.state.elevated is False:
+            messages.append(
+                "Not running as administrator. If a sim runs elevated, Windows will "
+                "discard every keystroke this app sends and nothing will be typed — "
+                "with no error."
+            )
+        messages.extend(f"Config: {p}" for p in self.state.config_problems)
+
+        if messages:
+            self.warning_var.set("\n".join(messages))
+            self.warning_label.pack(fill="x", after=self.header)
+        else:
+            self.warning_label.pack_forget()
+
+    def _show_update(self, info) -> None:
+        if info is None:
+            self.update_frame.pack_forget()
+            return
+        self.update_var.set(f"Version {info.version} is available.")
+        self.update_frame.pack(fill="x", before=self.notebook)
+        gui_settings.set_update_details(self, info)
+
+    # -- actions ---------------------------------------------------------
+
+    def set_enabled(self, value: bool) -> None:
+        self.state.set_enabled(value)
+        self.enabled_var.set(value)
+        self.store.config.enabled = value
+        self.save_config()
+        log.info("trigger key %s", "enabled" if value else "disabled (passing through)")
+
+    def save_config(self) -> None:
+        """Write the config out. The worker picks it up on its next trigger."""
+        import config as config_mod
+
+        problems = self.store.config.validate()
+        self.state.config_problems = problems
+        try:
+            config_mod.save(self.store.path, self.store.config)
+        except OSError as exc:
+            messagebox.showerror("Push2Talk", f"Could not save config:\n{exc}")
+            return
+        # Keep the store's mtime in step so this write doesn't read back as an
+        # external edit on the next trigger.
+        self.store.load()
+        self._refresh_warnings()
+        if problems:
+            log.warning("config saved with %d problem(s); see the banner", len(problems))
+        else:
+            log.info("config saved")
+
+    def check_for_updates(self) -> None:
+        if self.checker is None:
+            messagebox.showinfo("Push2Talk", "Update checks are disabled in this run.")
+            return
+        log.info("checking for updates")
+        self.checker.check_now()
+
+    def install_update(self) -> None:
+        info = self.state.pending_update
+        if info is None:
+            return
+        import updater
+
+        if not updater.installed_via_installer():
+            messagebox.showinfo(
+                "Push2Talk",
+                "This copy was not installed with the installer, so it can't update "
+                "itself. Download the new release from GitHub.",
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Push2Talk",
+            f"Install version {info.version} now?\n\n"
+            "Push2Talk will close, update, and restart. Don't do this mid-session.",
+        ):
+            return
+
+        def work():
+            import paths
+
+            try:
+                installer = updater.download(info, paths.log_dir().parent / "updates")
+            except Exception as exc:
+                # Bound to a local: `exc` is cleared when the except block ends,
+                # so the lambda below would otherwise close over an unbound name.
+                message = str(exc)
+                log.error("update failed: %s", message)
+                self.root.after(
+                    0, lambda: messagebox.showerror("Push2Talk", f"Update failed:\n{message}")
+                )
+                return
+            self.root.after(0, lambda: self._launch_installer(installer))
+
+        import threading
+
+        threading.Thread(target=work, name="update-download", daemon=True).start()
+
+    def _launch_installer(self, installer) -> None:
+        import updater
+
+        updater.launch_installer(installer)
+        self.quit()
+
+    # -- window lifecycle ------------------------------------------------
+
+    def show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def hide_window(self) -> None:
+        if self.tray is None:
+            # With no tray there would be no way back, so treat close as quit.
+            self.quit()
+            return
+        self.root.withdraw()
+        log.info("minimised to tray; the trigger key is still active")
+
+    def quit(self) -> None:
+        if self._quitting:
+            return
+        self._quitting = True
+
+        try:
+            self.store.config.gui.geometry = self.root.geometry()
+            self.save_config()
+        except Exception:
+            log.debug("could not persist window geometry", exc_info=True)
+
+        for component in (self.tray, self.checker, self.worker, self.hook):
+            if component is None:
+                continue
+            try:
+                component.stop()
+            except Exception:
+                log.debug("stopping %s failed", component, exc_info=True)
+
+        self.root.quit()
+        self.root.destroy()

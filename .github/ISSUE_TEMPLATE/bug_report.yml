@@ -1,0 +1,78 @@
+name: Bug report
+description: Something doesn't work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if **nothing is typed into the game**, check the two
+        things that cause almost every report of it —
+
+        1. Is Push2Talk running as administrator? If the sim runs elevated and
+           Push2Talk doesn't, Windows discards every keystroke it sends and
+           reports no error at all.
+        2. Is the game in **borderless windowed** mode? Exclusive fullscreen
+           swallows synthetic input in some titles.
+
+  - type: input
+    id: version
+    attributes:
+      label: Push2Talk version
+      description: Shown in the window title and on the Updates tab.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: sim
+    attributes:
+      label: Which sim
+      description: >
+        And the executable name from the Status tab, if you have it — that name
+        is the profile key, and a mismatch is a common cause of "my profile is
+        ignored".
+      placeholder: "Le Mans Ultimate (le mans ultimate.exe)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Was Push2Talk running as administrator?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Installer (push2talk-setup-*.exe)
+        - Portable zip
+        - From source
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt
+      description: >
+        Status tab -> Open log folder, then paste the lines around the failed
+        trigger. The per-stage timings ("pre-keys sent", "transcribed …",
+        "sent …") are what make this diagnosable.
+      render: text
+    validations:
+      required: false

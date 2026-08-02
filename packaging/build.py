@@ -1,0 +1,139 @@
+"""Nuitka build. Every flag that matters lives here rather than in CI.
+
+    python packaging/build.py            # build
+    python packaging/build.py --version  # print the version and exit
+
+Two choices are deliberate and worth not "fixing" later:
+
+* **--standalone, never --onefile.** A onefile build unpacks itself into a temp
+  directory at every launch, which is the same shape as a self-extracting
+  dropper and is a large part of why packed Python apps get quarantined.
+* **Nuitka rather than PyInstaller.** Nuitka compiles to C and links a real
+  binary instead of appending a bundle to a bootloader that malware families
+  reuse. Builds are unsigned, so this does not make the app trusted — it just
+  removes the most common heuristic trigger.
+
+The native dependencies (ctranslate2, onnxruntime, PortAudio) are the fragile
+part: they ship shared libraries that standalone mode does not always pick up
+by itself, which is why they are named explicitly below.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD_DIR = ROOT / "build"
+
+
+def read_version() -> str:
+    """Parse __version__ out of the entry point without importing it.
+
+    Importing would pull in tkinter and the rest, which the build host may not
+    have configured, and would make the build depend on the app running.
+    """
+    text = (ROOT / "push2talk.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if not match:
+        raise SystemExit("could not find __version__ in push2talk.py")
+    return match.group(1)
+
+
+def _four_part(version: str) -> str:
+    parts = [p for p in re.findall(r"\d+", version)][:4]
+    while len(parts) < 4:
+        parts.append("0")
+    return ".".join(parts)
+
+
+def _have(module: str) -> bool:
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def build() -> int:
+    version = read_version()
+    BUILD_DIR.mkdir(exist_ok=True)
+
+    args = [
+        sys.executable, "-m", "nuitka",
+        "--standalone",
+        "--assume-yes-for-downloads",
+        "--enable-plugin=tk-inter",
+        # "attach", not "disable": double-clicking still shows no console, but
+        # running from a terminal keeps stdout, which is what makes
+        # `push2talk.exe --check-config` usable and lets CI smoke-test the
+        # built binary by reading its output rather than guessing.
+        "--windows-console-mode=attach",
+        # The app types into windows owned by processes that may be elevated;
+        # without this manifest UIPI discards everything it sends, silently.
+        "--windows-uac-admin",
+        f"--windows-icon-from-ico={ROOT / 'packaging' / 'icon.ico'}",
+        "--include-data-files="
+        f"{ROOT / 'config.default.json'}=config.default.json",
+        # Native payloads standalone mode misses on its own.
+        "--include-package=faster_whisper",
+        "--include-package-data=faster_whisper",
+        "--include-package=ctranslate2",
+        "--include-package-data=ctranslate2",
+        "--include-package=sounddevice",
+        "--include-package-data=sounddevice",
+        "--include-package=pystray",
+        "--include-package=PIL",
+        "--product-name=Push2Talk",
+        f"--product-version={_four_part(version)}",
+        f"--file-version={_four_part(version)}",
+        "--file-description=Push-to-talk dictation for sim racing",
+        "--copyright=MIT licensed",
+        f"--output-dir={BUILD_DIR}",
+        "--output-filename=push2talk.exe",
+        str(ROOT / "push2talk.py"),
+    ]
+
+    # PortAudio's DLL lives in a separate data package on Windows wheels.
+    if _have("_sounddevice_data"):
+        args.insert(-1, "--include-package-data=_sounddevice_data")
+
+    # faster-whisper uses onnxruntime for voice-activity detection. Which
+    # versions need it varies, so it is included only when actually installed.
+    if _have("onnxruntime"):
+        args.insert(-1, "--include-package=onnxruntime")
+        args.insert(-1, "--include-package-data=onnxruntime")
+
+    print(f"building Push2Talk {version}")
+    print(" ".join(args))
+    result = subprocess.run(args, cwd=ROOT, check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    dist = BUILD_DIR / "push2talk.dist"
+    exe = dist / "push2talk.exe"
+    if not exe.exists():
+        print(f"error: expected {exe} to exist after the build", file=sys.stderr)
+        return 1
+
+    print(f"built {exe}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Build the Windows binary with Nuitka.")
+    parser.add_argument("--version", action="store_true",
+                        help="print the version from push2talk.py and exit")
+    args = parser.parse_args()
+
+    if args.version:
+        print(read_version())
+        return 0
+    return build()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

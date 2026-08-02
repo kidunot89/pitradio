@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Nuitka
+*.build/
+*.dist/
+*.onefile-build/
+push2talk.exe
+
+# Inno Setup
+packaging/Output/
+*.iss.bak
+
+# Runtime state when running from source
+config.json
+logs/
+models/
+push2talk.log*
+
+.DS_Store
+.idea/
+.vscode/

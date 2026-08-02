@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint and validate config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lint tooling
+        run: pip install ruff
+
+      - run: ruff check .
+
+      # config.py and keys.py have no Win32 imports, which is what lets the
+      # config layer be validated on Linux at all. If this step ever fails with
+      # an import error, something Windows-only has leaked into them.
+      - name: Validate the shipped config
+        run: python push2talk.py --check-config
+
+  build:
+    name: Windows build smoke test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install nuitka
+
+      - name: Build with Nuitka
+        run: python packaging/build.py
+
+      # The reason this job exists. ctranslate2, onnxruntime and PortAudio ship
+      # native libraries that Nuitka's standalone mode does not always collect,
+      # and the failure only shows up when the built binary actually imports
+      # them. Running the real exe here catches that in CI instead of on
+      # someone's rig after they've installed it.
+      - name: Run the built binary
+        run: |
+          .\build\push2talk.dist\push2talk.exe --check-config
+          if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
+
+      - name: Verify the native dependencies actually import
+        run: |
+          .\build\push2talk.dist\push2talk.exe --list-devices
+          if ($LASTEXITCODE -ne 0) { throw "audio stack did not load in the built binary" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: push2talk-dist
+          path: build/push2talk.dist/
+          retention-days: 7

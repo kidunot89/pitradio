@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "enabled": true,
+  "trigger_key": "f13",
+  "audio": {
+    "input_device": null,
+    "samplerate": 16000,
+    "channels": 1,
+    "min_clip_seconds": 0.3,
+    "max_clip_seconds": 30.0
+  },
+  "whisper": {
+    "model": "small.en",
+    "device": "cpu",
+    "compute_type": "int8",
+    "cpu_threads": 0,
+    "beam_size": 5,
+    "language": "en",
+    "vad_filter": true,
+    "initial_prompt": "Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, Copse, Stowe, 130R, Degner, Spoon, box this lap, full course yellow, safety car, slow zone, double stint, undercut, overcut, out lap, in lap, apex, understeer, oversteer, dirty air, slipstream, blue flag, penalty, drive through, stop and go, pit window, tyre pressures, brake bias, traction control, fuel saving, lift and coast, delta, purple sector."
+  },
+  "cues": {
+    "enabled": true,
+    "output_device": null,
+    "start_hz": 880,
+    "stop_hz": 620,
+    "duration_ms": 60,
+    "volume": 0.25
+  },
+  "gui": {
+    "start_minimized": false,
+    "geometry": "",
+    "log_lines": 400
+  },
+  "updates": {
+    "repo": "kidunot89/push2talk",
+    "check_on_start": true,
+    "check_interval_hours": 24,
+    "auto_install": false
+  },
+  "default_profile": {
+    "pre_keys": ["enter"],
+    "post_keys": ["enter"],
+    "abort_keys": ["escape"],
+    "pre_delay_ms": 350,
+    "post_delay_ms": 80,
+    "key_hold_ms": 40,
+    "key_gap_ms": 40,
+    "type_delay_ms": 8,
+    "max_chars": 200,
+    "text_mode": "unicode"
+  },
+  "profiles": {
+    "le mans ultimate.exe": {
+      "pre_keys": ["enter"],
+      "post_keys": ["enter"],
+      "abort_keys": ["escape"],
+      "pre_delay_ms": 350,
+      "max_chars": 200
+    }
+  }
+}

@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install nuitka
+
+      - name: Read version
+        id: version
+        run: |
+          $v = python packaging/build.py --version
+          echo "value=$v" >> $env:GITHUB_OUTPUT
+          echo "Building version $v"
+
+      # The tag and __version__ must agree, or the self-updater will keep
+      # offering an update that installs the same version it already has.
+      - name: Check the tag matches __version__
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $ver = "${{ steps.version.outputs.value }}"
+          if ($tag -ne $ver) {
+            throw "tag $tag does not match __version__ $ver in push2talk.py"
+          }
+
+      - name: Build with Nuitka
+        run: python packaging/build.py
+
+      - name: Smoke test the binary
+        run: |
+          .\build\push2talk.dist\push2talk.exe --check-config
+          if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build the installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=${{ steps.version.outputs.value }} `
+            packaging\push2talk.iss
+
+      - name: Package the portable build
+        run: |
+          Compress-Archive -Path build\push2talk.dist\* `
+            -DestinationPath packaging\Output\push2talk-portable-${{ steps.version.outputs.value }}.zip
+
+      # The self-updater refuses to run anything whose hash is not listed here,
+      # so this file is not optional — a release without it cannot be installed
+      # automatically.
+      - name: Generate SHA256SUMS
+        run: |
+          cd packaging\Output
+          Get-FileHash -Algorithm SHA256 * |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Out-File -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            packaging/Output/push2talk-setup-*.exe
+            packaging/Output/push2talk-portable-*.zip
+            packaging/Output/SHA256SUMS
+          body: |
+            Install with `push2talk-setup-${{ steps.version.outputs.value }}.exe`.
+
+            Windows will show a SmartScreen warning: these builds are not
+            code-signed, so Windows has no publisher to attribute them to.
+            Choose **More info -> Run anyway**. Some antivirus products flag it
+            too — the app installs a global keyboard hook and synthesises
+            keystrokes, which is a keylogger's behavioural signature and also
+            exactly what push-to-talk dictation requires. Everything runs
+            locally; the only network access is the one-time speech model
+            download and the update check.
+
+            Verify your download against `SHA256SUMS` if you'd rather not take
+            that on trust.

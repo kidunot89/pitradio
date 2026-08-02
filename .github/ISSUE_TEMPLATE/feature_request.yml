@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest something Push2Talk should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the situation rather than the solution — often there's already
+        a way, or a simpler one than the feature you had in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Which sim, how you race, whatever makes the case concrete.
+    validations:
+      required: false
