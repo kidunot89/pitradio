@@ -52,23 +52,42 @@ jobs:
       # Same suite as the Linux job, on the platform that actually ships.
       - run: pytest -q
 
+      # Nuitka compiles to C and then invokes a C compiler, so a cold build
+      # recompiles the whole dependency tree — PyAV's FFmpeg bindings and
+      # onnxruntime dominate. Persisting its cache is what keeps repeat builds
+      # from paying that again. The key covers the dependency set and the build
+      # flags, since either changing invalidates the compiled output.
+      - name: Cache the Nuitka compilation cache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-${{ runner.os }}-py312-${{ hashFiles('requirements.txt', 'packaging/build.py') }}
+          restore-keys: nuitka-${{ runner.os }}-py312-
+
       - name: Build with Nuitka
         run: python packaging/build.py
 
-      # The reason this job exists. ctranslate2, onnxruntime and PortAudio ship
-      # native libraries that Nuitka's standalone mode does not always collect,
-      # and the failure only shows up when the built binary actually imports
-      # them. Running the real exe here catches that in CI instead of on
+      # The reason this job exists. ctranslate2, onnxruntime, PyAV and PortAudio
+      # ship native libraries that Nuitka's standalone mode does not always
+      # collect, and the failure only shows up when the built binary actually
+      # imports them. Running the real exe here catches that in CI instead of on
       # someone's rig after they've installed it.
+      #
+      # Start-Process rather than invoking the exe directly: --windows-console-
+      # mode=attach produces a GUI-subsystem binary, and PowerShell neither
+      # waits for those nor sets $LASTEXITCODE from them, so a direct call would
+      # test a stale exit code rather than this process's.
       - name: Run the built binary
         run: |
-          .\build\pitradio.dist\pitradio.exe --check-config
-          if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--check-config' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "built binary failed --check-config (exit $($p.ExitCode))" }
 
       - name: Verify the native dependencies actually import
         run: |
-          .\build\pitradio.dist\pitradio.exe --list-devices
-          if ($LASTEXITCODE -ne 0) { throw "audio stack did not load in the built binary" }
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--list-devices' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "audio stack did not load (exit $($p.ExitCode))" }
 
       - uses: actions/upload-artifact@v4
         with:

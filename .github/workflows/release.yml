@@ -33,6 +33,15 @@ jobs:
           pip install -r requirements.txt
           pip install nuitka
 
+      # Shares the cache the CI workflow populates, so a release build usually
+      # starts warm rather than recompiling the whole dependency tree.
+      - name: Cache the Nuitka compilation cache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-${{ runner.os }}-py312-${{ hashFiles('requirements.txt', 'packaging/build.py') }}
+          restore-keys: nuitka-${{ runner.os }}-py312-
+
       - name: Read version
         id: version
         run: |
@@ -54,10 +63,14 @@ jobs:
       - name: Build with Nuitka
         run: python packaging/build.py
 
+      # Start-Process because the binary is GUI-subsystem: PowerShell does not
+      # wait for those, and $LASTEXITCODE would be a stale value from an earlier
+      # command rather than this one's result.
       - name: Smoke test the binary
         run: |
-          .\build\pitradio.dist\pitradio.exe --check-config
-          if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--check-config' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "built binary failed --check-config (exit $($p.ExitCode))" }
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
