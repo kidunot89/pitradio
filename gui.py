@@ -54,7 +54,7 @@ class App:
         self._quitting = False
         self._log_lines = 0
 
-        root.title(f"Push2Talk {version}")
+        root.title(f"PitRadio {version}")
         root.minsize(720, 520)
         if store.config.gui.geometry:
             # A saved geometry can be off-screen or malformed after a monitor
@@ -256,7 +256,7 @@ class App:
         try:
             config_mod.save(self.store.path, self.store.config)
         except OSError as exc:
-            messagebox.showerror("Push2Talk", f"Could not save config:\n{exc}")
+            messagebox.showerror("PitRadio", f"Could not save config:\n{exc}")
             return
         # Keep the store's mtime in step so this write doesn't read back as an
         # external edit on the next trigger.
@@ -269,7 +269,7 @@ class App:
 
     def check_for_updates(self) -> None:
         if self.checker is None:
-            messagebox.showinfo("Push2Talk", "Update checks are disabled in this run.")
+            messagebox.showinfo("PitRadio", "Update checks are disabled in this run.")
             return
         log.info("checking for updates")
         self.checker.check_now()
@@ -282,16 +282,16 @@ class App:
 
         if not updater.installed_via_installer():
             messagebox.showinfo(
-                "Push2Talk",
+                "PitRadio",
                 "This copy was not installed with the installer, so it can't update "
                 "itself. Download the new release from GitHub.",
             )
             return
 
         if not messagebox.askyesno(
-            "Push2Talk",
+            "PitRadio",
             f"Install version {info.version} now?\n\n"
-            "Push2Talk will close, update, and restart. Don't do this mid-session.",
+            "PitRadio will close, update, and restart. Don't do this mid-session.",
         ):
             return
 
@@ -306,7 +306,7 @@ class App:
                 message = str(exc)
                 log.error("update failed: %s", message)
                 self.root.after(
-                    0, lambda: messagebox.showerror("Push2Talk", f"Update failed:\n{message}")
+                    0, lambda: messagebox.showerror("PitRadio", f"Update failed:\n{message}")
                 )
                 return
             self.root.after(0, lambda: self._launch_installer(installer))

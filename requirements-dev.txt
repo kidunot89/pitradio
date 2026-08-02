@@ -1,0 +1,7 @@
+# Enough to lint and run the test suite on any platform. The tests deliberately
+# cover only the parts with no Windows or audio dependency — config, key names,
+# text sanitising, the updater and path resolution — so this stays small and the
+# suite runs anywhere.
+ruff>=0.6
+pytest>=8.0
+numpy>=1.26

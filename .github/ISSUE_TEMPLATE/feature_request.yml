@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest something Push2Talk should do
+description: Suggest something PitRadio should do
 labels: ["enhancement"]
 body:
   - type: textarea

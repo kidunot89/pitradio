@@ -24,7 +24,7 @@ LRESULT = ctypes.c_ssize_t
 
 # Tag on every synthetic event we send, so the hook can recognise its own
 # output and pass it through instead of reacting to it.
-INJECT_TAG = 0x50325454  # "P2TT"
+INJECT_TAG = 0x50545244  # "PTRD"
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_EXTENDEDKEY = 0x0001

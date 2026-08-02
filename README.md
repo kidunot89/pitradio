@@ -1,14 +1,14 @@
-# Push2Talk
+# PitRadio
 
 Push-to-talk voice dictation into sim racing chat boxes.
 
-Hold a key, say what you want, let go. Push2Talk opens the game's chat box,
+Hold a key, say what you want, let go. PitRadio opens the game's chat box,
 transcribes what you said, types it, and sends it — without you taking a hand
 off the wheel. Speech recognition runs locally on the CPU; nothing you say
 leaves your machine.
 
 Built for wheel-mounted buttons: bind a button to F13 with JoyToKey (or your
-wheel's own software) and Push2Talk sees it as an ordinary key.
+wheel's own software) and PitRadio sees it as an ordinary key.
 
 > **Status:** early. Ships with a profile for Le Mans Ultimate. Other sims work
 > by adding a profile, which takes about a minute — see
@@ -18,8 +18,8 @@ wheel's own software) and Push2Talk sees it as an ordinary key.
 
 ## Install
 
-Download the latest `push2talk-setup-*.exe` from
-[Releases](https://github.com/kidunot89/push2talk/releases) and run it.
+Download the latest `pitradio-setup-*.exe` from
+[Releases](https://github.com/kidunot89/pitradio/releases) and run it.
 
 **Windows will warn you about it.** Two separate things cause this, and both
 are expected:
@@ -27,13 +27,13 @@ are expected:
 - **SmartScreen: "Windows protected your PC".** These builds aren't
   code-signed, so Windows has no publisher to attribute them to. Choose **More
   info → Run anyway**.
-- **Antivirus may flag or quarantine it.** Push2Talk installs a global keyboard
+- **Antivirus may flag or quarantine it.** PitRadio installs a global keyboard
   hook and synthesises keystrokes. That is a keylogger's behavioural signature.
   It is also precisely what push-to-talk dictation requires — there is no way to
   swallow your trigger key and type into a game without it.
 
 If you'd rather not take that on trust: the source is here, the build is
-reproducible from it, and [`SHA256SUMS`](https://github.com/kidunot89/push2talk/releases)
+reproducible from it, and [`SHA256SUMS`](https://github.com/kidunot89/pitradio/releases)
 in each release lets you verify what you downloaded. You can also
 [run from source](#running-from-source) and skip the binary entirely.
 
@@ -42,7 +42,7 @@ in each release lets you verify what you downloaded. You can also
 The installed build requests this automatically. It matters because of a
 Windows rule called UIPI: a normal-privilege process cannot send input to a
 window owned by an elevated one. If your sim or its launcher runs elevated and
-Push2Talk doesn't, **every keystroke is silently discarded** — no error, no
+PitRadio doesn't, **every keystroke is silently discarded** — no error, no
 exception, nothing typed. This is the single most common cause of "it does
 nothing".
 
@@ -52,7 +52,7 @@ The Status tab warns you if the app isn't elevated.
 
 ## First run
 
-1. Open Push2Talk. On first launch it downloads the speech model (~250MB,
+1. Open PitRadio. On first launch it downloads the speech model (~250MB,
    once). The window shows the progress.
 2. Go to **Audio**, pick your microphone, and press **Record 4s and
    transcribe**. Nothing is typed anywhere — this just proves the mic and the
@@ -67,11 +67,11 @@ from the tray menu to actually stop the app.
 
 ## Adding your sim
 
-Profiles are keyed on the game's executable name, and Push2Talk tells you what
+Profiles are keyed on the game's executable name, and PitRadio tells you what
 that is:
 
 1. With the sim focused, tap the trigger key once.
-2. Alt-tab to Push2Talk. The **Status** tab shows **Focused app** — that's the
+2. Alt-tab to PitRadio. The **Status** tab shows **Focused app** — that's the
    executable name.
 3. Go to **Profiles → Add**, and it will offer that name.
 4. Set the keys your sim uses for chat. For most sims that's Enter to open and
@@ -79,11 +79,11 @@ that is:
 
 Then tune it. The setting that matters is **Delay after opening chat**
 (`pre_delay_ms`): the chat box needs a few frames to open and take focus, and
-if Push2Talk starts typing too early the opening characters vanish. Start at
+if PitRadio starts typing too early the opening characters vanish. Start at
 350ms; raise it if you lose the beginning of messages.
 
 Config changes take effect on the next trigger — no restart. The file lives at
-`%APPDATA%\push2talk\config.json` if you'd rather edit it directly; the GUI and
+`%APPDATA%\pitradio\config.json` if you'd rather edit it directly; the GUI and
 a text editor write the same file.
 
 **Got a sim working?** A profile that works is genuinely useful to other people
@@ -95,7 +95,7 @@ a text editor write the same file.
 
 Work down this list; it's ordered by how often each one is the answer.
 
-1. **Is Push2Talk running as administrator?** See above. This is most of them.
+1. **Is PitRadio running as administrator?** See above. This is most of them.
 2. **Is the game in borderless windowed mode?** Exclusive fullscreen swallows
    synthetic input in some titles. Borderless is worth trying before anything
    else here.
@@ -112,7 +112,7 @@ Work down this list; it's ordered by how often each one is the answer.
    reach — usually anti-cheat related. The
    [Interception driver](https://github.com/oblitum/Interception) is the only
    real workaround, and it's a kernel driver, so treat it as a last resort.
-   Push2Talk doesn't use it.
+   PitRadio doesn't use it.
 
 The log records the executable name and per-stage timings for every trigger —
 when the chat box opened, how long transcription took, when the message was
@@ -135,7 +135,7 @@ CPU transcription doesn't.
 
 ## Updates
 
-Push2Talk checks GitHub for new releases and can install them itself. Automatic
+PitRadio checks GitHub for new releases and can install them itself. Automatic
 installs are **off by default**, and always deferred while a sim is in focus —
 restarting the app mid-stint would be worse than updating a day later.
 
@@ -167,10 +167,10 @@ Turn the check off entirely with `--no-update-check`, or in
 ## Running from source
 
 ```bash
-git clone https://github.com/kidunot89/push2talk.git
-cd push2talk
+git clone https://github.com/kidunot89/pitradio.git
+cd pitradio
 pip install -r requirements.txt
-python push2talk.py
+python pitradio.py
 ```
 
 Run your terminal as administrator, for the reason above.
@@ -178,15 +178,28 @@ Run your terminal as administrator, for the reason above.
 Useful flags:
 
 ```bash
-python push2talk.py --check-config    # validate config.json, resolve every key name
-python push2talk.py --list-devices    # audio devices, for picking a mic
-python push2talk.py --gui-only        # open the window with no hook, audio or model
-python push2talk.py --no-update-check # never contact GitHub
+python pitradio.py --check-config    # validate config.json, resolve every key name
+python pitradio.py --list-devices    # audio devices, for picking a mic
+python pitradio.py --gui-only        # open the window with no hook, audio or model
+python pitradio.py --no-update-check # never contact GitHub
 ```
 
 `--check-config` and `--gui-only` also run on macOS and Linux — the config
 layer and the GUI have no Windows dependencies, which is what makes the app
 developable off Windows. Everything that actually types into a game does not.
+
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+The suite covers config validation and hot-reload, key-name resolution, text
+sanitising, path resolution, and the updater's verification logic. It runs on
+any platform. The keyboard hook, key injection and the trigger cycle aren't
+covered — they need Windows, and CI exercises them by building and running the
+real binary on a Windows runner.
 
 ### Building the installer
 
@@ -195,7 +208,7 @@ pip install nuitka
 python packaging/build.py
 ```
 
-Then compile `packaging/push2talk.iss` with Inno Setup. CI does both on every
+Then compile `packaging/pitradio.iss` with Inno Setup. CI does both on every
 tagged release, and builds on every push so that a broken native dependency
 shows up there rather than on someone's rig.
 

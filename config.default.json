@@ -33,7 +33,7 @@
     "log_lines": 400
   },
   "updates": {
-    "repo": "kidunot89/push2talk",
+    "repo": "kidunot89/pitradio",
     "check_on_start": true,
     "check_interval_hours": 24,
     "auto_install": false

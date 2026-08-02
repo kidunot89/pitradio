@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Push2Talk — push-to-talk dictation for sim racing.
+"""PitRadio — push-to-talk dictation for sim racing.
 
 Entry point. Sets up logging, loads config, starts the four threads and hands
 the main thread to tkinter.
@@ -32,7 +32,7 @@ from state import AppState
 
 __version__ = "0.1.0"
 
-log = logging.getLogger("push2talk")
+log = logging.getLogger("pitradio")
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 GUI_LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
@@ -57,7 +57,7 @@ def setup_logging(app_state: AppState | None, verbose: bool) -> None:
     try:
         paths.log_dir().mkdir(parents=True, exist_ok=True)
         rotating = logging.handlers.RotatingFileHandler(
-            paths.log_dir() / "push2talk.log",
+            paths.log_dir() / "pitradio.log",
             maxBytes=1_048_576, backupCount=3, encoding="utf-8",
         )
         rotating.setFormatter(logging.Formatter(LOG_FORMAT, TIME_FORMAT))
@@ -210,7 +210,7 @@ def run(args) -> int:
     app_state.config_problems = list(store.problems)
     app_state.enabled = cfg.enabled
 
-    log.info("Push2Talk %s starting", __version__)
+    log.info("PitRadio %s starting", __version__)
     log.info("%s", paths.describe())
     for problem in store.problems:
         log.warning("config: %s", problem)
@@ -316,10 +316,10 @@ def _preload_model(transcriber, store, app_state: AppState) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="push2talk",
+        prog="pitradio",
         description="Push-to-talk dictation into sim racing chat boxes.",
     )
-    parser.add_argument("--version", action="version", version=f"Push2Talk {__version__}")
+    parser.add_argument("--version", action="version", version=f"PitRadio {__version__}")
     parser.add_argument("--check-config", action="store_true",
                         help="validate config.json and resolve every key name, then exit")
     parser.add_argument("--list-devices", action="store_true",
@@ -347,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if sys.platform != "win32":
         print(
-            "Push2Talk drives the Windows input APIs and only runs on Windows.\n"
+            "PitRadio drives the Windows input APIs and only runs on Windows.\n"
             "On another platform, --check-config, --list-devices and --gui-only "
             "still work.",
             file=sys.stderr,

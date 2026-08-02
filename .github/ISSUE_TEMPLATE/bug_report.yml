@@ -8,8 +8,8 @@ body:
         Before filing: if **nothing is typed into the game**, check the two
         things that cause almost every report of it —
 
-        1. Is Push2Talk running as administrator? If the sim runs elevated and
-           Push2Talk doesn't, Windows discards every keystroke it sends and
+        1. Is PitRadio running as administrator? If the sim runs elevated and
+           PitRadio doesn't, Windows discards every keystroke it sends and
            reports no error at all.
         2. Is the game in **borderless windowed** mode? Exclusive fullscreen
            swallows synthetic input in some titles.
@@ -17,7 +17,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Push2Talk version
+      label: PitRadio version
       description: Shown in the window title and on the Updates tab.
       placeholder: "0.1.0"
     validations:
@@ -38,7 +38,7 @@ body:
   - type: dropdown
     id: elevated
     attributes:
-      label: Was Push2Talk running as administrator?
+      label: Was PitRadio running as administrator?
       options:
         - "Yes"
         - "No"
@@ -51,7 +51,7 @@ body:
     attributes:
       label: How did you install it?
       options:
-        - Installer (push2talk-setup-*.exe)
+        - Installer (pitradio-setup-*.exe)
         - Portable zip
         - From source
     validations:

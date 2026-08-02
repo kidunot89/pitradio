@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: Lint and validate config
+  test:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,16 +17,21 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install lint tooling
-        run: pip install ruff
+      - name: Install dev tooling
+        run: pip install -r requirements-dev.txt
 
       - run: ruff check .
 
-      # config.py and keys.py have no Win32 imports, which is what lets the
-      # config layer be validated on Linux at all. If this step ever fails with
-      # an import error, something Windows-only has leaked into them.
+      # The suite covers the parts with no Windows or audio dependency: config
+      # validation and hot-reload, key-name resolution, text sanitising, path
+      # resolution, and the updater's version compare, host allowlist and
+      # checksum verification. That it runs on Linux at all is the point — if
+      # this job ever fails with an import error, something Windows-only has
+      # leaked into a module that is supposed to stay portable.
+      - run: pytest -q
+
       - name: Validate the shipped config
-        run: python push2talk.py --check-config
+        run: python pitradio.py --check-config
 
   build:
     name: Windows build smoke test
@@ -41,7 +46,11 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           pip install nuitka
+
+      # Same suite as the Linux job, on the platform that actually ships.
+      - run: pytest -q
 
       - name: Build with Nuitka
         run: python packaging/build.py
@@ -53,16 +62,16 @@ jobs:
       # someone's rig after they've installed it.
       - name: Run the built binary
         run: |
-          .\build\push2talk.dist\push2talk.exe --check-config
+          .\build\pitradio.dist\pitradio.exe --check-config
           if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
 
       - name: Verify the native dependencies actually import
         run: |
-          .\build\push2talk.dist\push2talk.exe --list-devices
+          .\build\pitradio.dist\pitradio.exe --list-devices
           if ($LASTEXITCODE -ne 0) { throw "audio stack did not load in the built binary" }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: push2talk-dist
-          path: build/push2talk.dist/
+          name: pitradio-dist
+          path: build/pitradio.dist/
           retention-days: 7

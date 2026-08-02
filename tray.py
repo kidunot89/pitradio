@@ -70,9 +70,9 @@ class Tray:
         self._thread: threading.Thread | None = None
 
         self.icon = pystray.Icon(
-            "push2talk",
+            "pitradio",
             icon_image("idle"),
-            "Push2Talk",
+            "PitRadio",
             menu=pystray.Menu(
                 pystray.MenuItem("Show", self._show, default=True),
                 pystray.MenuItem(
@@ -102,7 +102,7 @@ class Tray:
         if kind != self._kind:
             self._kind = kind
             self.icon.icon = icon_image(kind)
-        self.icon.title = f"Push2Talk — {status}"
+        self.icon.title = f"PitRadio — {status}"
         self.icon.update_menu()
 
     # -- menu callbacks (tray thread) ------------------------------------

@@ -37,10 +37,10 @@ def read_version() -> str:
     Importing would pull in tkinter and the rest, which the build host may not
     have configured, and would make the build depend on the app running.
     """
-    text = (ROOT / "push2talk.py").read_text(encoding="utf-8")
+    text = (ROOT / "pitradio.py").read_text(encoding="utf-8")
     match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if not match:
-        raise SystemExit("could not find __version__ in push2talk.py")
+        raise SystemExit("could not find __version__ in pitradio.py")
     return match.group(1)
 
 
@@ -69,7 +69,7 @@ def build() -> int:
         "--enable-plugin=tk-inter",
         # "attach", not "disable": double-clicking still shows no console, but
         # running from a terminal keeps stdout, which is what makes
-        # `push2talk.exe --check-config` usable and lets CI smoke-test the
+        # `pitradio.exe --check-config` usable and lets CI smoke-test the
         # built binary by reading its output rather than guessing.
         "--windows-console-mode=attach",
         # The app types into windows owned by processes that may be elevated;
@@ -87,14 +87,14 @@ def build() -> int:
         "--include-package-data=sounddevice",
         "--include-package=pystray",
         "--include-package=PIL",
-        "--product-name=Push2Talk",
+        "--product-name=PitRadio",
         f"--product-version={_four_part(version)}",
         f"--file-version={_four_part(version)}",
         "--file-description=Push-to-talk dictation for sim racing",
         "--copyright=MIT licensed",
         f"--output-dir={BUILD_DIR}",
-        "--output-filename=push2talk.exe",
-        str(ROOT / "push2talk.py"),
+        "--output-filename=pitradio.exe",
+        str(ROOT / "pitradio.py"),
     ]
 
     # PortAudio's DLL lives in a separate data package on Windows wheels.
@@ -107,14 +107,14 @@ def build() -> int:
         args.insert(-1, "--include-package=onnxruntime")
         args.insert(-1, "--include-package-data=onnxruntime")
 
-    print(f"building Push2Talk {version}")
+    print(f"building PitRadio {version}")
     print(" ".join(args))
     result = subprocess.run(args, cwd=ROOT, check=False)
     if result.returncode != 0:
         return result.returncode
 
-    dist = BUILD_DIR / "push2talk.dist"
-    exe = dist / "push2talk.exe"
+    dist = BUILD_DIR / "pitradio.dist"
+    exe = dist / "pitradio.exe"
     if not exe.exists():
         print(f"error: expected {exe} to exist after the build", file=sys.stderr)
         return 1
@@ -126,7 +126,7 @@ def build() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the Windows binary with Nuitka.")
     parser.add_argument("--version", action="store_true",
-                        help="print the version from push2talk.py and exit")
+                        help="print the version from pitradio.py and exit")
     args = parser.parse_args()
 
     if args.version:

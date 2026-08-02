@@ -52,8 +52,13 @@ def is_newer(candidate: str, current: str) -> bool:
 
 
 def _check_host(url: str) -> None:
-    host = (urlparse(url).hostname or "").lower()
-    if urlparse(url).scheme != "https" or not host.endswith(ALLOWED_HOSTS):
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    # Exact match or a genuine subdomain — a plain endswith() would also accept
+    # an attacker-registered "notgithub.com", which is the whole point of the
+    # check being here.
+    allowed = any(host == known or host.endswith("." + known) for known in ALLOWED_HOSTS)
+    if parsed.scheme != "https" or not allowed:
         raise ValueError(f"refusing to fetch {url!r}: unexpected host")
 
 
@@ -64,7 +69,7 @@ def _get(url: str, *, accept: str = "application/vnd.github+json") -> bytes:
         headers={
             "Accept": accept,
             # GitHub rejects requests without one.
-            "User-Agent": "push2talk-updater",
+            "User-Agent": "pitradio-updater",
         },
     )
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:

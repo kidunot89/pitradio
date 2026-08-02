@@ -1,7 +1,7 @@
-; Inno Setup script for Push2Talk.
+; Inno Setup script for PitRadio.
 ;
 ; Build the Nuitka dist first (packaging/build.py), then:
-;   iscc /DAppVersion=0.1.0 packaging\push2talk.iss
+;   iscc /DAppVersion=0.1.0 packaging\pitradio.iss
 ;
 ; Notes that matter:
 ; * PrivilegesRequired=admin, because the app cannot type into an elevated sim
@@ -16,13 +16,13 @@
   #define AppVersion "0.0.0"
 #endif
 
-#define AppName "Push2Talk"
+#define AppName "PitRadio"
 #define AppPublisher "Geoff Taylor"
-#define AppURL "https://github.com/kidunot89/push2talk"
-#define AppExe "push2talk.exe"
+#define AppURL "https://github.com/kidunot89/pitradio"
+#define AppExe "pitradio.exe"
 
 [Setup]
-AppId={{8E6F1C24-9A3D-4B77-8C1E-3F5A2D7B9E04}
+AppId={{A292DFB9-10EC-463E-B766-771B660524FA}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
@@ -34,7 +34,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=Output
-OutputBaseFilename=push2talk-setup-{#AppVersion}
+OutputBaseFilename=pitradio-setup-{#AppVersion}
 SetupIconFile=icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2/max
@@ -53,7 +53,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\build\push2talk.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\build\pitradio.dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -64,10 +64,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Leave %APPDATA%\push2talk alone: config, logs and the cached model are the
+; Leave %APPDATA%\pitradio alone: config, logs and the cached model are the
 ; user's, and an uninstall/reinstall cycle should not cost them a 250MB
 ; download or their tuned delays.
-Type: filesandordirs; Name: "{localappdata}\push2talk\updates"
+Type: filesandordirs; Name: "{localappdata}\pitradio\updates"
 
 [Code]
 // The scheduled task is created by the app itself (Settings -> Start with
@@ -78,6 +78,6 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
     Exec(ExpandConstant('{sys}\schtasks.exe'),
-         '/delete /f /tn Push2Talk', '', SW_HIDE,
+         '/delete /f /tn PitRadio', '', SW_HIDE,
          ewWaitUntilTerminated, ResultCode);
 end;

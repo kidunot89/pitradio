@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "push2talk"
+APP_NAME = "pitradio"
 
 
 def is_frozen() -> bool:

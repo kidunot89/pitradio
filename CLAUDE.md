@@ -9,7 +9,7 @@ swallow it, record, fire the profile's keys to open the game's chat box → on
 release, transcribe with faster-whisper on CPU, type the text, fire the send
 keys. Per-sim behaviour is a JSON config keyed on the focused executable name.
 
-Published publicly under MIT at `github.com/kidunot89/push2talk`, distributed as
+Published publicly under MIT at `github.com/kidunot89/pitradio`, distributed as
 an Inno Setup installer built by CI, with a self-updater.
 
 [PROMPT.md](PROMPT.md) is the original specification and still the authority on
@@ -18,21 +18,33 @@ an Inno Setup installer built by CI, with a self-updater.
 ## Commands
 
 ```bash
-python push2talk.py                   # run the app (Windows, as administrator)
-python push2talk.py --check-config    # validate config, resolve every key name
-python push2talk.py --list-devices    # audio devices
-python push2talk.py --gui-only        # window with no hook/audio/model
+python pitradio.py                   # run the app (Windows, as administrator)
+python pitradio.py --check-config    # validate config, resolve every key name
+python pitradio.py --list-devices    # audio devices
+python pitradio.py --gui-only        # window with no hook/audio/model
+pytest -q                             # test suite (runs on any platform)
+pytest tests/test_updater.py -q       # one file
+pytest -q -k checksum                 # one case
 ruff check .                          # lint (config in pyproject.toml)
 python packaging/build.py             # Nuitka build
 python packaging/build.py --version   # print __version__
 python packaging/make_icon.py         # regenerate packaging/icon.ico
 ```
 
-There is no test suite. `--check-config` and `--gui-only` are the substitute:
-both run on macOS/Linux and cover the config layer, key-name resolution and the
-whole GUI including its event pump. CI additionally runs the *built binary's*
-`--check-config` and `--list-devices` on a Windows runner, which is the only
-way the native-dependency bundling gets verified.
+`pytest` covers everything with no Windows or audio dependency: config
+validation, merging and hot-reload; key-name resolution; text sanitising; path
+resolution; and the updater's version comparison, host allowlist and checksum
+verification. It runs on any platform — that it runs on Linux is itself the
+check that nothing Windows-only has leaked into a portable module.
+
+Not covered by pytest, and deliberately so: the hook, injection, the worker
+cycle, and the GUI. Those need either Windows or a display. `--gui-only`
+launches the real window against a stubbed backend for the GUI, and CI runs the
+*built binary's* `--check-config` and `--list-devices` on a Windows runner,
+which is the only way the native-dependency bundling gets verified at all.
+
+When adding tests, keep them importable without `winapi` — a test that needs
+Windows can't run in the place most of this gets developed.
 
 ## Development happens off Windows
 
@@ -47,7 +59,7 @@ keep as much as possible testable anyway, and both are load-bearing:
   Windows-only functionality through the objects passed into `App`, all of
   which may be `None`.
 
-`push2talk.py` imports `winapi`, `hook`, `worker` and `inject` *inside*
+`pitradio.py` imports `winapi`, `hook`, `worker` and `inject` *inside*
 functions, never at module scope, for the same reason.
 
 ## Architecture
@@ -103,7 +115,7 @@ produces a bug with no error message.
   logs and the model cache to `%LOCALAPPDATA%` — see [paths.py](paths.py). Under
   Program Files, writes land in UAC's VirtualStore and hot-reload silently stops
   working.
-- **Frozen GUI builds may have `sys.stdout is None`.** `push2talk.out()` and the
+- **Frozen GUI builds may have `sys.stdout is None`.** `pitradio.out()` and the
   console log handler both guard for it.
 
 ## Packaging

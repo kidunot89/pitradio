@@ -45,7 +45,7 @@ jobs:
           $tag = "${{ github.ref_name }}".TrimStart("v")
           $ver = "${{ steps.version.outputs.value }}"
           if ($tag -ne $ver) {
-            throw "tag $tag does not match __version__ $ver in push2talk.py"
+            throw "tag $tag does not match __version__ $ver in pitradio.py"
           }
 
       - name: Build with Nuitka
@@ -53,7 +53,7 @@ jobs:
 
       - name: Smoke test the binary
         run: |
-          .\build\push2talk.dist\push2talk.exe --check-config
+          .\build\pitradio.dist\pitradio.exe --check-config
           if ($LASTEXITCODE -ne 0) { throw "built binary failed --check-config" }
 
       - name: Install Inno Setup
@@ -63,12 +63,12 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             /DAppVersion=${{ steps.version.outputs.value }} `
-            packaging\push2talk.iss
+            packaging\pitradio.iss
 
       - name: Package the portable build
         run: |
-          Compress-Archive -Path build\push2talk.dist\* `
-            -DestinationPath packaging\Output\push2talk-portable-${{ steps.version.outputs.value }}.zip
+          Compress-Archive -Path build\pitradio.dist\* `
+            -DestinationPath packaging\Output\pitradio-portable-${{ steps.version.outputs.value }}.zip
 
       # The self-updater refuses to run anything whose hash is not listed here,
       # so this file is not optional — a release without it cannot be installed
@@ -85,11 +85,11 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            packaging/Output/push2talk-setup-*.exe
-            packaging/Output/push2talk-portable-*.zip
+            packaging/Output/pitradio-setup-*.exe
+            packaging/Output/pitradio-portable-*.zip
             packaging/Output/SHA256SUMS
           body: |
-            Install with `push2talk-setup-${{ steps.version.outputs.value }}.exe`.
+            Install with `pitradio-setup-${{ steps.version.outputs.value }}.exe`.
 
             Windows will show a SmartScreen warning: these builds are not
             code-signed, so Windows has no publisher to attribute them to.

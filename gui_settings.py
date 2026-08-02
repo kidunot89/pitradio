@@ -23,7 +23,7 @@ import state as state_mod
 
 log = logging.getLogger(__name__)
 
-TASK_NAME = "Push2Talk"
+TASK_NAME = "PitRadio"
 
 
 # -- small helpers -------------------------------------------------------
@@ -241,7 +241,7 @@ def _apply_run_at_logon(app) -> None:
     except subprocess.CalledProcessError as exc:
         app.v_run_logon.set(not want)
         messagebox.showerror(
-            "Push2Talk",
+            "PitRadio",
             f"Could not change the startup task:\n{exc.stderr or exc}",
         )
 
@@ -347,7 +347,7 @@ def _remove_profile(app) -> None:
     name = _selected_profile(app)
     if name is None:
         return
-    if not messagebox.askyesno("Push2Talk", f"Remove the profile for {name}?"):
+    if not messagebox.askyesno("PitRadio", f"Remove the profile for {name}?"):
         return
     app.store.config.profiles.pop(name, None)
     app.save_config()
@@ -357,7 +357,7 @@ def _remove_profile(app) -> None:
 def _save_profile(app) -> None:
     name = _selected_profile(app)
     if name is None:
-        messagebox.showinfo("Push2Talk", "Select a profile first, or add one.")
+        messagebox.showinfo("PitRadio", "Select a profile first, or add one.")
         return
     _read_profile_vars(app.v_profile, app.store.config.profiles[name])
     app.save_config()
@@ -474,10 +474,10 @@ def set_level(app, rms: float) -> None:
 def _run_mic_test(app) -> None:
     if app.recorder is None or app.transcriber is None:
         messagebox.showinfo(
-            "Push2Talk", "Audio isn't available in this run (GUI preview mode).")
+            "PitRadio", "Audio isn't available in this run (GUI preview mode).")
         return
     if app.state.status not in (state_mod.STATUS_IDLE, state_mod.STATUS_DISABLED):
-        messagebox.showinfo("Push2Talk", "Busy — try again in a moment.")
+        messagebox.showinfo("PitRadio", "Busy — try again in a moment.")
         return
 
     app.test_button.state(["disabled"])
@@ -566,7 +566,7 @@ def _resend_history(app) -> None:
     if not text or text == "(nothing said)":
         return
     if app.worker is None:
-        messagebox.showinfo("Push2Talk", "Re-send isn't available in this run.")
+        messagebox.showinfo("PitRadio", "Re-send isn't available in this run.")
         return
     log.info("re-sending in 3 seconds — focus the game now")
     app.worker.request_resend(text)

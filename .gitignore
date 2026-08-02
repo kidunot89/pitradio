@@ -8,7 +8,7 @@ venv/
 *.build/
 *.dist/
 *.onefile-build/
-push2talk.exe
+pitradio.exe
 
 # Inno Setup
 packaging/Output/
@@ -18,7 +18,7 @@ packaging/Output/
 config.json
 logs/
 models/
-push2talk.log*
+pitradio.log*
 
 .DS_Store
 .idea/

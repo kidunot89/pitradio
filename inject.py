@@ -66,7 +66,7 @@ def _send(inputs: list[INPUT]) -> bool:
         log.error(
             "SendInput was blocked (ERROR_ACCESS_DENIED). The focused window "
             "belongs to a higher-integrity process, so UIPI is discarding our "
-            "input. Run Push2Talk as administrator."
+            "input. Run PitRadio as administrator."
         )
     elif err != ERROR_ACCESS_DENIED:
         log.error("SendInput sent %d/%d events, last error %d", sent, len(inputs), err)

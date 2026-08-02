@@ -90,7 +90,7 @@ class GuiConfig:
 
 @dataclass
 class UpdateConfig:
-    repo: str = "kidunot89/push2talk"
+    repo: str = "kidunot89/pitradio"
     check_on_start: bool = True
     check_interval_hours: int = 24
     auto_install: bool = False        # opt-in; see README on why
