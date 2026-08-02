@@ -19,6 +19,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          # Full history and tags: the changelog step diffs against the
+          # previous tag, and a shallow clone has neither.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -81,6 +84,65 @@ jobs:
             Out-File -Encoding ascii SHA256SUMS
           Get-Content SHA256SUMS
 
+      # Written as a file rather than an inline body so the changelog can be
+      # assembled from git history. bash rather than pwsh: the quoting for a
+      # multi-line document with interpolation is far less error-prone.
+      - name: Assemble the release notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # The most recent tag that isn't this one. Sorted by version rather
+          # than date so an out-of-order or backfilled tag doesn't win.
+          PREV=$(git tag --sort=-v:refname | grep -vx "$TAG" | head -n1 || true)
+
+          {
+            echo "Install with \`pitradio-setup-${VERSION}.exe\`."
+            echo
+
+            if [ -n "$PREV" ]; then
+              echo "## Changes since ${PREV}"
+              RANGE="${PREV}..${TAG}"
+            else
+              echo "## Changes"
+              RANGE="$TAG"
+            fi
+            echo
+            git log --no-merges --pretty=format:'- %s (%h)' "$RANGE"
+            echo
+            echo
+
+            if [ -n "$PREV" ]; then
+              echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+              echo
+            fi
+
+            cat <<'NOTES'
+          ## Before you install
+
+          Windows will show a SmartScreen warning: these builds are not
+          code-signed, so Windows has no publisher to attribute them to. Choose
+          **More info → Run anyway**. Some antivirus products flag it too — the
+          app installs a global keyboard hook and synthesises keystrokes, which
+          is a keylogger's behavioural signature and also exactly what
+          push-to-talk dictation requires.
+
+          Everything runs locally. The only network access is the one-time
+          speech model download and the update check. Verify your download
+          against `SHA256SUMS` if you'd rather not take that on trust.
+
+          PitRadio needs to run as administrator: if a sim runs elevated and
+          PitRadio doesn't, Windows silently discards every keystroke it sends.
+          The installer sets this up for you.
+          NOTES
+          } > release_notes.md
+
+          echo "--- release notes ---"
+          cat release_notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
@@ -88,17 +150,4 @@ jobs:
             packaging/Output/pitradio-setup-*.exe
             packaging/Output/pitradio-portable-*.zip
             packaging/Output/SHA256SUMS
-          body: |
-            Install with `pitradio-setup-${{ steps.version.outputs.value }}.exe`.
-
-            Windows will show a SmartScreen warning: these builds are not
-            code-signed, so Windows has no publisher to attribute them to.
-            Choose **More info -> Run anyway**. Some antivirus products flag it
-            too — the app installs a global keyboard hook and synthesises
-            keystrokes, which is a keylogger's behavioural signature and also
-            exactly what push-to-talk dictation requires. Everything runs
-            locally; the only network access is the one-time speech model
-            download and the update check.
-
-            Verify your download against `SHA256SUMS` if you'd rather not take
-            that on trust.
+          body_path: release_notes.md
