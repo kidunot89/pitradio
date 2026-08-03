@@ -316,3 +316,78 @@ def test_vocabularies_survives_a_broken_plugin():
     rows = plugins.PluginRegistry((Exploding,)).vocabularies()
     assert rows[0][1] == []
     assert "error" in rows[0][2]
+
+
+# -- plugin settings -----------------------------------------------------
+
+
+class Configurable(SessionPlugin):
+    id = "configurable"
+    name = "Configurable Sim"
+    settings = (
+        plugins.PluginSetting(key="positions", label="Positions", default=True),
+        plugins.PluginSetting(key="depth", label="Depth", kind="int", default=5),
+    )
+
+
+def test_defaults_come_from_the_plugin():
+    """So a setting added later needs no rewrite of existing profiles."""
+    assert Configurable().defaults() == {"positions": True, "depth": 5}
+
+
+def test_stored_values_override_defaults():
+    registry = plugins.PluginRegistry((Configurable,))
+    merged = registry.settings_for("configurable", {"positions": False})
+    assert merged == {"positions": False, "depth": 5}
+
+
+def test_settings_for_an_unknown_plugin_is_empty():
+    assert plugins.PluginRegistry((Configurable,)).settings_for("nope") == {}
+
+
+def test_a_plugin_without_settings_has_none():
+    assert plugins.PluginRegistry((Working,)).settings_for("fake") == {}
+
+
+def test_profiles_store_plugin_settings_separately():
+    """One plugin can serve two games and be configured differently for each."""
+    cfg = config.Config.from_dict({"profiles": {
+        "one.exe": {"plugin": "lmu", "plugin_settings": {"positions": True}},
+        "two.exe": {"plugin": "lmu", "plugin_settings": {"positions": False}},
+    }})
+    assert cfg.profile_for("one.exe")[0].plugin_settings == {"positions": True}
+    assert cfg.profile_for("two.exe")[0].plugin_settings == {"positions": False}
+
+
+def test_plugin_settings_survive_a_round_trip(tmp_path):
+    cfg = config.Config()
+    cfg.profiles["game.exe"] = config.Profile(
+        plugin="lmu", plugin_settings={"positions": False})
+
+    path = tmp_path / "config.json"
+    config.save(path, cfg)
+    assert config.load(path).profiles["game.exe"].plugin_settings == {"positions": False}
+
+
+def test_lmu_exposes_a_positions_toggle():
+    lmu = plugins.PluginRegistry().by_id("lmu")
+    assert [s.key for s in lmu.settings] == ["positions"]
+
+
+def test_lmu_reads_standings(lmu_with_data):
+    lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 2
+    lmu_with_data._data.scoring.vehScoringInfo[0].mDriverName = b"Geoff Taylor"
+    lmu_with_data._data.scoring.vehScoringInfo[0].mPlace = 2
+    lmu_with_data._data.scoring.vehScoringInfo[1].mDriverName = b"Nick Tandy"
+    lmu_with_data._data.scoring.vehScoringInfo[1].mPlace = 1
+
+    assert lmu_with_data.positions() == {1: "Nick Tandy", 2: "Geoff Taylor"}
+
+
+def test_lmu_skips_unclassified_entries(lmu_with_data):
+    """Place 0 means unclassified, not "leader"."""
+    lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 1
+    lmu_with_data._data.scoring.vehScoringInfo[0].mDriverName = b"Geoff Taylor"
+    lmu_with_data._data.scoring.vehScoringInfo[0].mPlace = 0
+
+    assert lmu_with_data.positions() == {}

@@ -34,6 +34,41 @@ def _normalise(text: str) -> str:
     return stripped.casefold()
 
 
+# Surname particles, so "de Vries" and "van der Linde" keep theirs. Lowercase
+# because that is how they appear in a name; a capitalised "Van" is a first
+# name in its own right.
+PARTICLES = frozenset({
+    "de", "del", "della", "der", "den", "di", "da", "das", "dos", "du",
+    "la", "le", "van", "von", "ter", "ten", "al", "bin", "st",
+})
+
+
+def display_name(name: str) -> str:
+    """"Geoff Taylor" -> "G.Taylor" — how sims label drivers on screen.
+
+    Racing HUDs show an initial and a surname, so that is what other drivers
+    recognise. Sending back what was said instead ("Geoff", or a surname alone)
+    makes the reader work out who is meant.
+
+    Particles stay with the surname: "Nyck de Vries" becomes "N.de Vries", not
+    "N.Vries". A middle name does not — "José María López" becomes "J.López".
+    """
+    parts = name_parts(name)
+    if not parts:
+        return name.strip()
+    if len(parts) == 1:
+        # A handle rather than a name; there is no initial to take.
+        return parts[0]
+
+    surname = [parts[-1]]
+    index = len(parts) - 2
+    while index > 0 and parts[index].lower() in PARTICLES:
+        surname.insert(0, parts[index])
+        index -= 1
+
+    return f"{parts[0][0].upper()}.{' '.join(surname)}"
+
+
 def name_parts(name: str) -> list[str]:
     """The tokens of a driver name worth matching on.
 
@@ -71,6 +106,7 @@ def find_mentions(
     *,
     fuzzy: bool = False,
     threshold: float = DEFAULT_THRESHOLD,
+    first_names: bool = True,
 ) -> list[str]:
     """Which drivers are named in the text, most complete match first."""
     if not text or not drivers:
@@ -84,7 +120,8 @@ def find_mentions(
     for name, parts in build_index(drivers):
         if not parts:
             continue
-        if _matches(words, parts, fuzzy=fuzzy, threshold=threshold):
+        if _matches(words, parts, fuzzy=fuzzy, threshold=threshold,
+                    first_names=first_names):
             found.append(name)
     return found
 
@@ -102,15 +139,37 @@ def trailing_runs(parts: list[str]) -> list[list[str]]:
     return [parts[start:] for start in range(len(parts))]
 
 
-def _matches(words: list[str], parts: list[str], *, fuzzy: bool, threshold: float) -> bool:
-    """A driver is named if the full name, or any trailing run of it, appears.
+# First names that are also ordinary racing speech. Matched as part of a full
+# name, never on their own — "max attack", "nick the inside line", "will do"
+# and "mark the apex" are all things a driver says without meaning anybody.
+AMBIGUOUS_FIRST_NAMES = frozenset({
+    "max", "nick", "will", "mark", "chase", "rob", "grant", "miles", "art",
+    "guy", "drew", "ray", "hunter", "porter", "gale", "sunny", "rusty",
+})
 
-    A first name alone is deliberately not enough: "Max" and "Nick" are
-    ordinary words, and marking them would be worse than missing them.
+
+def match_runs(parts: list[str], *, first_names: bool = True) -> list[list[str]]:
+    """Every run of a name worth matching, longest first.
+
+    Trailing runs cover the full name and the surname — including multi-word
+    surnames. The leading token is added separately so a first name alone can
+    be recognised, since people do say them, but only when it is not also an
+    ordinary word.
     """
+    runs = trailing_runs(parts)
+    if first_names and len(parts) > 1 and parts[0] not in AMBIGUOUS_FIRST_NAMES:
+        runs.append([parts[0]])
+    return runs
+
+
+def _matches(
+    words: list[str], parts: list[str], *, fuzzy: bool, threshold: float,
+    first_names: bool = True,
+) -> bool:
+    """A driver is named if any recognisable run of their name appears."""
     return any(
         _contains_sequence(words, run, fuzzy=fuzzy, threshold=threshold)
-        for run in trailing_runs(parts)
+        for run in match_runs(parts, first_names=first_names)
     )
 
 
@@ -149,14 +208,14 @@ def _find_span(
     *,
     fuzzy: bool,
     threshold: float,
-) -> int | None:
-    """Character offset where a run of tokens matches `parts`, or None."""
+) -> tuple[int, int] | None:
+    """(start, end) character offsets of a run matching `parts`, or None."""
     span = len(parts)
     for start in range(len(tokens) - span + 1):
         window = tokens[start:start + span]
         if all(_word_matches(t[2], p, fuzzy=fuzzy, threshold=threshold)
                for t, p in zip(window, parts, strict=True)):
-            return window[0][0]
+            return window[0][0], window[-1][1]
     return None
 
 
@@ -167,19 +226,18 @@ def apply_mentions(
     prefix: str = "@",
     fuzzy: bool = False,
     threshold: float = DEFAULT_THRESHOLD,
+    first_names: bool = True,
 ) -> str:
-    """Prefix any driver named in the text, e.g. 'box Smith' -> 'box @Smith'.
+    """Replace a named driver with how the sim labels them: '@G.Taylor'.
 
-    Works on token positions rather than a regex over the raw text, for two
-    reasons. Matching normalises accents — "lopez" finds "José María López" —
-    and a regex built from the stored name would then fail to mark up what was
-    actually written. And when a full name appears, the prefix belongs at the
-    start of it: substituting on the longest part alone produced
-    "Geoff @Taylor", marking someone mid-name.
+    Whatever was said — "Geoff", "Taylor", or the full name — becomes the same
+    canonical form, because that is what every other driver sees on their HUD.
+    Echoing back the spoken words instead leaves the reader working out who was
+    meant, which defeats the point of a mention.
 
-    Rewrites what was said rather than substituting the stored name: if someone
-    says a surname, replacing it with the full name changes their words for no
-    benefit.
+    Works on token positions rather than a regex over the raw text: matching
+    normalises accents, so "lopez" finds "José María López", and a regex built
+    from the stored name would not match what was actually written.
     """
     if not text or not drivers:
         return text
@@ -188,28 +246,91 @@ def apply_mentions(
     if not tokens:
         return text
 
-    inserts: list[int] = []
-    for name in find_mentions(text, drivers, fuzzy=fuzzy, threshold=threshold):
+    # (start, end, replacement), collected before any edit so offsets stay
+    # valid while they are being found.
+    edits: list[tuple[int, int, str]] = []
+    for name in find_mentions(text, drivers, fuzzy=fuzzy, threshold=threshold,
+                              first_names=first_names):
         parts = [_normalise(p) for p in name_parts(name)]
         if not parts:
             continue
 
-        # Longest run first, so the prefix lands at the start of whatever was
-        # actually said — "@de Vries", not "de @Vries".
-        for run in trailing_runs(parts):
-            at = _find_span(tokens, run, fuzzy=fuzzy, threshold=threshold)
-            if at is not None:
-                if at not in inserts:
-                    inserts.append(at)
-                break
+        # Longest run first, so "Geoff Taylor" is replaced as a whole rather
+        # than leaving a stray first name behind.
+        for run in match_runs(parts, first_names=first_names):
+            span = _find_span(tokens, run, fuzzy=fuzzy, threshold=threshold)
+            if span is None:
+                continue
+            begin, finish = span
+            if any(begin < e and b < finish for b, e, _ in edits):
+                break  # already covered by another driver's replacement
+            edits.append((begin, finish, f"{prefix}{display_name(name)}"))
+            break
 
-    # Right to left, so earlier offsets stay valid as the string grows.
+    # Right to left, so earlier offsets stay valid as the text changes length.
     result = text
-    for at in sorted(inserts, reverse=True):
-        if result[max(0, at - len(prefix)):at] == prefix:
-            continue  # already marked
-        result = result[:at] + prefix + result[at:]
+    for begin, finish, replacement in sorted(edits, reverse=True):
+        if _already_mentioned(result, begin, prefix):
+            continue
+        result = result[:begin] + replacement + result[finish:]
     return result
+
+
+def _already_mentioned(text: str, begin: int, prefix: str) -> bool:
+    """Whether the match at `begin` is already inside a mention.
+
+    Checking only the character before the match is not enough once the
+    replacement is a display form: in "@M.Verstappen" the surname is preceded
+    by ".", not "@", so a naive guard produced "@M.@M.Verstappen". Skip back
+    over any initial-and-dot and look for the prefix behind it.
+    """
+    index = begin
+    while index > 0 and (text[index - 1].isalnum() or text[index - 1] == "."):
+        index -= 1
+    return text[max(0, index - len(prefix)):index] == prefix
+
+
+# "P3", "p 3", "P-3". Whisper renders a spoken "P three" inconsistently, and
+# an optional space or hyphen covers most of what it produces.
+_POSITION = re.compile(r"\bP\s?-?\s?(\d{1,2})\b", re.IGNORECASE)
+
+# Spelled-out ordinals, which Whisper produces at least as often as digits.
+_ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
+_ORDINAL_PLACE = re.compile(
+    r"\b(" + "|".join(_ORDINALS) + r")\s+place\b", re.IGNORECASE)
+
+
+def apply_positions(
+    text: str,
+    positions: dict[int, str],
+    *,
+    prefix: str = "@",
+) -> str:
+    """Replace a standings reference with the driver in that place.
+
+    "tell P3 to move over" becomes "tell @N.Tandy to move over". On a full grid
+    most names are ones you cannot pronounce or did not catch, and a position is
+    something you can always read off the timing screen.
+
+    A position with nobody in it is left alone rather than blanked: saying "P40"
+    in a twenty-car race means nothing, and silently deleting it would be worse
+    than leaving the words.
+    """
+    if not text or not positions:
+        return text
+
+    def replace_digits(match: re.Match) -> str:
+        name = positions.get(int(match.group(1)))
+        return f"{prefix}{display_name(name)}" if name else match.group(0)
+
+    def replace_ordinal(match: re.Match) -> str:
+        name = positions.get(_ORDINALS[match.group(1).lower()])
+        return f"{prefix}{display_name(name)}" if name else match.group(0)
+
+    return _ORDINAL_PLACE.sub(replace_ordinal, _POSITION.sub(replace_digits, text))
 
 
 def vocabulary_hint(drivers: list[str], limit: int = 40) -> str:

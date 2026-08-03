@@ -250,6 +250,12 @@ line; see [plugins/README.md](plugins/README.md).
 Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
 can serve several games. `executables` on the plugin only pre-fills the picker.
 
+Plugins expose options via `settings: tuple[PluginSetting, ...]`, rendered in
+the profile editor when assigned. Values live on the **profile**
+(`Profile.plugin_settings`), not the plugin, for the same reason the plugin
+choice does. Defaults are read from the plugin at merge time, so adding a
+setting never requires migrating configs.
+
 `PluginRegistry.drivers_for` swallows every exception: it runs inside the
 trigger cycle, and a plugin fault must cost session data, never the message.
 

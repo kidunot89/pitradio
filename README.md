@@ -156,6 +156,35 @@ game-side plugin required. Assign it in **Profiles → Session plugin**; the
 bundled LMU profile already has it. The choice lives on the profile, so a plugin
 that suits two games can be assigned to both.
 
+However you say the name, the mention comes out in the form sims put on screen:
+
+| You say | It sends |
+| --- | --- |
+| "Geoff Taylor is quick" | `@G.Taylor is quick` |
+| "tell Taylor to box" | `tell @G.Taylor to box` |
+| "Geoff is quick" | `@G.Taylor is quick` |
+| "de Vries is catching" | `@N.de Vries is catching` |
+
+That's the point of replacing rather than just prefixing — `@G.Taylor` is what
+every other driver sees on their own HUD, so they know immediately who's meant.
+
+You can also refer to someone by their **standings position**, which is often
+easier than a name you can't pronounce or didn't catch:
+
+| You say | It sends |
+| --- | --- |
+| "tell P3 to move over" | `tell @N.de Vries to move over` |
+| "P1 is pulling away" | `@M.Verstappen is pulling away` |
+| "third place is quick" | `@N.de Vries is quick` |
+
+A position nobody is in — "P40" in a twenty-car race — is left as you said it.
+Turn this off under **Profiles → Le Mans Ultimate options**.
+
+First names that double as racing speech are never matched on their own:
+"max attack", "nick the inside line" and "will do" stay as they are. They're
+still recognised inside a full name. Turn first-name matching off entirely with
+`mentions.match_first_names`.
+
 Note on the `@`: it's plain text. Neither LMU nor rFactor 2 chat supports
 markup, so there's no bold and the game attaches no meaning to it — it's a human
 convention, like writing someone's name in caps.
@@ -163,6 +192,10 @@ convention, like writing someone's name in caps.
 The accuracy half is the more valuable one. Whisper mangles proper nouns it has
 no reason to expect; telling it who's in the session beats any amount of
 matching after the fact.
+
+Plugins can expose their own options, which appear in the profile editor once
+the plugin is assigned. They're stored per profile, so the same plugin can be
+configured differently for two games.
 
 Plugins are compiled into the app — there's no way to add one after installing.
 Adding a sim means a pull request, and it's two small steps: see

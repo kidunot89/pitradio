@@ -53,6 +53,9 @@ class Profile:
     # none. Held on the profile rather than the plugin so one plugin can
     # serve several games.
     plugin: str = ""
+    # Per-plugin options for this game. Defaults come from the plugin itself,
+    # so a setting added later needs no rewrite of existing profiles.
+    plugin_settings: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -81,6 +84,10 @@ class MentionConfig:
     # into someone else's name, which is worse than leaving it alone.
     fuzzy: bool = False
     threshold: float = 0.85
+    # Whether saying only a first name counts. On, because people do — but
+    # names that double as racing speech ("max attack", "nick the inside
+    # line") are never matched alone regardless.
+    match_first_names: bool = True
     # The part that actually improves accuracy — telling Whisper who is in the
     # session so it hears the name correctly to begin with.
     add_names_to_vocabulary: bool = True

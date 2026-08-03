@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from plugins.base import SessionPlugin
+from plugins.base import PluginSetting, SessionPlugin
 from plugins.lmu import LeMansUltimatePlugin
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,30 @@ class PluginRegistry:
             log.exception("plugin %s failed while reading vocabulary", plugin.name)
             return []
 
+    def positions_for(self, plugin_id: str | None) -> dict[int, str]:
+        """Standings from the profile's plugin, or empty."""
+        plugin = self.by_id(plugin_id)
+        if plugin is None:
+            return {}
+        try:
+            return plugin.positions()
+        except Exception:
+            log.exception("plugin %s failed while reading positions", plugin.name)
+            return {}
+
+    def settings_for(self, plugin_id: str | None, stored: dict | None = None) -> dict:
+        """A plugin's settings with the profile's overrides applied.
+
+        Defaults come from the plugin, so a setting added later appears without
+        every existing profile needing to be rewritten.
+        """
+        plugin = self.by_id(plugin_id)
+        if plugin is None:
+            return {}
+        merged = plugin.defaults()
+        merged.update(stored or {})
+        return merged
+
     def vocabularies(self) -> list[tuple[str, list[str], str]]:
         """(plugin name, terms, status) for every plugin, for the GUI.
 
@@ -133,4 +157,7 @@ class PluginRegistry:
         return rows
 
 
-__all__ = ["BUILTIN", "LeMansUltimatePlugin", "PluginRegistry", "SessionPlugin"]
+__all__ = [
+    "BUILTIN", "LeMansUltimatePlugin", "PluginRegistry", "PluginSetting",
+    "SessionPlugin",
+]

@@ -21,7 +21,7 @@ import sys
 import threading
 from pathlib import Path
 
-from plugins.base import SessionPlugin
+from plugins.base import PluginSetting, SessionPlugin
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +88,16 @@ class LeMansUltimatePlugin(SessionPlugin):
     description = (
         "Reads the driver list from LMU's shared memory, so names are "
         "transcribed correctly and can be turned into mentions."
+    )
+    settings = (
+        PluginSetting(
+            key="positions",
+            label="Recognise standings positions",
+            kind="bool",
+            default=True,
+            help=('say "P3" and it sends that driver\'s name — useful when you '
+                  "cannot pronounce it or did not catch it"),
+        ),
     )
 
     def __init__(self) -> None:
@@ -196,6 +206,28 @@ class LeMansUltimatePlugin(SessionPlugin):
                 if name:
                     names.append(name)
             return names
+
+    def positions(self) -> dict[int, str]:
+        """Place -> driver name, from the same scoring block as the names."""
+        with self._lock:
+            if not self._connect():
+                return {}
+            try:
+                scoring = self._data.scoring
+                count = int(scoring.scoringInfo.mNumVehicles)
+            except (AttributeError, ValueError):
+                return {}
+
+            count = max(0, min(count, len(scoring.vehScoringInfo)))
+            standings: dict[int, str] = {}
+            for index in range(count):
+                vehicle = scoring.vehScoringInfo[index]
+                name = vehicle.mDriverName.decode("utf-8", "replace").strip("\x00").strip()
+                place = int(vehicle.mPlace)
+                # Place 0 means unclassified, not "leader".
+                if name and place > 0:
+                    standings[place] = name
+            return standings
 
     def status(self) -> str:
         if not self.is_connected():

@@ -40,6 +40,34 @@ the useful terms are not people — car names, teams, tracks, commentators. The
 Vocabulary tab shows what every plugin currently supplies, which is how someone
 debugs a term that keeps coming out wrong.
 
+### Settings
+
+A plugin can expose options, shown in the profile editor when it is assigned:
+
+```python
+from plugins.base import PluginSetting, SessionPlugin
+
+
+class YourSimPlugin(SessionPlugin):
+    settings = (
+        PluginSetting(key="positions", label="Recognise standings positions",
+                      kind="bool", default=True, help="say \"P3\"..."),
+    )
+```
+
+`kind` is `bool`, `int` or `text`. Values are stored **on the profile**, not on
+the plugin, so a plugin serving two games can be configured differently for
+each. Defaults come from the plugin at read time, so adding a setting later does
+not require rewriting existing configs.
+
+Read them with `registry.settings_for(profile.plugin, profile.plugin_settings)`.
+
+### Standings
+
+Override `positions()` to return `{place: driver name}` and people can say "P3"
+instead of a name. Place numbering is 1-based; skip anything unclassified rather
+than reporting it as position zero.
+
 **2. Register it.** Add the class to `BUILTIN` in `plugins/__init__.py`.
 
 That's all. The profile editor picks it up automatically.

@@ -17,8 +17,25 @@ valid answer.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PluginSetting:
+    """One option a plugin exposes, rendered in the profile editor.
+
+    Settings are stored per profile rather than per plugin: a plugin can serve
+    several games, and what makes sense in one may not in another.
+    """
+
+    key: str
+    label: str
+    kind: str = "bool"          # bool | int | text
+    default: Any = False
+    help: str = ""
 
 
 class SessionPlugin:
@@ -35,6 +52,11 @@ class SessionPlugin:
     executables: tuple[str, ...] = ()
     #: One line explaining what it adds, for the plugin list.
     description: str = ""
+    #: Options shown in the profile editor when this plugin is assigned.
+    settings: tuple[PluginSetting, ...] = ()
+
+    def defaults(self) -> dict[str, Any]:
+        return {setting.key: setting.default for setting in self.settings}
 
     def serves(self, executable: str | None) -> bool:
         return (executable or "").strip().lower() in self.executables
@@ -71,6 +93,14 @@ class SessionPlugin:
         people. Defaults to the driver list, which is the common case.
         """
         return self.drivers()
+
+    def positions(self) -> dict[int, str]:
+        """Standings position -> driver name, or empty.
+
+        Lets someone say "P3" instead of a name they cannot pronounce or did
+        not catch — which on a full grid is most of them.
+        """
+        return {}
 
     def status(self) -> str:
         """A line for the GUI's plugin list — connected, idle, or why not."""

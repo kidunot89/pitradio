@@ -132,6 +132,12 @@ class Worker(threading.Thread):
                 self.plugins.vocabulary_for(profile.plugin)
                 if drivers and cfg.mentions.add_names_to_vocabulary else []
             ),
+            "positions": (
+                self.plugins.positions_for(profile.plugin)
+                if drivers and self.plugins.settings_for(
+                    profile.plugin, profile.plugin_settings).get("positions")
+                else {}
+            ),
         }
 
     def _on_up(self, released_at: float) -> None:
@@ -164,12 +170,24 @@ class Worker(threading.Thread):
         )
 
         text = speech.sanitize(raw, profile.max_chars)
+
+        positions = active.get("positions") or {}
+        if text and positions and cfg.mentions.enabled:
+            # Before name matching: "P3" is unambiguous, and resolving it first
+            # means the resulting name is not re-matched.
+            spoken = mentions_mod.apply_positions(
+                text, positions, prefix=cfg.mentions.prefix)
+            if spoken != text:
+                log.info("resolved standings: %r", spoken)
+                text = spoken
+
         if text and drivers and cfg.mentions.enabled:
             marked = mentions_mod.apply_mentions(
                 text, drivers,
                 prefix=cfg.mentions.prefix,
                 fuzzy=cfg.mentions.fuzzy,
                 threshold=cfg.mentions.threshold,
+                first_names=cfg.mentions.match_first_names,
             )
             if marked != text:
                 log.info("marked up driver names: %r", marked)

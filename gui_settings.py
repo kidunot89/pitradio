@@ -397,7 +397,66 @@ def _profile_vars(app, parent, profile) -> dict:
                           values=[name for _id, name in choices], state="readonly")
     _row(parent, 10, "Session plugin", picker,
          "reads who is in the session, for name accuracy and mentions")
+
+    # The assigned plugin's own options, rebuilt whenever the choice changes so
+    # only the relevant ones are ever on screen.
+    v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
+    v["_settings_vars"] = {}
+    v["_settings_frame"] = ttk.Frame(parent)
+    v["_settings_frame"].grid(row=11, column=0, columnspan=3, sticky="we", pady=(4, 0))
+    _rebuild_plugin_settings(app, v)
+    picker.bind("<<ComboboxSelected>>",
+                lambda _e: _rebuild_plugin_settings(app, v))
     return v
+
+
+def _rebuild_plugin_settings(app, v: dict) -> None:
+    """Render the options of whichever plugin is currently selected."""
+    frame = v["_settings_frame"]
+    for child in frame.winfo_children():
+        child.destroy()
+    v["_settings_vars"] = {}
+
+    if app.plugins is None:
+        return
+    plugin = app.plugins.by_id(_plugin_id(v["_plugin_choices"], v["plugin"].get()))
+    if plugin is None or not plugin.settings:
+        return
+
+    ttk.Label(frame, text=f"{plugin.name} options", foreground="#555").grid(
+        row=0, column=0, columnspan=2, sticky="w", pady=(4, 2))
+
+    stored = v["_plugin_settings"]
+    for row, setting in enumerate(plugin.settings, start=1):
+        current = stored.get(setting.key, setting.default)
+        if setting.kind == "bool":
+            var = tk.BooleanVar(value=bool(current))
+            ttk.Checkbutton(frame, text=setting.label, variable=var).grid(
+                row=row, column=0, sticky="w")
+        else:
+            var = tk.StringVar(value=str(current))
+            ttk.Label(frame, text=setting.label).grid(row=row, column=0, sticky="w")
+            ttk.Entry(frame, textvariable=var, width=12).grid(
+                row=row, column=1, sticky="w", padx=(8, 0))
+        v["_settings_vars"][setting.key] = (var, setting)
+
+        if setting.help:
+            ttk.Label(frame, text=setting.help, foreground="#777",
+                      wraplength=560, justify="left").grid(
+                row=row, column=2, sticky="w", padx=(8, 0))
+
+
+def _read_plugin_settings(v: dict) -> dict:
+    values = {}
+    for key, (var, setting) in v.get("_settings_vars", {}).items():
+        raw = var.get()
+        if setting.kind == "int":
+            try:
+                raw = int(str(raw).strip())
+            except (TypeError, ValueError):
+                raw = setting.default
+        values[key] = raw
+    return values
 
 
 def _key_list_row(app, parent, v, field: str):
@@ -446,6 +505,7 @@ def _read_profile_vars(v: dict, profile) -> None:
     profile.max_chars = _as_int(v["max_chars"], profile.max_chars)
     profile.text_mode = v["text_mode"].get() or "unicode"
     profile.plugin = _plugin_id(v["_plugin_choices"], v["plugin"].get())
+    profile.plugin_settings = _read_plugin_settings(v)
 
 
 def _save_settings(app) -> None:
@@ -610,6 +670,10 @@ def _load_profile(app) -> None:
     v["max_chars"].set(str(profile.max_chars))
     v["text_mode"].set(profile.text_mode)
     v["plugin"].set(_plugin_label(v["_plugin_choices"], profile.plugin))
+    v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
+    # Redraw, or the controls would still show the previously selected
+    # profile's values while claiming to describe this one.
+    _rebuild_plugin_settings(app, v)
 
 
 def _add_profile(app) -> None:
