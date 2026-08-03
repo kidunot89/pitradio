@@ -20,7 +20,7 @@ from tkinter import messagebox, ttk
 
 from pitradio import state as state_mod
 from pitradio.state import AppState
-from pitradio.ui import gui_language, gui_settings
+from pitradio.ui import gui_language, gui_settings, theme
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,15 @@ class App:
 
         root.title(f"PitRadio {version}")
         root.minsize(720, 520)
+
+        # Before anything is built: ttk styles are read when a widget is
+        # created, so a theme applied afterwards leaves whatever already
+        # exists in the old colours.
+        self.palette = theme.apply(root, store.config.gui.theme)
+        # Findable from any widget, for helpers that are handed a
+        # container rather than the App.
+        root._pitradio_palette = self.palette
+        self._set_window_icon()
         if store.config.gui.geometry:
             # A saved geometry can be off-screen or malformed after a monitor
             # change; falling back to the default beats failing to open.
@@ -77,6 +86,24 @@ class App:
             root.after(200, self.hide_window)
 
         root.after(POLL_MS, self._drain)
+
+    def _set_window_icon(self) -> None:
+        """The mark, in the title bar and the taskbar.
+
+        Held on the instance: Tk keeps only a weak reference to a PhotoImage,
+        and a collected one leaves the default empty icon with no error.
+        """
+        try:
+            from PIL import ImageTk
+
+            from pitradio.ui import logo
+
+            self._icons = [ImageTk.PhotoImage(logo.draw(size))
+                           for size in (16, 32, 48, 256)]
+            self.root.iconphoto(True, *self._icons)
+        except Exception as exc:
+            # Cosmetic; never worth failing to open the window over.
+            log.debug("could not set the window icon: %s", exc)
 
     # -- construction ----------------------------------------------------
 
@@ -156,6 +183,7 @@ class App:
         log_frame.pack(fill="both", expand=True)
 
         self.log_text = tk.Text(log_frame, height=14, wrap="none", state="disabled",
+                                **theme.text_options(self.palette),
                                 font=("Consolas", 9))
         scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)

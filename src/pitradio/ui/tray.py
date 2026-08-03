@@ -14,9 +14,10 @@ from __future__ import annotations
 import logging
 import threading
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from pitradio import state as state_mod
+from pitradio.ui import logo
 
 log = logging.getLogger(__name__)
 
@@ -29,24 +30,8 @@ COLOURS = {
 
 
 def icon_image(kind: str) -> Image.Image:
-    """A microphone on a coloured disc.
-
-    Drawn at 64px and scaled down by the tray, so the shapes are kept chunky
-    and well separated — at 16px anything finer collapses into a blob. The
-    gap between capsule and cradle is what makes it read as a microphone.
-    """
-    colour = COLOURS.get(kind, COLOURS["idle"])
-    white = (255, 255, 255, 240)
-
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((4, 4, 60, 60), fill=colour)
-
-    draw.rounded_rectangle((26, 14, 38, 34), radius=6, fill=white)
-    draw.arc((20, 24, 44, 44), start=0, end=180, fill=white, width=4)
-    draw.rectangle((30, 44, 34, 50), fill=white)
-    draw.rectangle((23, 50, 41, 54), fill=white)
-    return image
+    """The tray icon. One drawing, shared with the window and the .ico."""
+    return logo.icon_image(kind)
 
 
 def _kind_for(status: str, enabled: bool) -> str:

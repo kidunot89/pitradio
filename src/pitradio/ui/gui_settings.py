@@ -19,6 +19,7 @@ from tkinter import messagebox, ttk
 
 from pitradio import paths, speech
 from pitradio import state as state_mod
+from pitradio.ui import theme
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,31 @@ def _row(parent, row: int, label: str, widget, hint: str = "") -> None:
 
 def _entry(parent, var, width: int = 24) -> ttk.Entry:
     return ttk.Entry(parent, textvariable=var, width=width)
+
+
+def _field_grid(parent, row: int, *fields, columns: int = 2) -> int:
+    """Lay short fields out across the width instead of one per row.
+
+    A millisecond value needs about four characters and was being given the
+    whole window, so the profile editor ran to six rows of almost nothing and
+    pushed everything below it off the bottom. Each entry is (label, widget,
+    hint); a hint spans the remaining columns on its own line so it stays
+    readable without stretching the row.
+
+    Returns the next free row.
+    """
+    for index, (label, widget, hint) in enumerate(fields):
+        column = (index % columns) * 2
+        line = row + (index // columns)
+        ttk.Label(parent, text=label).grid(
+            row=line, column=column, sticky="w", pady=3, padx=(0, 8))
+        widget.grid(row=line, column=column + 1, sticky="w", pady=3, padx=(0, 20))
+        if hint:
+            ttk.Label(parent, text=hint, style="Muted.TLabel").grid(
+                row=line + 1, column=column, columnspan=2, sticky="w",
+                pady=(0, 4))
+    used = (len(fields) + columns - 1) // columns
+    return row + used + 1
 
 
 def _as_int(var: tk.StringVar, fallback: int) -> int:
@@ -101,6 +127,16 @@ def scrolling_tab(app, title: str) -> tuple[ttk.Frame, ttk.Frame]:
     return scrolling_pane(outer)
 
 
+def _palette(widget):
+    """The palette the window was themed with.
+
+    `scrolling_pane` is handed a container rather than the App, so it walks up
+    to the toplevel for it. Falls back to light rather than failing — a pane
+    that is the wrong shade still works.
+    """
+    return getattr(widget.winfo_toplevel(), "_pitradio_palette", theme.LIGHT_PALETTE)
+
+
 def scrolling_pane(outer, padding: int = 12) -> tuple[ttk.Frame, ttk.Frame]:
     """The scroll-plus-sticky-footer machinery, for a tab or a pane inside one."""
     # Packed before the canvas so it keeps its height when space runs short.
@@ -108,7 +144,8 @@ def scrolling_pane(outer, padding: int = 12) -> tuple[ttk.Frame, ttk.Frame]:
     footer.pack(side="bottom", fill="x")
     ttk.Separator(outer, orient="horizontal").pack(side="bottom", fill="x")
 
-    canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+    canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0,
+                       background=_palette(outer).window)
     bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=bar.set)
     canvas.pack(side="left", fill="both", expand=True)
@@ -252,6 +289,15 @@ def build_settings_tab(app) -> None:
     _row(cues, 3, "Duration (ms)", _entry(cues, app.v_cue_ms, 10))
     _row(cues, 4, "Volume (0-1)", _entry(cues, app.v_cue_vol, 10))
 
+    appearance = ttk.LabelFrame(frame, text="Appearance", padding=10)
+    appearance.pack(fill="x", pady=(10, 0))
+    app.v_theme = tk.StringVar(value=_theme_label(cfg.gui.theme))
+    _row(appearance, 0, "Theme",
+         ttk.Combobox(appearance, textvariable=app.v_theme, width=18,
+                      values=[label for _mode, label in THEME_CHOICES],
+                      state="readonly"),
+         "takes effect next time PitRadio starts")
+
     startup = ttk.LabelFrame(frame, text="Startup", padding=10)
     startup.pack(fill="x", pady=(10, 0))
     app.v_start_min = tk.BooleanVar(value=cfg.gui.start_minimized)
@@ -268,10 +314,28 @@ def build_settings_tab(app) -> None:
         ttk.Label(
             startup,
             text="Available in the installed build only — it registers a scheduled task.",
-            foreground="#777",
+            style="Muted.TLabel",
         ).pack(anchor="w")
 
     ttk.Button(footer, text="Save", command=lambda: _save_settings(app)).pack(anchor="e")
+
+
+THEME_CHOICES = (
+    ("system", "Match the system"),
+    ("light", "Light"),
+    ("dark", "Dark"),
+)
+
+
+def _theme_label(mode: str) -> str:
+    return dict(THEME_CHOICES).get(mode, THEME_CHOICES[0][1])
+
+
+def _theme_mode(label: str) -> str:
+    for mode, text in THEME_CHOICES:
+        if text == label:
+            return mode
+    return "system"
 
 
 def _joystick_label(app, joystick_cfg) -> str:
@@ -527,18 +591,23 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
         ("abort_keys", "Keys to abort", "used when nothing was said"),
     )):
         _row(parent, row, label, _key_list_row(app, parent, v, field), hint)
-    _row(parent, 3, "Delay after opening chat (ms)", _entry(parent, v["pre_delay_ms"], 10),
-         "raise this if the first characters go missing")
-    _row(parent, 4, "Delay before sending (ms)", _entry(parent, v["post_delay_ms"], 10))
-    _row(parent, 5, "Key hold (ms)", _entry(parent, v["key_hold_ms"], 10),
-         "below ~20ms games miss the press entirely")
-    _row(parent, 6, "Gap between keys (ms)", _entry(parent, v["key_gap_ms"], 10))
-    _row(parent, 7, "Delay per character (ms)", _entry(parent, v["type_delay_ms"], 10))
-    _row(parent, 8, "Max characters", _entry(parent, v["max_chars"], 10))
+    # Six short numbers, two per row. One per row ran the editor off the
+    # bottom of the window for the sake of fields four characters wide.
+    _field_grid(
+        parent, 3,
+        ("Chat open delay (ms)", _entry(parent, v["pre_delay_ms"], 8),
+         "raise this if the first characters go missing"),
+        ("Send delay (ms)", _entry(parent, v["post_delay_ms"], 8), ""),
+        ("Key hold (ms)", _entry(parent, v["key_hold_ms"], 8),
+         "below ~20ms games miss the press entirely"),
+        ("Gap between keys (ms)", _entry(parent, v["key_gap_ms"], 8), ""),
+        ("Per character (ms)", _entry(parent, v["type_delay_ms"], 8), ""),
+        ("Max characters", _entry(parent, v["max_chars"], 8), ""),
+    )
 
     mode = ttk.Combobox(parent, textvariable=v["text_mode"], width=12,
                         values=("unicode", "scancode"), state="readonly")
-    _row(parent, 9, "Text injection", mode,
+    _row(parent, 10, "Text injection", mode,
          "switch to scancode if the game ignores typed text")
 
     # Off leaves the message in the chat box to be read before it goes out.
@@ -546,9 +615,9 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     # everyone's problem.
     ttk.Checkbutton(
         parent, text="Send automatically", variable=v["auto_send"],
-    ).grid(row=10, column=1, sticky="w", pady=3, padx=(8, 0))
+    ).grid(row=11, column=1, sticky="w", pady=3, padx=(8, 0))
     ttk.Label(parent, text="off types the message and leaves it for you to send",
-              foreground="#777").grid(row=10, column=2, sticky="w", padx=(8, 0))
+              style="Muted.TLabel").grid(row=11, column=2, sticky="w", padx=(8, 0))
 
     # Hidden on the default profile. A session plugin reads one specific game,
     # and the default profile is what applies to games that have none — so a
@@ -568,7 +637,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
                           values=[name for _id, name in choices], state="readonly")
-    _row(parent, 11, "Session plugin", picker,
+    _row(parent, 12, "Session plugin", picker,
          "reads who is in the session; automatic picks by executable name")
 
     # The assigned plugin's own options, rebuilt whenever the choice changes so
@@ -576,7 +645,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
     v["_settings_vars"] = {}
     v["_settings_frame"] = ttk.Frame(parent)
-    v["_settings_frame"].grid(row=12, column=0, columnspan=3, sticky="we", pady=(4, 0))
+    v["_settings_frame"].grid(row=13, column=0, columnspan=3, sticky="we", pady=(4, 0))
     _rebuild_plugin_settings(app, v)
     picker.bind("<<ComboboxSelected>>",
                 lambda _e: _rebuild_plugin_settings(app, v))
@@ -699,6 +768,7 @@ def _save_settings(app) -> None:
 
     cfg.review.send_key = app.v_send_key.get().strip()
     cfg.review.clear_key = app.v_clear_key.get().strip()
+    cfg.gui.theme = _theme_mode(app.v_theme.get())
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 
@@ -798,7 +868,8 @@ def build_profiles_tab(app) -> None:
 
     left = ttk.Frame(body)
     left.pack(side="left", fill="y")
-    app.profile_list = tk.Listbox(left, width=28, exportselection=False)
+    app.profile_list = tk.Listbox(left, width=28, exportselection=False,
+                                  **theme.listbox_options(app.palette))
     app.profile_list.pack(fill="y", expand=True)
     app.profile_list.bind("<<ListboxSelect>>", lambda _e: _load_profile(app))
 
@@ -917,7 +988,8 @@ def build_vocabulary_tab(app) -> None:
         foreground="#666", wraplength=880, justify="left",
     ).pack(fill="x", pady=(0, 8))
 
-    app.vocab_text = tk.Text(frame, wrap="word", height=10)
+    app.vocab_text = tk.Text(frame, wrap="word", height=10,
+                             **theme.text_options(app.palette))
     app.vocab_text.insert("1.0", app.store.config.whisper.initial_prompt)
     app.vocab_text.pack(fill="both", expand=True)
 
@@ -937,6 +1009,7 @@ def build_vocabulary_tab(app) -> None:
     ).pack(fill="x", pady=(0, 6))
 
     app.runtime_vocab_text = tk.Text(session, wrap="word", height=8,
+                                     **theme.text_options(app.palette),
                                      state="disabled", font=("Consolas", 9))
     app.runtime_vocab_text.pack(fill="both", expand=True)
 
@@ -1272,7 +1345,8 @@ def build_updates_tab(app) -> None:
 
     notes = ttk.LabelFrame(frame, text="Release notes", padding=6)
     notes.pack(fill="both", expand=True)
-    app.notes_text = tk.Text(notes, wrap="word", height=12, state="disabled")
+    app.notes_text = tk.Text(notes, wrap="word", height=12, state="disabled",
+                             **theme.text_options(app.palette))
     app.notes_text.pack(fill="both", expand=True)
 
 

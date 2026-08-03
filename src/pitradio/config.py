@@ -175,6 +175,9 @@ class GuiConfig:
     start_minimized: bool = False
     geometry: str = ""
     log_lines: int = 400
+    # "system" follows the desktop's light/dark setting, which is what almost
+    # everyone wants; "light" and "dark" pin it.
+    theme: str = "system"
 
 
 @dataclass
@@ -300,6 +303,9 @@ class Config:
                 keys.parse_trigger(spec)
             except keys.KeyNameError as exc:
                 problems.append(f"{label}: {exc}")
+
+        if self.gui.theme not in ("system", "light", "dark"):
+            problems.append('gui.theme must be "system", "light" or "dark"')
 
         if not isinstance(self.review.tap_ms, int) or not 0 <= self.review.tap_ms <= 2000:
             problems.append("review.tap_ms must be between 0 and 2000")
