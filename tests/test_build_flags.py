@@ -235,3 +235,109 @@ def test_sdl2_is_shipped_when_available():
         arg.startswith("--include-data-files=") and arg.endswith("=SDL2.dll")
         for arg in build.nuitka_args("0.0.0")
     ), "SDL2.dll must be shipped to the dist root"
+
+
+# -- self-healing a corrupt compilation cache ----------------------------
+
+
+# The exact line that killed v0.1.22's release build, and two CI runs before
+# it. Kept verbatim: the recovery hinges on matching this shape, and a
+# paraphrase would let the regex drift away from what Scons really prints.
+CORRUPT_LINE = (
+    r"scons: *** [module.pygments.lexers.q.obj] "
+    r"C:\Users\RUNNER~1\AppData\Local\Nuitka\Nuitka\Cache\clcache\objects"
+    r"\88f\88f3f5baaac25063c1e0597c4044e75d\object: No such file or directory"
+)
+
+
+def test_a_corrupt_cache_entry_is_recognised():
+    output = f"Nuitka-Scons: Backend C compiler: cl (cl 14.5).\n{CORRUPT_LINE}\n" \
+             "FATAL: Failed unexpectedly in Scons C backend compilation.\n"
+    cache = build.corrupt_cache_dir(output)
+    assert cache == r"C:\Users\RUNNER~1\AppData\Local\Nuitka\Nuitka\Cache\clcache"
+
+
+def test_only_the_compiler_cache_is_targeted():
+    """Nuitka's other caches hold downloaded tools; refetching them is minutes."""
+    cache = build.corrupt_cache_dir(CORRUPT_LINE)
+    assert "objects" not in cache
+    assert cache.endswith("clcache")
+
+
+def test_the_ccache_spelling_is_recognised_too():
+    line = (
+        "scons: *** [module.foo.obj] "
+        "/home/runner/.cache/Nuitka/ccache/objects/1a/2b/object"
+        ": No such file or directory"
+    )
+    assert build.corrupt_cache_dir(line) == "/home/runner/.cache/Nuitka/ccache"
+
+
+@pytest.mark.parametrize("output", [
+    "",
+    "error: 'foo' undeclared (first use in this function)\n",
+    "FATAL: Failed unexpectedly in Scons C backend compilation.\n",
+    "LINK : fatal error LNK1181: cannot open input file 'foo.obj'\n",
+    # A missing *source* file is a real problem, not a stale cache entry.
+    "scons: *** [module.foo.obj] src/foo.c: No such file or directory\n",
+])
+def test_other_failures_are_not_retried(output):
+    """A genuine compile error must surface on the first attempt.
+
+    Retrying costs a second full build — about twenty minutes warm — so the
+    match has to be narrow enough that only a corrupt cache triggers it.
+    """
+    assert build.corrupt_cache_dir(output) is None
+
+
+def _stub_build(monkeypatch, tmp_path, outcomes):
+    """build() with Nuitka replaced by a scripted sequence of outcomes."""
+    monkeypatch.setattr(build, "BUILD_DIR", tmp_path)
+    monkeypatch.setattr(build, "nuitka_args", lambda version: ["nuitka", "stub"])
+    (tmp_path / "pitradio.dist").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "pitradio.dist" / "pitradio.exe").write_text("stub")
+
+    calls = []
+    results = iter(outcomes)
+
+    def fake_run(args):
+        calls.append(args)
+        return next(results)
+
+    removed = []
+    monkeypatch.setattr(build, "_run_nuitka", fake_run)
+    monkeypatch.setattr(build.shutil, "rmtree", lambda p, **kw: removed.append(p))
+    return calls, removed
+
+
+def test_a_corrupt_cache_is_removed_and_the_build_retried(monkeypatch, tmp_path):
+    calls, removed = _stub_build(monkeypatch, tmp_path, [
+        (1, f"{CORRUPT_LINE}\nFATAL: Failed unexpectedly in Scons C backend.\n"),
+        (0, "built fine the second time\n"),
+    ])
+
+    assert build.build() == 0
+    assert len(calls) == 2, "the build should have been retried"
+    assert removed == [r"C:\Users\RUNNER~1\AppData\Local\Nuitka\Nuitka\Cache\clcache"]
+
+
+def test_a_genuine_failure_is_not_retried(monkeypatch, tmp_path):
+    """Twenty minutes is too long to spend re-proving a real compile error."""
+    calls, removed = _stub_build(monkeypatch, tmp_path, [
+        (1, "error: 'foo' undeclared (first use in this function)\n"),
+    ])
+
+    assert build.build() == 1
+    assert len(calls) == 1
+    assert removed == []
+
+
+def test_a_second_failure_after_clearing_the_cache_gives_up(monkeypatch, tmp_path):
+    """One retry, not a loop — a cache that stays broken is a different problem."""
+    calls, _ = _stub_build(monkeypatch, tmp_path, [
+        (1, CORRUPT_LINE),
+        (1, CORRUPT_LINE),
+    ])
+
+    assert build.build() == 1
+    assert len(calls) == 2

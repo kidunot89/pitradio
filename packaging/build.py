@@ -24,6 +24,7 @@ import argparse
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -199,6 +200,62 @@ def nuitka_env() -> dict:
     return env
 
 
+# Scons reporting a cache entry whose object file is missing. The manifest
+# survived and the object did not, so Scons believes it has nothing to do and
+# fails outright rather than recompiling it.
+#
+# GitHub Actions caches saved from an interrupted run restore in exactly this
+# state — the tarball was snapshotted mid-write. One such entry killed three
+# separate runs before it was tracked down, because the failure looks like a
+# compiler problem and moves to whichever build restores the cache next.
+_CORRUPT_CACHE = re.compile(
+    r"^scons: \*\*\* \[[^\]]*\] (?P<root>.+?[\\/](?:cl|c)cache)[\\/]objects[\\/]"
+    r"[^\n]*: No such file or directory",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def corrupt_cache_dir(output: str) -> str | None:
+    """The compilation cache to delete, if that is why the build died.
+
+    Returns None for every other failure. A genuine compile error must surface
+    on the first attempt — retrying one costs a second full build, and at ~20
+    minutes warm that is not a cost to pay on a guess.
+
+    A plain string, not a Path: the path is whatever Scons printed, and on
+    Windows that is a Windows path. Wrapping it in Path on a Linux test runner
+    yields a single opaque component rather than a path, so the parsing could
+    only be verified on the platform it already works on.
+    """
+    match = _CORRUPT_CACHE.search(output)
+    return match.group("root") if match else None
+
+
+def _run_nuitka(args: list[str]) -> tuple[int, str]:
+    """Run Nuitka, echoing output live while keeping a copy to inspect.
+
+    Streamed rather than captured wholesale so a CI log still shows progress
+    during the twenty minutes this takes.
+    """
+    process = subprocess.Popen(
+        args,
+        cwd=ROOT,
+        env=nuitka_env(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+    )
+    captured: list[str] = []
+    with process:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            captured.append(line)
+    return process.returncode, "".join(captured)
+
+
 def build() -> int:
     version = read_version()
     BUILD_DIR.mkdir(exist_ok=True)
@@ -206,9 +263,26 @@ def build() -> int:
     args = nuitka_args(version)
     print(f"building PitRadio {version}")
     print(" ".join(args))
-    result = subprocess.run(args, cwd=ROOT, check=False, env=nuitka_env())
-    if result.returncode != 0:
-        return result.returncode
+
+    returncode, output = _run_nuitka(args)
+    if returncode != 0:
+        cache = corrupt_cache_dir(output)
+        if cache is None:
+            return returncode
+
+        # Only the compiler cache is removed. Nuitka's other caches under the
+        # same root hold downloaded tools, and refetching those adds minutes
+        # for no reason — the corruption is never in them.
+        print(
+            f"\nthe compilation cache at {cache} is corrupt: it has an entry "
+            f"whose object file is missing.\nremoving it and building again.",
+            file=sys.stderr,
+        )
+        shutil.rmtree(cache, ignore_errors=True)
+
+        returncode, _ = _run_nuitka(args)
+        if returncode != 0:
+            return returncode
 
     dist = BUILD_DIR / "pitradio.dist"
     exe = dist / "pitradio.exe"
