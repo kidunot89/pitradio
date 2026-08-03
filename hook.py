@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from ctypes import wintypes
 
+import keys
 import winapi
 from winapi import (
     HC_ACTION,
@@ -52,12 +53,18 @@ class KeyboardHook(threading.Thread):
         trigger_vk: int,
         events: queue.Queue[tuple[str, float]],
         is_enabled: Callable[[], bool],
+        modifiers: list[int] | None = None,
     ):
         super().__init__(name="hook", daemon=True)
         self._trigger_vk = trigger_vk
+        self._modifiers = [keys.generic_modifier(m) for m in (modifiers or [])]
         self._events = events
         self._is_enabled = is_enabled
         self._pressed = False
+        # Set while the GUI is asking the user to press a key. The callback
+        # reports what was pressed and swallows it, so binding Enter or Escape
+        # doesn't also actuate whatever is behind the dialog.
+        self._capture: Callable[[list[int], int], None] | None = None
         self._hook = None
         self._thread_id: int | None = None
         self._ready = threading.Event()
@@ -68,8 +75,16 @@ class KeyboardHook(threading.Thread):
 
     # -- public ----------------------------------------------------------
 
-    def set_trigger(self, trigger_vk: int) -> None:
+    def start_capture(self, on_captured: Callable[[list[int], int], None]) -> None:
+        """Report the next non-modifier keypress instead of acting on it."""
+        self._capture = on_captured
+
+    def cancel_capture(self) -> None:
+        self._capture = None
+
+    def set_trigger(self, trigger_vk: int, modifiers: list[int] | None = None) -> None:
         """Config hot-reload can change the trigger key mid-session."""
+        self._modifiers = [keys.generic_modifier(m) for m in (modifiers or [])]
         if trigger_vk != self._trigger_vk:
             self._trigger_vk = trigger_vk
             # Otherwise a key held across the change would never see its
@@ -122,19 +137,55 @@ class KeyboardHook(threading.Thread):
         if info.dwExtraInfo == winapi.INJECT_TAG:
             return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
+        if self._capture is not None:
+            return self._handle_capture(info, n_code, w_param, l_param)
+
         if info.vkCode != self._trigger_vk or not self._is_enabled():
             return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
-        # Auto-repeat is still swallowed either way, just not acted on: the
-        # `_pressed` guard is what turns a stream of repeats into one event.
+        # Modifiers are checked here rather than tracked, because a low-level
+        # hook reports one key at a time and never a combination. Only the main
+        # key is ever swallowed — swallowing Ctrl would break it everywhere.
         if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN) and not self._pressed:
+            if not self._modifiers_held():
+                return user32.CallNextHookEx(None, n_code, w_param, l_param)
             self._pressed = True
             self._post(TRIGGER_DOWN)
         elif w_param in (WM_KEYUP, WM_SYSKEYUP) and self._pressed:
+            # Release fires regardless of modifier state: letting go of Ctrl
+            # before the main key must not strand a recording.
             self._pressed = False
             self._post(TRIGGER_UP)
+        elif not self._pressed:
+            # A press we did not claim — pass it through untouched.
+            return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
-        return 1  # swallow: the game must never see the trigger key
+        # Auto-repeat is swallowed too; `_pressed` is what turns a stream of
+        # repeats into a single event.
+        return 1  # the game must never see the trigger key
+
+    def _modifiers_held(self) -> bool:
+        return all(winapi.is_key_down(mod) for mod in self._modifiers)
+
+    def _handle_capture(self, info, n_code, w_param, l_param):
+        """Report the pressed key to the GUI and swallow it."""
+        if w_param not in (WM_KEYDOWN, WM_SYSKEYDOWN):
+            return 1
+        if keys.is_modifier(info.vkCode):
+            # Wait for the real key; a modifier alone is not a binding.
+            return 1
+
+        held = [
+            code
+            for code in (keys.VK["ctrl"], keys.VK["alt"], keys.VK["shift"])
+            if winapi.is_key_down(keys.generic_modifier(code))
+        ]
+        callback, self._capture = self._capture, None
+        try:
+            callback(held, info.vkCode)
+        except Exception:
+            log.exception("key capture callback failed")
+        return 1
 
     def _post(self, kind: str) -> None:
         try:

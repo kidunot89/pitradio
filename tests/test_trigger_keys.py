@@ -46,8 +46,9 @@ def test_changing_the_trigger_key_reaches_the_hook():
         def __init__(self):
             self.vk = keys.VK["f13"]
 
-        def set_trigger(self, vk):
+        def set_trigger(self, vk, modifiers=None):
             self.vk = vk
+            self.modifiers = list(modifiers or [])
 
     class FakeStore:
         def __init__(self):
@@ -63,6 +64,7 @@ def test_changing_the_trigger_key_reaches_the_hook():
 
     gui.App._apply_trigger_key(app)
     assert app.hook.vk == keys.VK["scrolllock"]
+    assert app.hook.modifiers == []
 
 
 def test_an_invalid_trigger_key_leaves_the_hook_alone():
@@ -72,8 +74,9 @@ def test_an_invalid_trigger_key_leaves_the_hook_alone():
         def __init__(self):
             self.vk = keys.VK["f13"]
 
-        def set_trigger(self, vk):
+        def set_trigger(self, vk, modifiers=None):
             self.vk = vk
+            self.modifiers = list(modifiers or [])
 
     class FakeStore:
         def __init__(self):
@@ -97,3 +100,31 @@ def test_no_hook_is_harmless():
     app = object.__new__(gui.App)
     app.hook = None
     gui.App._apply_trigger_key(app)
+
+
+def test_a_combo_trigger_reaches_the_hook_with_its_modifiers():
+    """ctrl+f12 must arrive as both the key to watch and the modifier to check."""
+
+    class FakeHook:
+        def __init__(self):
+            self.vk = keys.VK["f13"]
+            self.modifiers = []
+
+        def set_trigger(self, vk, modifiers=None):
+            self.vk = vk
+            self.modifiers = list(modifiers or [])
+
+    class FakeStore:
+        def __init__(self):
+            self.config = config.Config()
+
+    import gui
+
+    app = object.__new__(gui.App)
+    app.hook = FakeHook()
+    app.store = FakeStore()
+    app.store.config.trigger_key = "ctrl+f12"
+
+    gui.App._apply_trigger_key(app)
+    assert app.hook.vk == keys.VK["f12"]
+    assert app.hook.modifiers == [keys.VK["ctrl"]]

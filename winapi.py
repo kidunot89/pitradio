@@ -17,6 +17,10 @@ from ctypes import wintypes
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+# Legacy multimedia joystick API. Chosen over SDL because it needs no extra
+# dependency, and every native dependency this app has added has cost a release
+# to get bundled correctly. It caps out at 32 buttons per device.
+winmm = ctypes.WinDLL("winmm", use_last_error=True)
 
 # Pointer-sized unsigned int. wintypes has no ULONG_PTR.
 ULONG_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
@@ -102,6 +106,62 @@ class TOKEN_ELEVATION(ctypes.Structure):
     _fields_ = [("TokenIsElevated", wintypes.DWORD)]
 
 
+# -- joystick ------------------------------------------------------------
+
+JOYERR_NOERROR = 0
+JOY_RETURNBUTTONS = 0x00000080
+MAX_JOYSTICK_BUTTONS = 32  # the API's ceiling, not ours
+MAXPNAMELEN = 32
+MAX_JOYSTICKOEMVXDNAME = 260
+
+
+class JOYINFOEX(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("dwXpos", wintypes.DWORD),
+        ("dwYpos", wintypes.DWORD),
+        ("dwZpos", wintypes.DWORD),
+        ("dwRpos", wintypes.DWORD),
+        ("dwUpos", wintypes.DWORD),
+        ("dwVpos", wintypes.DWORD),
+        ("dwButtons", wintypes.DWORD),      # bitmask, one bit per button
+        ("dwButtonNumber", wintypes.DWORD),
+        ("dwPOV", wintypes.DWORD),
+        ("dwReserved1", wintypes.DWORD),
+        ("dwReserved2", wintypes.DWORD),
+    ]
+
+
+class JOYCAPSW(ctypes.Structure):
+    _fields_ = [
+        ("wMid", wintypes.WORD),
+        ("wPid", wintypes.WORD),
+        ("szPname", wintypes.WCHAR * MAXPNAMELEN),
+        ("wXmin", wintypes.UINT),
+        ("wXmax", wintypes.UINT),
+        ("wYmin", wintypes.UINT),
+        ("wYmax", wintypes.UINT),
+        ("wZmin", wintypes.UINT),
+        ("wZmax", wintypes.UINT),
+        ("wNumButtons", wintypes.UINT),
+        ("wPeriodMin", wintypes.UINT),
+        ("wPeriodMax", wintypes.UINT),
+        ("wRmin", wintypes.UINT),
+        ("wRmax", wintypes.UINT),
+        ("wUmin", wintypes.UINT),
+        ("wUmax", wintypes.UINT),
+        ("wVmin", wintypes.UINT),
+        ("wVmax", wintypes.UINT),
+        ("wCaps", wintypes.UINT),
+        ("wMaxAxes", wintypes.UINT),
+        ("wNumAxes", wintypes.UINT),
+        ("wMaxButtons", wintypes.UINT),
+        ("szRegKey", wintypes.WCHAR * MAXPNAMELEN),
+        ("szOEMVxD", wintypes.WCHAR * MAX_JOYSTICKOEMVXDNAME),
+    ]
+
+
 HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 
 user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
@@ -112,6 +172,16 @@ user32.MapVirtualKeyW.restype = wintypes.UINT
 
 user32.VkKeyScanW.argtypes = (wintypes.WCHAR,)
 user32.VkKeyScanW.restype = wintypes.SHORT
+
+user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+user32.GetAsyncKeyState.restype = wintypes.SHORT
+
+winmm.joyGetNumDevs.restype = wintypes.UINT
+winmm.joyGetDevCapsW.argtypes = (
+    ctypes.c_void_p, ctypes.POINTER(JOYCAPSW), wintypes.UINT)
+winmm.joyGetDevCapsW.restype = wintypes.UINT
+winmm.joyGetPosEx.argtypes = (wintypes.UINT, ctypes.POINTER(JOYINFOEX))
+winmm.joyGetPosEx.restype = wintypes.UINT
 
 user32.SetWindowsHookExW.argtypes = (
     ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD)
@@ -168,6 +238,51 @@ advapi32.GetTokenInformation.restype = wintypes.BOOL
 
 def current_thread_id() -> int:
     return kernel32.GetCurrentThreadId()
+
+
+def is_key_down(vk: int) -> bool:
+    """Whether a key is physically held right now.
+
+    Used to check a trigger's modifiers. The hook reports one key at a time, so
+    a combo like ctrl+f12 can only be recognised by asking about the modifier
+    separately when the main key arrives.
+    """
+    # High-order bit set means down. The low bit is a "pressed since last call"
+    # toggle and must be ignored.
+    return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+
+def joystick_count() -> int:
+    return winmm.joyGetNumDevs()
+
+
+def joystick_name(device: int) -> str | None:
+    """Product name of a joystick, or None if that ID has no device attached."""
+    caps = JOYCAPSW()
+    if winmm.joyGetDevCapsW(device, ctypes.byref(caps), ctypes.sizeof(caps)) != JOYERR_NOERROR:
+        return None
+    return caps.szPname or f"joystick {device}"
+
+
+def joystick_buttons(device: int) -> int | None:
+    caps = JOYCAPSW()
+    if winmm.joyGetDevCapsW(device, ctypes.byref(caps), ctypes.sizeof(caps)) != JOYERR_NOERROR:
+        return None
+    return caps.wNumButtons
+
+
+def joystick_button_mask(device: int) -> int | None:
+    """Bitmask of currently held buttons, or None if the device isn't present.
+
+    Only JOY_RETURNBUTTONS is requested: axes are polled every few milliseconds
+    and we have no use for them.
+    """
+    info = JOYINFOEX()
+    info.dwSize = ctypes.sizeof(JOYINFOEX)
+    info.dwFlags = JOY_RETURNBUTTONS
+    if winmm.joyGetPosEx(device, ctypes.byref(info)) != JOYERR_NOERROR:
+        return None
+    return info.dwButtons
 
 
 def foreground_exe() -> str | None:

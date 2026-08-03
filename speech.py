@@ -87,6 +87,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._samplerate = 16000
         self._max_samples = 16000 * 30
+        self._gain = 1.0
         self._on_level = on_level
 
     @property
@@ -99,6 +100,7 @@ class Recorder:
 
         self._samplerate = audio_cfg.samplerate
         self._max_samples = int(audio_cfg.samplerate * audio_cfg.max_clip_seconds)
+        self._gain = float(getattr(audio_cfg, "gain", 1.0) or 1.0)
         with self._lock:
             self._blocks = []
 
@@ -116,6 +118,10 @@ class Recorder:
         if status:
             log.debug("audio status: %s", status)
         block = indata.copy().reshape(-1)
+        if self._gain != 1.0:
+            # Clipped, not just scaled: a gain that pushes past full scale would
+            # otherwise wrap and turn loud speech into noise.
+            block = np.clip(block * self._gain, -1.0, 1.0)
         with self._lock:
             self._blocks.append(block)
         if self._on_level is not None:

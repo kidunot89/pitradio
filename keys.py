@@ -127,14 +127,48 @@ def parse_combo(spec: str) -> tuple[list[int], int]:
 
 
 def parse_key(spec: str) -> int:
-    """Single key, no modifiers — used for the trigger key."""
-    mods, vk = parse_combo(spec)
-    if mods:
-        raise KeyNameError(
-            f"trigger key {spec!r} cannot have modifiers: the low-level hook "
-            f"sees one key at a time"
-        )
+    """The main key of a spec, ignoring modifiers.
+
+    Kept for callers that only care which key to watch for. The hook checks
+    modifier state separately via GetAsyncKeyState, because a low-level hook
+    reports one key at a time and never a combination.
+    """
+    _mods, vk = parse_combo(spec)
     return vk
+
+
+def parse_trigger(spec: str) -> tuple[list[int], int]:
+    """Modifiers and main key for a trigger like "ctrl+f12"."""
+    return parse_combo(spec)
+
+
+def format_combo(modifiers: list[int], vk: int) -> str:
+    """Render a captured key back into a spec string.
+
+    Modifiers come out in a fixed order so the same physical press always
+    produces the same text, whatever order they were pressed in.
+    """
+    order = [("ctrl", VK["ctrl"]), ("alt", VK["alt"]), ("shift", VK["shift"])]
+    held = [name for name, code in order if code in modifiers]
+    return "+".join([*held, name_for(vk)])
+
+
+# Modifiers as the hook sees them. GetAsyncKeyState is asked about the
+# side-agnostic code so either Ctrl satisfies "ctrl".
+GENERIC_MODIFIER = {
+    0xA0: 0x10, 0xA1: 0x10,  # l/r shift -> shift
+    0xA2: 0x11, 0xA3: 0x11,  # l/r ctrl  -> ctrl
+    0xA4: 0x12, 0xA5: 0x12,  # l/r alt   -> alt
+}
+
+
+def generic_modifier(vk: int) -> int:
+    """Map a side-specific modifier to the code GetAsyncKeyState answers for."""
+    return GENERIC_MODIFIER.get(vk, vk)
+
+
+def is_modifier(vk: int) -> bool:
+    return vk in GENERIC_MODIFIER or vk in (0x10, 0x11, 0x12)
 
 
 def name_for(vk: int) -> str:

@@ -37,11 +37,56 @@ def test_unknown_key_and_modifier_are_rejected():
         keys.parse_combo("")
 
 
-def test_trigger_key_rejects_modifiers():
-    """The low-level hook sees one key at a time, so a chord can never match."""
-    assert keys.parse_key("f13") == 0x7C
-    with pytest.raises(keys.KeyNameError, match="cannot have modifiers"):
-        keys.parse_key("ctrl+f13")
+def test_trigger_accepts_modifiers():
+    """A low-level hook reports one key at a time, so the hook checks modifier
+    state separately via GetAsyncKeyState rather than expecting a chord event."""
+    assert keys.parse_trigger("f13") == ([], 0x7C)
+    assert keys.parse_trigger("ctrl+f12") == ([keys.VK["ctrl"]], 0x7B)
+    # parse_key still answers "which key do I watch for".
+    assert keys.parse_key("ctrl+f13") == 0x7C
+
+
+@pytest.mark.parametrize(
+    ("mods", "vk", "expected"),
+    [
+        ([], "f13", "f13"),
+        (["ctrl"], "f12", "ctrl+f12"),
+        (["shift", "ctrl"], "a", "ctrl+shift+a"),
+        (["alt", "ctrl", "shift"], "enter", "ctrl+alt+shift+enter"),
+    ],
+)
+def test_format_combo_is_order_stable(mods, vk, expected):
+    """The same physical press must render identically however it was pressed."""
+    codes = [keys.VK[m] for m in mods]
+    assert keys.format_combo(codes, keys.VK[vk]) == expected
+
+
+@pytest.mark.parametrize("spec", ["f13", "ctrl+f12", "shift+ctrl+a", "escape"])
+def test_format_combo_round_trips_through_the_parser(spec):
+    """Rendering a captured press and re-parsing it must describe the same keys.
+
+    Modifier order is normalised, so compare as sets rather than lists.
+    """
+    mods, vk = keys.parse_trigger(spec)
+    remods, revk = keys.parse_trigger(keys.format_combo(mods, vk))
+
+    assert revk == vk
+    assert {keys.generic_modifier(m) for m in remods} == {
+        keys.generic_modifier(m) for m in mods
+    }
+
+
+@pytest.mark.parametrize(
+    ("side_specific", "generic"),
+    [(0xA0, 0x10), (0xA1, 0x10), (0xA2, 0x11), (0xA3, 0x11), (0xA4, 0x12), (0xA5, 0x12)],
+)
+def test_side_specific_modifiers_map_to_generic(side_specific, generic):
+    """Either Ctrl should satisfy a "ctrl" trigger, so ask about the generic code."""
+    assert keys.generic_modifier(side_specific) == generic
+
+
+def test_non_modifiers_pass_through_generic_mapping():
+    assert keys.generic_modifier(keys.VK["f13"]) == keys.VK["f13"]
 
 
 @pytest.mark.parametrize(

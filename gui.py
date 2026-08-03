@@ -39,6 +39,7 @@ class App:
         recorder=None,
         transcriber=None,
         hook=None,
+        joystick=None,
         use_tray: bool = True,
     ):
         self.root = root
@@ -50,6 +51,7 @@ class App:
         self.recorder = recorder
         self.transcriber = transcriber
         self.hook = hook
+        self.joystick = joystick
         self.tray = None
         self._quitting = False
         self._log_lines = 0
@@ -262,6 +264,7 @@ class App:
         # external edit on the next trigger.
         self.store.load()
         self._apply_trigger_key()
+        self._apply_joystick_binding()
         self._refresh_warnings()
         if problems:
             log.warning("config saved with %d problem(s); see the banner", len(problems))
@@ -282,10 +285,20 @@ class App:
         import keys
 
         try:
-            self.hook.set_trigger(keys.parse_key(self.store.config.trigger_key))
+            mods, vk = keys.parse_trigger(self.store.config.trigger_key)
+            self.hook.set_trigger(vk, mods)
             log.info("trigger key is now %s", self.store.config.trigger_key)
         except keys.KeyNameError as exc:
             log.error("keeping the previous trigger key: %s", exc)
+
+    def _apply_joystick_binding(self) -> None:
+        """Same reasoning as the trigger key: apply on save, not on next trigger."""
+        if self.joystick is None:
+            return
+        joy = self.store.config.joystick
+        self.joystick.set_binding(joy.device, joy.button)
+        if joy.device is not None and joy.button is not None:
+            log.info("joystick trigger: device %s button %s", joy.device, joy.button)
 
     def check_for_updates(self) -> None:
         if self.checker is None:
@@ -367,7 +380,7 @@ class App:
         except Exception:
             log.debug("could not persist window geometry", exc_info=True)
 
-        for component in (self.tray, self.checker, self.worker, self.hook):
+        for component in (self.tray, self.checker, self.worker, self.hook, self.joystick):
             if component is None:
                 continue
             try:

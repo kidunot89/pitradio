@@ -183,14 +183,14 @@ def cmd_self_test() -> int:
     Deliberately does not construct a WhisperModel; that would download 250MB.
     Importing is enough to catch a missing or unloadable dependency.
     """
-    windows_only = {"winapi", "hook", "inject", "worker"}
+    windows_only = {"winapi", "hook", "inject", "worker", "joystick"}
     modules = [
         "tkinter", "tkinter.ttk",
         "numpy", "sounddevice", "PIL", "pystray",
         # The heavy native stack. faster_whisper pulls av in eagerly, and av's
         # extension modules import av.utils from inside compiled code.
         "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
-        "winapi", "hook", "inject", "worker",
+        "winapi", "hook", "inject", "worker", "joystick",
         "speech", "updater", "gui", "gui_settings", "tray",
     ]
 
@@ -288,6 +288,7 @@ def run(args) -> int:
 
     import gui
     import hook as hook_mod
+    import joystick as joystick_mod
     import keys
     import speech
     import updater
@@ -317,10 +318,10 @@ def run(args) -> int:
         )
 
     try:
-        trigger_vk = keys.parse_key(cfg.trigger_key)
+        trigger_mods, trigger_vk = keys.parse_trigger(cfg.trigger_key)
     except keys.KeyNameError as exc:
         log.error("%s; falling back to F13", exc)
-        trigger_vk = keys.VK["f13"]
+        trigger_mods, trigger_vk = [], keys.VK["f13"]
 
     # Level updates arrive with every audio block; throttled here so they can't
     # crowd out log lines in the GUI's event queue.
@@ -336,7 +337,12 @@ def run(args) -> int:
     transcriber = speech.Transcriber(paths.model_dir())
 
     events: queue.Queue[tuple[str, object]] = queue.Queue()
-    hook = hook_mod.KeyboardHook(trigger_vk, events, lambda: app_state.enabled)
+    hook = hook_mod.KeyboardHook(
+        trigger_vk, events, lambda: app_state.enabled, trigger_mods)
+    # A wheel button feeds the same queue, so the worker never learns which
+    # input fired -- and does not need to.
+    joystick = joystick_mod.JoystickWatcher(
+        events, lambda: app_state.enabled, cfg.joystick.device, cfg.joystick.button)
     worker = worker_mod.Worker(store, app_state, events, recorder, transcriber)
     worker.hook = hook
 
@@ -356,7 +362,8 @@ def run(args) -> int:
     app = gui.App(
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
-        transcriber=transcriber, hook=hook, use_tray=not args.no_tray,
+        transcriber=transcriber, hook=hook, joystick=joystick,
+        use_tray=not args.no_tray,
     )
 
     if checker is not None:
@@ -366,6 +373,7 @@ def run(args) -> int:
 
     worker.start()
     hook.start()
+    joystick.start()
     if not hook.wait_until_ready(5.0):
         log.error("the keyboard hook did not come up; the trigger key will do nothing")
 

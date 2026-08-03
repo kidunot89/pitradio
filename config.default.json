@@ -2,12 +2,17 @@
   "version": 1,
   "enabled": true,
   "trigger_key": "f13",
+  "joystick": {
+    "device": null,
+    "button": null
+  },
   "audio": {
     "input_device": null,
     "samplerate": 16000,
     "channels": 1,
     "min_clip_seconds": 0.3,
-    "max_clip_seconds": 30.0
+    "max_clip_seconds": 30.0,
+    "gain": 1.0
   },
   "whisper": {
     "model": "small.en",
@@ -39,9 +44,15 @@
     "auto_install": false
   },
   "default_profile": {
-    "pre_keys": ["enter"],
-    "post_keys": ["enter"],
-    "abort_keys": ["escape"],
+    "pre_keys": [
+      "enter"
+    ],
+    "post_keys": [
+      "enter"
+    ],
+    "abort_keys": [
+      "escape"
+    ],
     "pre_delay_ms": 350,
     "post_delay_ms": 80,
     "key_hold_ms": 40,
@@ -52,9 +63,15 @@
   },
   "profiles": {
     "le mans ultimate.exe": {
-      "pre_keys": ["enter"],
-      "post_keys": ["enter"],
-      "abort_keys": ["escape"],
+      "pre_keys": [
+        "enter"
+      ],
+      "post_keys": [
+        "enter"
+      ],
+      "abort_keys": [
+        "escape"
+      ],
       "pre_delay_ms": 350,
       "max_chars": 200
     }

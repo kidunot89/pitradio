@@ -56,7 +56,9 @@ The Status tab warns you if the app isn't elevated.
    once). The window shows the progress.
 2. Go to **Audio**, pick your microphone, and press **Record 4s and
    transcribe**. Nothing is typed anywhere — this just proves the mic and the
-   model work.
+   model work. If the level bar barely moves while you speak, raise
+   **Microphone gain**; the bar shows the signal after gain, which is what
+   Whisper actually receives.
 3. Sort out a trigger key — see below.
 4. Start your sim, hold the trigger, say something, release.
 
@@ -67,9 +69,17 @@ also do something in the game. Almost no keyboard has an F13 key: the intended
 route is to map a wheel button to F13 with **JoyToKey** (or your wheel's own
 software), after which PitRadio sees it as an ordinary keypress.
 
-If you just want to try it at a desk, change the trigger in **Settings** to a
-key you can actually press. `scrolllock` and `pause` are good choices — present
-on most keyboards, rarely bound by sims. The change applies immediately.
+You don't have to type key names. **Settings → Press a key…** binds whatever
+you press next, including combinations like `Ctrl+F12`, and the press is
+swallowed so binding Enter doesn't also do something behind the window.
+
+**Settings → Press a button…** binds a wheel or gamepad button directly, which
+removes the need for JoyToKey entirely. The key and the button work alongside
+each other — either one triggers. Button detection uses Windows' built-in
+joystick interface, which reports up to 32 buttons per device.
+
+To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
+choices: present on most keyboards, rarely bound by sims.
 
 Whatever you pick is **swallowed**: it never reaches the game, so don't use a
 key the sim needs.

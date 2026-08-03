@@ -91,9 +91,45 @@ def build_settings_tab(app) -> None:
 
     trigger = ttk.LabelFrame(frame, text="Trigger", padding=10)
     trigger.pack(fill="x")
+
     app.v_trigger = tk.StringVar(value=cfg.trigger_key)
-    _row(trigger, 0, "Trigger key", _entry(trigger, app.v_trigger),
-         "F13 is unbound in every sim; map a wheel button to it externally")
+    key_row = ttk.Frame(trigger)
+    _entry(key_row, app.v_trigger, 20).pack(side="left")
+    app.capture_key_button = ttk.Button(
+        key_row, text="Press a key…", command=lambda: _capture_key(app))
+    app.capture_key_button.pack(side="left", padx=6)
+    _row(trigger, 0, "Trigger key", key_row,
+         "hold it to talk; it never reaches the game")
+
+    # Holds a capture until Save, so cancelling out of Settings changes nothing.
+    app.captured_joystick = (cfg.joystick.device, cfg.joystick.button)
+    app.v_joystick = tk.StringVar(value=_joystick_label(app, cfg.joystick))
+    joy_row = ttk.Frame(trigger)
+    ttk.Label(joy_row, textvariable=app.v_joystick, foreground="#333",
+              width=34).pack(side="left")
+    app.capture_button_button = ttk.Button(
+        joy_row, text="Press a button…", command=lambda: _capture_button(app))
+    app.capture_button_button.pack(side="left", padx=6)
+    ttk.Button(joy_row, text="Clear", command=lambda: _clear_joystick(app)).pack(side="left")
+    _row(trigger, 1, "Wheel / gamepad button", joy_row,
+         "works alongside the key — either one triggers")
+
+    if app.joystick is None:
+        app.capture_button_button.state(["disabled"])
+        ttk.Label(
+            trigger,
+            text="Joystick input is unavailable in this run.",
+            foreground="#777",
+        ).grid(row=2, column=0, columnspan=3, sticky="w")
+    else:
+        found = app.joystick.list_devices()
+        summary = (
+            ", ".join(f"{name} ({count} buttons)" for _i, name, count in found)
+            if found else "no joysticks detected"
+        )
+        ttk.Label(trigger, text=f"Detected: {summary}", foreground="#777",
+                  wraplength=640, justify="left").grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
     defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
     defaults.pack(fill="x", pady=(10, 0))
@@ -134,6 +170,79 @@ def build_settings_tab(app) -> None:
 
     ttk.Button(frame, text="Save", command=lambda: _save_settings(app)).pack(
         anchor="e", pady=(12, 0))
+
+
+def _joystick_label(app, joystick_cfg) -> str:
+    if joystick_cfg.device is None or joystick_cfg.button is None:
+        return "(not bound)"
+    if app.joystick is None:
+        return f"device {joystick_cfg.device}, button {joystick_cfg.button}"
+    return app.joystick.describe(joystick_cfg.device, joystick_cfg.button)
+
+
+def _capture_key(app) -> None:
+    """Bind the next key pressed.
+
+    Capture runs through the low-level hook rather than a tkinter key binding,
+    for two reasons: the hook reports raw virtual-key codes, which map directly
+    onto the config's key names — including F13-F24, which no keyboard has and
+    tkinter reports inconsistently — and it swallows the press, so binding Enter
+    or Escape doesn't also actuate the window behind the prompt.
+    """
+    if app.hook is None:
+        messagebox.showinfo("PitRadio", "Key capture needs the keyboard hook, "
+                                        "which isn't running in this mode.")
+        return
+
+    app.capture_key_button.state(["disabled"])
+    app.capture_key_button.configure(text="Press any key…")
+
+    def done(modifiers, vk) -> None:
+        import keys
+
+        spec = keys.format_combo(modifiers, vk)
+
+        def apply() -> None:
+            app.v_trigger.set(spec)
+            app.capture_key_button.state(["!disabled"])
+            app.capture_key_button.configure(text="Press a key…")
+            log.info("captured trigger key: %s (save to apply)", spec)
+
+        app.root.after(0, apply)
+
+    app.hook.start_capture(done)
+
+
+def _capture_button(app) -> None:
+    """Bind the next wheel or gamepad button pressed."""
+    if app.joystick is None:
+        return
+
+    app.capture_button_button.state(["disabled"])
+    app.capture_button_button.configure(text="Press a button…")
+    app.v_joystick.set("waiting for a button…")
+
+    def done(device, button) -> None:
+        def apply() -> None:
+            app.captured_joystick = (device, button)
+            app.v_joystick.set(app.joystick.describe(device, button))
+            app.capture_button_button.state(["!disabled"])
+            app.capture_button_button.configure(text="Press a button…")
+            log.info("captured joystick device %d button %d (save to apply)",
+                     device, button)
+
+        app.root.after(0, apply)
+
+    app.joystick.start_capture(done)
+
+
+def _clear_joystick(app) -> None:
+    app.captured_joystick = (None, None)
+    app.v_joystick.set("(not bound)")
+    if app.joystick is not None:
+        app.joystick.cancel_capture()
+    app.capture_button_button.state(["!disabled"])
+    app.capture_button_button.configure(text="Press a button…")
 
 
 def _profile_vars(parent, profile) -> dict:
@@ -188,6 +297,10 @@ def _read_profile_vars(v: dict, profile) -> None:
 def _save_settings(app) -> None:
     cfg = app.store.config
     cfg.trigger_key = app.v_trigger.get().strip() or cfg.trigger_key
+
+    device, button = getattr(app, "captured_joystick", (None, None))
+    cfg.joystick.device, cfg.joystick.button = device, button
+
     _read_profile_vars(app.v_default, cfg.default_profile)
 
     cfg.cues.enabled = app.v_cues_enabled.get()
@@ -429,19 +542,37 @@ def build_audio_tab(app) -> None:
                          values=["(system default)"] + [label for _i, label in app.input_devices])
     _row(inputs, 0, "Input device", combo)
 
+    app.v_gain = tk.DoubleVar(value=cfg.audio.gain)
+    app.v_gain_label = tk.StringVar(value=_gain_text(cfg.audio.gain))
+    gain_row = ttk.Frame(inputs)
+    ttk.Scale(gain_row, from_=0.1, to=10.0, orient="horizontal", length=260,
+              variable=app.v_gain,
+              command=lambda _v: app.v_gain_label.set(_gain_text(app.v_gain.get()))
+              ).pack(side="left")
+    ttk.Label(gain_row, textvariable=app.v_gain_label, width=8).pack(side="left", padx=6)
+    ttk.Button(gain_row, text="Reset",
+               command=lambda: _reset_gain(app)).pack(side="left")
+    _row(inputs, 1, "Microphone gain", gain_row,
+         "raise if the level bar barely moves when you speak")
+
     app.level = ttk.Progressbar(inputs, maximum=100)
-    _row(inputs, 1, "Level", app.level)
+    _row(inputs, 2, "Level", app.level)
+    ttk.Label(inputs,
+              text="The level bar shows the signal after gain — what Whisper "
+                   "actually receives. Aim for it to peak around three quarters.",
+              foreground="#777", wraplength=640, justify="left").grid(
+        row=3, column=0, columnspan=3, sticky="w")
 
     app.v_test_result = tk.StringVar(value="")
     test_row = ttk.Frame(inputs)
-    test_row.grid(row=2, column=0, columnspan=3, sticky="we", pady=(8, 0))
+    test_row.grid(row=4, column=0, columnspan=3, sticky="we", pady=(8, 0))
     app.test_button = ttk.Button(test_row, text="Record 4s and transcribe",
                                  command=lambda: _run_mic_test(app))
     app.test_button.pack(side="left")
     ttk.Label(test_row, textvariable=app.v_test_result, foreground="#333",
               wraplength=560).pack(side="left", padx=10)
     ttk.Label(inputs, text="Nothing is typed anywhere during a test.",
-              foreground="#777").grid(row=3, column=0, columnspan=3, sticky="w")
+              foreground="#777").grid(row=5, column=0, columnspan=3, sticky="w")
 
     outputs = ttk.LabelFrame(frame, text="Cue output", padding=10)
     outputs.pack(fill="x", pady=(10, 0))
@@ -456,7 +587,7 @@ def build_audio_tab(app) -> None:
                    "end up in the recording.",
               foreground="#777").grid(row=1, column=0, columnspan=3, sticky="w")
     ttk.Button(outputs, text="Play test cue",
-               command=lambda: speech.play_cue(cfg.cues, cfg.cues.start_hz)).grid(
+               command=lambda: _play_test_cue(app)).grid(
         row=2, column=1, sticky="w", pady=(8, 0))
 
     ttk.Button(frame, text="Save", command=lambda: _save_audio(app)).pack(
@@ -479,11 +610,46 @@ def _device_from_label(devices, label: str):
     return None
 
 
+def _gain_text(value: float) -> str:
+    return f"{value:.1f}x"
+
+
+def _reset_gain(app) -> None:
+    app.v_gain.set(1.0)
+    app.v_gain_label.set(_gain_text(1.0))
+
+
 def _save_audio(app) -> None:
     cfg = app.store.config
+    cfg.audio.gain = min(10.0, max(0.1, round(float(app.v_gain.get()), 2)))
     cfg.audio.input_device = _device_from_label(app.input_devices, app.v_input.get())
     cfg.cues.output_device = _device_from_label(app.output_devices, app.v_output.get())
     app.save_config()
+
+
+def _play_test_cue(app) -> None:
+    """Play on what's selected right now, not what was saved.
+
+    Reading from a config object captured when the tab was built is wrong twice
+    over: it ignores an unsaved dropdown change, and save_config() replaces that
+    object via store.load(), so after the first save the test would play on
+    whatever device was configured at startup, forever.
+    """
+    import config as config_mod
+
+    saved = app.store.config.cues
+    cue = config_mod.CueConfig(
+        # A test button should make a sound even when cues are switched off;
+        # that is what the user is asking to hear.
+        enabled=True,
+        output_device=_device_from_label(app.output_devices, app.v_output.get()),
+        start_hz=_as_int(app.v_cue_start, saved.start_hz),
+        stop_hz=_as_int(app.v_cue_stop, saved.stop_hz),
+        duration_ms=_as_int(app.v_cue_ms, saved.duration_ms),
+        volume=min(1.0, max(0.0, _as_float(app.v_cue_vol, saved.volume))),
+    )
+    log.info("test cue on device %r", cue.output_device)
+    speech.play_cue(cue, cue.start_hz)
 
 
 def set_level(app, rms: float) -> None:

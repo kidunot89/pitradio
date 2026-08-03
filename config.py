@@ -51,12 +51,28 @@ class Profile:
 
 
 @dataclass
+class JoystickConfig:
+    """A wheel or gamepad button as an alternative trigger.
+
+    Works alongside the keyboard trigger rather than replacing it: either fires
+    the same cycle. Buttons are 1-based, matching how wheels label them.
+    """
+
+    device: Any = None      # joystick id, or null for "not bound"
+    button: Any = None      # 1-based button number
+
+
+@dataclass
 class AudioConfig:
     input_device: Any = None          # index, substring of the name, or null
     samplerate: int = 16000           # what Whisper wants; no resampling needed
     channels: int = 1
     min_clip_seconds: float = 0.3     # below this, don't even transcribe
     max_clip_seconds: float = 30.0
+    # Software gain applied to captured audio. Raising the Windows device level
+    # needs the Core Audio APIs; multiplying the samples achieves the same for
+    # Whisper's benefit and works whatever the driver exposes.
+    gain: float = 1.0
 
 
 @dataclass
@@ -101,6 +117,7 @@ class Config:
     version: int = CONFIG_VERSION
     enabled: bool = True
     trigger_key: str = "f13"
+    joystick: JoystickConfig = field(default_factory=JoystickConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     cues: CueConfig = field(default_factory=CueConfig)
@@ -118,6 +135,7 @@ class Config:
         cfg.enabled = bool(data.get("enabled", True))
         cfg.trigger_key = str(data.get("trigger_key", cfg.trigger_key))
 
+        cfg.joystick = _section(JoystickConfig, data.get("joystick"))
         cfg.audio = _section(AudioConfig, data.get("audio"))
         cfg.whisper = _section(WhisperConfig, data.get("whisper"))
         cfg.cues = _section(CueConfig, data.get("cues"))
@@ -141,6 +159,7 @@ class Config:
             "version": self.version,
             "enabled": self.enabled,
             "trigger_key": self.trigger_key,
+            "joystick": asdict(self.joystick),
             "audio": asdict(self.audio),
             "whisper": asdict(self.whisper),
             "cues": asdict(self.cues),
@@ -171,9 +190,18 @@ class Config:
         problems: list[str] = []
 
         try:
-            keys.parse_key(self.trigger_key)
+            keys.parse_trigger(self.trigger_key)
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
+
+        joystick_bound = self.joystick.device is not None or self.joystick.button is not None
+        if joystick_bound:
+            if not isinstance(self.joystick.device, int) or self.joystick.device < 0:
+                problems.append("joystick.device must be a device number, or null")
+            # 1-based to match the numbering printed on wheels; the legacy API
+            # this uses exposes at most 32.
+            if not isinstance(self.joystick.button, int) or not 1 <= self.joystick.button <= 32:
+                problems.append("joystick.button must be between 1 and 32, or null")
 
         if self.audio.samplerate != 16000:
             problems.append(
@@ -182,6 +210,8 @@ class Config:
             )
         if self.audio.channels != 1:
             problems.append(f"audio.channels must be 1, got {self.audio.channels}")
+        if not 0.1 <= self.audio.gain <= 10.0:
+            problems.append("audio.gain must be between 0.1 and 10.0")
         if self.audio.min_clip_seconds < 0:
             problems.append("audio.min_clip_seconds must be >= 0")
         if self.audio.max_clip_seconds <= self.audio.min_clip_seconds:

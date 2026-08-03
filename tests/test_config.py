@@ -87,8 +87,13 @@ def _problems(mutate) -> list[str]:
     return config.Config.from_dict(raw).validate()
 
 
-def test_trigger_key_with_modifier_is_rejected():
-    problems = _problems(lambda r: r.update(trigger_key="ctrl+f13"))
+def test_trigger_key_may_have_modifiers():
+    """ctrl+f12 is a legitimate trigger; the hook checks modifier state itself."""
+    assert _problems(lambda r: r.update(trigger_key="ctrl+f12")) == []
+
+
+def test_unknown_trigger_key_is_still_rejected():
+    problems = _problems(lambda r: r.update(trigger_key="ctrl+nonsense"))
     assert any("trigger_key" in p for p in problems)
 
 
