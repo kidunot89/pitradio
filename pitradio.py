@@ -17,6 +17,7 @@ winapi is imported lazily rather than at module scope, so `--check-config` and
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import logging.handlers
 import queue
@@ -30,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 log = logging.getLogger("pitradio")
 
@@ -140,6 +141,65 @@ def cmd_check_config() -> int:
         return 1
 
     out("\nno problems found")
+    return 0
+
+
+def cmd_self_test() -> int:
+    """Import every module the running app needs, and open a real window.
+
+    This exists because `--check-config` and `--list-devices` both return before
+    touching tkinter, the keyboard hook or the speech stack — so a packaged
+    build could pass both and still be unable to transcribe a single word. That
+    is not hypothetical: v0.1.0 shipped missing `av.utils`, and neither of those
+    commands would ever have noticed.
+
+    Deliberately does not construct a WhisperModel; that would download 250MB.
+    Importing is enough to catch a missing or unloadable dependency.
+    """
+    windows_only = {"winapi", "hook", "inject", "worker"}
+    modules = [
+        "tkinter", "tkinter.ttk",
+        "numpy", "sounddevice", "PIL", "pystray",
+        # The heavy native stack. faster_whisper pulls av in eagerly, and av's
+        # extension modules import av.utils from inside compiled code.
+        "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
+        "winapi", "hook", "inject", "worker",
+        "speech", "updater", "gui", "gui_settings", "tray",
+    ]
+
+    failures: list[tuple[str, str]] = []
+    for name in modules:
+        if name in windows_only and sys.platform != "win32":
+            out(f"  skip    {name} (Windows only)")
+            continue
+        try:
+            importlib.import_module(name)
+            out(f"  ok      {name}")
+        except Exception as exc:
+            failures.append((name, f"{type(exc).__name__}: {exc}"))
+            out(f"  FAILED  {name}: {type(exc).__name__}: {exc}")
+
+    # Tk initialising is a separate risk from tkinter importing: the Tcl runtime
+    # data has to be bundled too, and its absence only shows at window creation.
+    try:
+        import tkinter
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.update()
+        root.destroy()
+        out("  ok      tkinter window creation")
+    except Exception as exc:
+        failures.append(("tkinter window", f"{type(exc).__name__}: {exc}"))
+        out(f"  FAILED  tkinter window: {exc}")
+
+    if failures:
+        out(f"\n{len(failures)} component(s) failed:")
+        for name, detail in failures:
+            out(f"  - {name}: {detail}")
+        return 1
+
+    out("\nall components loaded")
     return 0
 
 
@@ -324,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="validate config.json and resolve every key name, then exit")
     parser.add_argument("--list-devices", action="store_true",
                         help="list audio devices and exit")
+    parser.add_argument("--self-test", action="store_true",
+                        help="load every component and exit; verifies a packaged build")
     parser.add_argument("--gui-only", action="store_true",
                         help="open the window with no hook, audio or model (layout preview)")
     parser.add_argument("--no-tray", action="store_true",
@@ -341,6 +403,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_devices:
         setup_logging(None, args.verbose)
         return cmd_list_devices()
+
+    if args.self_test:
+        setup_logging(None, args.verbose)
+        return cmd_self_test()
 
     if args.gui_only:
         return run_gui_only()

@@ -22,6 +22,7 @@ python pitradio.py                   # run the app (Windows, as administrator)
 python pitradio.py --check-config    # validate config, resolve every key name
 python pitradio.py --list-devices    # audio devices
 python pitradio.py --gui-only        # window with no hook/audio/model
+python pitradio.py --self-test       # import every component + open a Tk window
 pytest -q                             # test suite (runs on any platform)
 pytest tests/test_updater.py -q       # one file
 pytest -q -k checksum                 # one case
@@ -40,9 +41,15 @@ check that nothing Windows-only has leaked into a portable module.
 
 Not covered by pytest, and deliberately so: the hook, injection, the worker
 cycle, and the GUI. Those need either Windows or a display. `--gui-only`
-launches the real window against a stubbed backend for the GUI, and CI runs the
-*built binary's* `--check-config` and `--list-devices` on a Windows runner,
-which is the only way the native-dependency bundling gets verified at all.
+launches the real window against a stubbed backend for the GUI.
+
+CI runs the *built binary's* `--check-config`, `--list-devices` and
+`--self-test` on a Windows runner. **`--self-test` is the one that matters** —
+the other two return before importing tkinter, the hook or the speech stack, so
+they pass happily on a build that cannot transcribe a word. v0.1.0 shipped
+exactly that way, missing `av.utils`. When you add a runtime dependency, add it
+to the list in `cmd_self_test` or packaging will not notice when it goes
+missing.
 
 When adding tests, keep them importable without `winapi` — a test that needs
 Windows can't run in the place most of this gets developed.
@@ -139,6 +146,13 @@ minutes per attempt:
 - **`av` (PyAV, with FFmpeg) is imported eagerly by `faster_whisper`** and
   cannot be excluded, even though we hand Whisper a numpy array and never use
   its file-decoding path. It's most of the build time and the dist size.
+- **`av` needs an explicit `--include-package`.** Each `av` submodule ships as a
+  prebuilt extension with a `.py` typing stub beside it. Nuitka uses the
+  extension, and imports made *from inside* one are invisible to static
+  analysis — so following imports alone silently drops `av.utils`, and the app
+  dies with `No module named 'av.utils'` the first time it loads Whisper. This
+  shipped in v0.1.0. The `Nuitka-Inclusion: Should decide --prefer-source-code`
+  lines in the build log are this mechanism announcing itself.
 - **`onnxruntime` is imported lazily** by the VAD, which `vad_filter: true`
   enables by default. Nuitka can't discover it by following code, which is why
   the explicit `--include-package` is load-bearing.

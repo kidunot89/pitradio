@@ -181,6 +181,7 @@ Useful flags:
 python pitradio.py --check-config    # validate config.json, resolve every key name
 python pitradio.py --list-devices    # audio devices, for picking a mic
 python pitradio.py --gui-only        # open the window with no hook, audio or model
+python pitradio.py --self-test       # load every component; verifies a packaged build
 python pitradio.py --no-update-check # never contact GitHub
 ```
 

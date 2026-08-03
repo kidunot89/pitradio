@@ -72,6 +72,14 @@ jobs:
                  -ArgumentList '--check-config' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "built binary failed --check-config (exit $($p.ExitCode))" }
 
+      # Gates the release on every component actually loading. Without this,
+      # v0.1.0 published a build that could not transcribe at all.
+      - name: Load every component before publishing
+        run: |
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed; refusing to publish (exit $($p.ExitCode))" }
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 

@@ -89,6 +89,16 @@ jobs:
                  -ArgumentList '--list-devices' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "audio stack did not load (exit $($p.ExitCode))" }
 
+      # --check-config and --list-devices both return before importing tkinter,
+      # the hook or the speech stack, so a build can pass both and still be
+      # unable to transcribe. v0.1.0 shipped that way, missing av.utils. This
+      # loads every component and opens a real Tk window.
+      - name: Load every component in the built binary
+        run: |
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
+
       - uses: actions/upload-artifact@v4
         with:
           name: pitradio-dist

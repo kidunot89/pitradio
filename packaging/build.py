@@ -83,6 +83,14 @@ def build() -> int:
         "--include-package-data=faster_whisper",
         "--include-package=ctranslate2",
         "--include-package-data=ctranslate2",
+        # av (PyAV) ships each submodule as a prebuilt extension with a .py
+        # typing stub beside it. Nuitka uses the extension, and imports made
+        # from inside one are invisible to static analysis — so following
+        # imports alone silently misses av.utils and the app dies with
+        # "No module named 'av.utils'" the first time it loads Whisper.
+        # Including the whole package is the only reliable fix.
+        "--include-package=av",
+        "--include-package-data=av",
         # sounddevice is a single module, not a package — --include-package
         # is a fatal error for it. Its PortAudio DLL lives in the separate
         # _sounddevice_data package, added below.
