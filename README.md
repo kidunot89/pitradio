@@ -289,7 +289,15 @@ pip install nuitka
 python packaging/build.py
 ```
 
-Then compile `packaging/pitradio.iss` with Inno Setup. CI does both on every
+Then verify the result before trusting it:
+
+```bash
+.\build\pitradio.dist\pitradio.exe --self-test
+```
+
+That loads every component and opens a window, which is what catches a
+dependency that failed to bundle. Then compile `packaging/pitradio.iss` with
+Inno Setup. CI does both on every
 tagged release, and builds on every push so that a broken native dependency
 shows up there rather than on someone's rig.
 

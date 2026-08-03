@@ -94,6 +94,25 @@ def av_extension_modules() -> list[str]:
     return sorted(names)
 
 
+def sdl2_library() -> Path | None:
+    """The SDL2 binary inside the sdl2dll package, if it is installed.
+
+    Shipped to the dist root rather than left inside the package: relying on
+    --include-package-data put it somewhere sdlinput could not find at runtime,
+    and the built binary reported "SDL2 library not found". Beside the exe it
+    is both on the DLL search path and where sdlinput looks first.
+    """
+    try:
+        import sdl2dll
+    except ImportError:
+        return None
+
+    root = Path(sdl2dll.get_dllpath())
+    for candidate in sorted(root.rglob("SDL2.dll")):
+        return candidate
+    return None
+
+
 def nuitka_args(version: str) -> list[str]:
     """The full Nuitka command line.
 
@@ -129,10 +148,6 @@ def nuitka_args(version: str) -> list[str]:
         "--include-module=sounddevice",
         "--include-package=pystray",
         "--include-package=PIL",
-        # SDL2 ships as a DLL inside sdl2dll. sdlinput loads it by path at
-        # runtime, so it is data rather than an import Nuitka can follow.
-        "--include-package=sdl2dll",
-        "--include-package-data=sdl2dll",
         # Plugins are registered statically in plugins/__init__.py, so
         # Nuitka can follow them -- but naming the package guarantees a
         # new sim module is bundled even before anything imports it.
@@ -152,6 +167,10 @@ def nuitka_args(version: str) -> list[str]:
 
     for name in av_extension_modules():
         args.insert(-1, f"--include-module={name}")
+
+    sdl2 = sdl2_library()
+    if sdl2 is not None:
+        args.insert(-1, f"--include-data-files={sdl2}=SDL2.dll")
 
     # PortAudio's DLL lives in a separate data package on Windows wheels.
     if _have("_sounddevice_data"):

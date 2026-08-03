@@ -45,6 +45,13 @@ MAX_BUTTONS = 32  # matches the config's range; wheels rarely expose more
 def _candidate_paths() -> list[Path]:
     """Where SDL2 might be, most specific first."""
     candidates: list[Path] = []
+
+    # Beside the executable: where packaging/build.py places it. Checked first
+    # because a compiled sdl2dll's __file__ does not reliably point at a real
+    # directory, which is how a build shipped with SDL2 unloadable.
+    if sys.platform == "win32":
+        candidates.append(Path(sys.executable).parent / "SDL2.dll")
+
     try:
         import sdl2dll
 
@@ -59,9 +66,6 @@ def _candidate_paths() -> list[Path]:
     except Exception as exc:
         log.debug("sdl2dll unavailable: %s", exc)
 
-    # Beside the executable, and then whatever the loader can find.
-    if sys.platform == "win32":
-        candidates.append(Path(sys.executable).parent / "SDL2.dll")
     return candidates
 
 

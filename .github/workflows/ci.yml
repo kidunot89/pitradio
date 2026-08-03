@@ -41,6 +41,8 @@ jobs:
 
   build:
     name: Windows build smoke test
+    # Don't spend 40 minutes compiling for a commit whose tests already fail.
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

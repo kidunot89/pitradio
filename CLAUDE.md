@@ -163,6 +163,30 @@ produces a bug with no error message.
   when F12 arrives. Only the main key is swallowed; swallowing Ctrl would break
   it system-wide.
 
+## Build locally before pushing
+
+A Windows CI build is ~13 minutes warm and ~40 cold, so discovering a packaging
+mistake there is expensive. Several have been found that way and every one was
+reproducible in minutes on a Windows machine:
+
+```bash
+python packaging/build.py
+.\build\pitradio.dist\pitradio.exe --self-test
+```
+
+`--self-test` is the check that matters: it loads every component, opens a real
+window, and verifies SDL2 actually loads. It has caught a missing `av.utils`, a
+missing `SDL2.dll` and a GUI that could not construct.
+
+Also run it **with no console** — `Start-Process` without `-NoNewWindow` — which
+is how a Start Menu shortcut launches it and is not the same code path.
+
+What *is* checkable without building, and should be kept that way: every
+`--include-package` name resolving, every `--include-data-files` source
+existing, and the vendored modules being importable through the build's own
+PYTHONPATH. See [tests/test_build_flags.py](tests/test_build_flags.py) — each of
+those pins a mistake that previously cost a full build.
+
 ## Packaging
 
 Nuitka `--standalone` (never `--onefile`: the extract-to-temp pattern is a large

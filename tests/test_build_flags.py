@@ -195,3 +195,43 @@ def test_every_included_package_is_importable(args):
         f"the build asks Nuitka to include {unavailable}, which cannot be "
         f"imported even with its PYTHONPATH. That is a fatal build error."
     )
+
+
+def test_every_data_file_source_exists(args):
+    """--include-data-files pointing at a missing file fails the build.
+
+    Cheap to check here; otherwise it costs a full Windows build to find out.
+    """
+    from pathlib import Path
+
+    missing = []
+    for arg in args:
+        if not arg.startswith("--include-data-files="):
+            continue
+        source = arg.split("=", 1)[1].rsplit("=", 1)[0]
+        if not Path(source).exists():
+            missing.append(source)
+
+    assert not missing, f"the build references files that do not exist: {missing}"
+
+
+def test_sdl2_is_shipped_when_available():
+    """SDL2 must land beside the exe, not inside the package.
+
+    Relying on --include-package-data put it where sdlinput could not find it
+    at runtime, and the built binary reported "SDL2 library not found" — which
+    only showed up after a full build.
+    """
+    import sys
+
+    library = build.sdl2_library()
+    if sys.platform != "win32":
+        # macOS ships a framework rather than SDL2.dll, so there is nothing to
+        # assert here beyond the lookup not raising.
+        return
+
+    assert library is not None, "sdl2dll is installed but SDL2.dll was not found"
+    assert any(
+        arg.startswith("--include-data-files=") and arg.endswith("=SDL2.dll")
+        for arg in build.nuitka_args("0.0.0")
+    ), "SDL2.dll must be shipped to the dist root"
