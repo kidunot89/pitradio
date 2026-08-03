@@ -141,6 +141,107 @@ between a tap and a hold.
 
 ---
 
+## Using PitRadio
+
+> **Screenshots** are generated from the running app by
+> `python packaging/screenshots.py`, cropped to the control being described.
+> Run it on Windows to refresh them after a UI change.
+
+### The Status tab — is it actually listening?
+
+![Status](docs/images/status.png)
+
+Everything you need to answer "why did nothing happen?" is here.
+
+- **Listening for** — what the hook is armed with *right now*, read from the
+  hook rather than from the config file. A key you saved but that never applied
+  shows up here as the old one.
+- **Last trigger** — stamped the moment the key is detected, before any audio
+  or transcription work. If this updates and nothing else does, PitRadio saw
+  your key and the problem is downstream. If it doesn't update, the key never
+  reached it.
+- **Focused app** — the executable name, which is the profile key. This is how
+  you add a sim.
+
+Below it, the live log:
+
+![Log](docs/images/log.png)
+
+`pre-keys sent` means the chat box was asked to open. `transcribed` shows what
+Whisper heard, before any mention matching. `sent N chars` closes the cycle.
+
+### Settings → Trigger
+
+![Trigger](docs/images/trigger.png)
+
+Four bindings, each taking a key and/or a controller button. They work
+alongside each other — either fires.
+
+| Binding | What it does |
+| --- | --- |
+| **Trigger key** | hold to talk; swallowed, so it never reaches the game |
+| **Wheel / gamepad button** | the same, from a controller |
+| **Send waiting message** | sends a message left in the chat box |
+| **Clear waiting message** | discards it |
+
+**Press a key…** binds whatever you press next, including `Ctrl+F12`, and
+swallows it — so binding Enter doesn't also actuate whatever is behind the
+window. **Press a button…** waits five seconds for a *press*, which is what
+lets you bind a button on a rim covered in latched switches.
+
+The controller list underneath names the API each device was found through.
+That is the first thing to look at when a controller misbehaves — a device seen
+only by XInput has no stable identity, and one missing from all four backends
+is a driver or Steam problem rather than anything PitRadio can fix.
+
+### Settings → Appearance
+
+![Appearance](docs/images/appearance.png)
+
+Light, dark, or follow the desktop. Applies on the next start.
+
+### Profiles — one per sim
+
+![Profiles](docs/images/profiles.png)
+
+The setting that matters most is **Chat open delay**: the chat box needs a few
+frames to open and take focus, and typing too early loses the opening
+characters. Start at 350ms and raise it if messages arrive truncated.
+
+**Send automatically** is off if you want to read a message before it goes out
+— see [Checking a message before it goes out](#checking-a-message-before-it-goes-out).
+
+**Session plugin** reads who is in the session so names transcribe correctly
+and become mentions. Leave it on *automatic* unless you have a reason.
+
+### Language
+
+![Language](docs/images/language.png)
+
+PitRadio picks your desktop's language the first time it runs. Whisper has no
+per-language models — the `.en` builds are English-only and the rest are
+multilingual — so choosing a language and a size here derives the model for
+you. Changing it downloads the new model on save.
+
+### Audio
+
+![Audio](docs/images/audio.png)
+
+Pick the microphone, then **Record 4s and transcribe**. Nothing is typed
+anywhere; it only proves the mic and the model work. If the level bar barely
+moves while you speak, raise **Microphone gain** — the bar shows the signal
+*after* gain, which is what Whisper actually receives.
+
+### History
+
+![History](docs/images/history.png)
+
+Every message, with what was heard and what was typed. **Re-send** retypes one
+after a three-second countdown, which is there so you can focus the game first
+— without it the message goes into PitRadio's own window.
+
+---
+
 ## Adding your sim
 
 Profiles are keyed on the game's executable name, and PitRadio tells you what
@@ -336,6 +437,19 @@ Turn the check off entirely with `--no-update-check`, or in
 - Transcription history is kept in memory only, and goes away when you quit.
 - The keyboard hook only acts on the configured trigger key. Every other key is
   passed straight through untouched.
+
+---
+
+## Contributing
+
+Profiles for sims other than Le Mans Ultimate are the most useful thing anyone
+can send — the Status tab shows the executable name, and an issue with that and
+your sim's chat keys is a complete contribution.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to get set up and what review asks
+- [DEVELOPING.md](DEVELOPING.md) — task-shaped recipes: add a sim plugin, a
+  config option, a settings field, a controller backend. Written test-first,
+  because almost everything in this app fails silently.
 
 ---
 

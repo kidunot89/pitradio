@@ -218,6 +218,8 @@ def build_settings_tab(app) -> None:
 
     trigger = ttk.LabelFrame(frame, text="Trigger", padding=10)
     trigger.pack(fill="x")
+    # Named so packaging/screenshots.py can crop to it.
+    app.trigger_frame = trigger
 
     app.v_trigger = tk.StringVar(value=cfg.trigger_key)
     key_row = ttk.Frame(trigger)
@@ -291,6 +293,7 @@ def build_settings_tab(app) -> None:
 
     appearance = ttk.LabelFrame(frame, text="Appearance", padding=10)
     appearance.pack(fill="x", pady=(10, 0))
+    app.appearance_frame = appearance
     app.v_theme = tk.StringVar(value=_theme_label(cfg.gui.theme))
     _row(appearance, 0, "Theme",
          ttk.Combobox(appearance, textvariable=app.v_theme, width=18,

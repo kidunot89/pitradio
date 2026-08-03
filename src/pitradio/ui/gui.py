@@ -120,14 +120,14 @@ class App:
         self.header.pack(fill="x")
 
         ttk.Label(self.header, textvariable=self.status_var,
-                  font=("Segoe UI", 16, "bold")).pack(side="left")
+                  style="Status.TLabel").pack(side="left")
         ttk.Checkbutton(self.header, text="Enabled", variable=self.enabled_var,
                         command=lambda: self.set_enabled(self.enabled_var.get())
                         ).pack(side="right")
 
         self.warning_var = tk.StringVar(value="")
         self.warning_label = ttk.Label(
-            self.root, textvariable=self.warning_var, foreground="#b34700",
+            self.root, textvariable=self.warning_var, style="Warn.TLabel",
             wraplength=900, justify="left", padding=(12, 0, 12, 6),
         )
 
@@ -158,6 +158,8 @@ class App:
 
         grid = ttk.Frame(frame)
         grid.pack(fill="x")
+        # Named so packaging/screenshots.py can crop to it.
+        self.status_frame = grid
         for row, (label, var) in enumerate(
             (("Listening for", self.armed_var),
              ("Last trigger", self.last_trigger_var),
