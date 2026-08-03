@@ -41,8 +41,15 @@ from winapi import (
 
 log = logging.getLogger(__name__)
 
-TRIGGER_DOWN = "down"
-TRIGGER_UP = "up"
+# Re-exported from state so the GUI can name them without importing winapi.
+# Actions are momentary: one event on press, none on release, so the worker
+# never has to pair them up.
+from state import (  # noqa: E402,F401  (re-exported for callers)
+    TRIGGER_CLEAR,
+    TRIGGER_DOWN,
+    TRIGGER_SEND,
+    TRIGGER_UP,
+)
 
 
 class KeyboardHook(threading.Thread):
@@ -61,6 +68,10 @@ class KeyboardHook(threading.Thread):
         self._events = events
         self._is_enabled = is_enabled
         self._pressed = False
+        # kind -> (vk, modifiers) for the momentary send/clear keys, and
+        # which of them are currently held so auto-repeat fires once.
+        self._actions: dict[str, tuple[int, list[int]]] = {}
+        self._action_held: set[str] = set()
         # Set while the GUI is asking the user to press a key. The callback
         # reports what was pressed and swallows it, so binding Enter or Escape
         # doesn't also actuate whatever is behind the dialog.
@@ -94,6 +105,18 @@ class KeyboardHook(threading.Thread):
 
     def cancel_capture(self) -> None:
         self._capture = None
+
+    def set_actions(self, actions: dict[str, tuple[int, list[int]]]) -> None:
+        """Bind the momentary keys, replacing whatever was bound before.
+
+        Applied on save like the trigger is, not left to the worker's next
+        reload: these exist to act on a message that is waiting *now*.
+        """
+        self._actions = {
+            kind: (vk, [keys.generic_modifier(m) for m in mods])
+            for kind, (vk, mods) in actions.items()
+        }
+        self._action_held.clear()
 
     def set_trigger(self, trigger_vk: int, modifiers: list[int] | None = None) -> None:
         """Config hot-reload can change the trigger key mid-session."""
@@ -165,7 +188,17 @@ class KeyboardHook(threading.Thread):
         if self._capture is not None:
             return self._handle_capture(info, n_code, w_param, l_param)
 
-        if info.vkCode != self._trigger_vk or not self._is_enabled():
+        if not self._is_enabled():
+            return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+        # Checked before the trigger so that binding the same key to both is a
+        # visible config mistake rather than one silently shadowing the other.
+        for kind, (vk, modifiers) in self._actions.items():
+            if info.vkCode == vk:
+                return self._handle_action(
+                    kind, modifiers, n_code, w_param, l_param)
+
+        if info.vkCode != self._trigger_vk:
             return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
         # A low-level hook reports one key at a time and never a combination,
@@ -190,6 +223,22 @@ class KeyboardHook(threading.Thread):
         # repeats into a single event.
         return 1  # the game must never see the trigger key
 
+    def _handle_action(self, kind, modifiers, n_code, w_param, l_param):
+        """A momentary key: one event on press, nothing on release."""
+        if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+            if kind in self._action_held:
+                return 1  # auto-repeat, already reported
+            if not self._modifiers_held(modifiers):
+                return user32.CallNextHookEx(None, n_code, w_param, l_param)
+            self._action_held.add(kind)
+            self._post(kind)
+            return 1
+        if w_param in (WM_KEYUP, WM_SYSKEYUP) and kind in self._action_held:
+            self._action_held.discard(kind)
+            return 1
+        # A press we never claimed — pass it through untouched.
+        return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
     def _is_modifier_down(self, generic: int) -> bool:
         """Either source of truth will do.
 
@@ -199,8 +248,9 @@ class KeyboardHook(threading.Thread):
         """
         return generic in self._held_modifiers or winapi.is_key_down(generic)
 
-    def _modifiers_held(self) -> bool:
-        return all(self._is_modifier_down(mod) for mod in self._modifiers)
+    def _modifiers_held(self, modifiers: list[int] | None = None) -> bool:
+        wanted = self._modifiers if modifiers is None else modifiers
+        return all(self._is_modifier_down(mod) for mod in wanted)
 
     def _handle_capture(self, info, n_code, w_param, l_param):
         """Report the pressed key to the GUI and swallow it."""

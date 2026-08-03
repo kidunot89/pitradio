@@ -99,6 +99,12 @@ class ReviewConfig:
 
     tap_ms: int = 300
     double_tap_ms: int = 350
+    # Dedicated bindings, as an alternative to the gestures. Gestures cost
+    # nothing to bind but make you count taps; a wheel with buttons to spare is
+    # better served by one button per action. Both work at once — neither
+    # disables the other. Empty means unbound.
+    send_key: str = ""
+    clear_key: str = ""
 
 
 @dataclass
@@ -185,6 +191,11 @@ class Config:
     enabled: bool = True
     trigger_key: str = "f13"
     joystick: JoystickConfig = field(default_factory=JoystickConfig)
+    # Wheel/gamepad equivalents of review.send_key and review.clear_key.
+    # Top level rather than nested in ReviewConfig so every controller
+    # binding has the same shape and the GUI can treat them alike.
+    send_joystick: JoystickConfig = field(default_factory=JoystickConfig)
+    clear_joystick: JoystickConfig = field(default_factory=JoystickConfig)
     review: ReviewConfig = field(default_factory=ReviewConfig)
     mentions: MentionConfig = field(default_factory=MentionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -205,6 +216,8 @@ class Config:
         cfg.trigger_key = str(data.get("trigger_key", cfg.trigger_key))
 
         cfg.joystick = _section(JoystickConfig, data.get("joystick"))
+        cfg.send_joystick = _section(JoystickConfig, data.get("send_joystick"))
+        cfg.clear_joystick = _section(JoystickConfig, data.get("clear_joystick"))
         cfg.review = _section(ReviewConfig, data.get("review"))
         cfg.mentions = _section(MentionConfig, data.get("mentions"))
         cfg.audio = _section(AudioConfig, data.get("audio"))
@@ -231,6 +244,8 @@ class Config:
             "enabled": self.enabled,
             "trigger_key": self.trigger_key,
             "joystick": asdict(self.joystick),
+            "send_joystick": asdict(self.send_joystick),
+            "clear_joystick": asdict(self.clear_joystick),
             "review": asdict(self.review),
             "mentions": asdict(self.mentions),
             "audio": asdict(self.audio),
@@ -267,24 +282,24 @@ class Config:
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
 
-        joystick_bound = (
-            self.joystick.device is not None
-            or self.joystick.button is not None
-            or self.joystick.guid is not None
-        )
-        if joystick_bound:
-            # An identity is enough on its own: the index is only consulted when
-            # no identity was recorded, so a binding may legitimately omit it.
-            if self.joystick.guid is None and (
-                not isinstance(self.joystick.device, int) or self.joystick.device < 0
-            ):
-                problems.append("joystick.device must be a device number, or null")
-            if self.joystick.guid is not None and not isinstance(self.joystick.guid, str):
-                problems.append("joystick.guid must be a device identity string, or null")
-            # 1-based to match the numbering printed on wheels. The ceiling
-            # covers button boxes and the POV hats folded in above them.
-            if not isinstance(self.joystick.button, int) or not 1 <= self.joystick.button <= 128:
-                problems.append("joystick.button must be between 1 and 128, or null")
+        for label, binding in (
+            ("joystick", self.joystick),
+            ("send_joystick", self.send_joystick),
+            ("clear_joystick", self.clear_joystick),
+        ):
+            problems.extend(_joystick_problems(label, binding))
+
+        # Optional, so an empty string is "unbound" rather than a bad name.
+        for label, spec in (
+            ("review.send_key", self.review.send_key),
+            ("review.clear_key", self.review.clear_key),
+        ):
+            if not spec:
+                continue
+            try:
+                keys.parse_trigger(spec)
+            except keys.KeyNameError as exc:
+                problems.append(f"{label}: {exc}")
 
         if not isinstance(self.review.tap_ms, int) or not 0 <= self.review.tap_ms <= 2000:
             problems.append("review.tap_ms must be between 0 and 2000")
@@ -404,6 +419,38 @@ def _section(cls, raw: Any):
     known = {f.name for f in fields(cls)}
     values = {k: v for k, v in (raw or {}).items() if k in known}
     return cls(**values)
+
+
+def _joystick_problems(label: str, binding: JoystickConfig) -> list[str]:
+    """Everything wrong with one controller binding.
+
+    Shared by the talk trigger and the send/clear bindings — three copies of
+    these rules would drift, and a binding that validates differently from the
+    one beside it is the kind of thing nobody notices until it silently stops
+    working.
+    """
+    bound = (
+        binding.device is not None
+        or binding.button is not None
+        or binding.guid is not None
+    )
+    if not bound:
+        return []
+
+    problems = []
+    # An identity is enough on its own: the index is only consulted when no
+    # identity was recorded, so a binding may legitimately omit it.
+    if binding.guid is None and (
+        not isinstance(binding.device, int) or binding.device < 0
+    ):
+        problems.append(f"{label}.device must be a device number, or null")
+    if binding.guid is not None and not isinstance(binding.guid, str):
+        problems.append(f"{label}.guid must be a device identity string, or null")
+    # 1-based to match the numbering printed on wheels. The ceiling covers
+    # button boxes and the POV hats folded in above them.
+    if not isinstance(binding.button, int) or not 1 <= binding.button <= 128:
+        problems.append(f"{label}.button must be between 1 and 128, or null")
+    return problems
 
 
 # -- persistence ---------------------------------------------------------

@@ -45,8 +45,14 @@ log = logging.getLogger(__name__)
 _sdl = sdlinput.SdlJoysticks()
 _use_sdl: bool | None = None
 
-TRIGGER_DOWN = "down"
-TRIGGER_UP = "up"
+# Re-exported from state so every producer of these events agrees on the
+# strings. Actions are momentary: one event on press, none on release.
+from state import (  # noqa: E402,F401  (re-exported for callers)
+    TRIGGER_CLEAR,
+    TRIGGER_DOWN,
+    TRIGGER_SEND,
+    TRIGGER_UP,
+)
 
 POLL_SECONDS = 0.012
 MAX_DEVICES = 16
@@ -196,7 +202,13 @@ class JoystickWatcher(threading.Thread):
         self._device = device
         self._button = button
         self._guid = guid or ""
-        self._resolved: int | None = None
+        # guid -> the index it currently occupies. Re-enumerating on every
+        # poll would be wasteful with three bindings to resolve.
+        self._resolved: dict[str, int] = {}
+        # kind -> (guid, device, button) for the momentary send/clear
+        # bindings, and whether each is currently held.
+        self._actions: dict[str, tuple[str, int | None, int]] = {}
+        self._action_held: dict[str, bool] = {}
         self._pressed = False
         self._capture: Callable[[Device, int], None] | None = None
         self._baseline: dict[str, int] | None = None
@@ -225,9 +237,15 @@ class JoystickWatcher(threading.Thread):
     ) -> None:
         self._device, self._button = device, button
         self._guid = guid or ""
-        self._resolved = None
+        self._resolved.clear()
         self._pressed = False
         self._missing_logged = False
+
+    def set_actions(self, actions: dict[str, tuple[str, int | None, int]]) -> None:
+        """Bind the momentary buttons: kind -> (guid, device index, button)."""
+        self._actions = dict(actions)
+        self._action_held.clear()
+        self._resolved.clear()
 
     def start_capture(self, on_captured: Callable[[Device, int], None]) -> None:
         """Report the next button *pressed* on any device.
@@ -254,31 +272,51 @@ class JoystickWatcher(threading.Thread):
             try:
                 if self._capture is not None:
                     self._poll_capture()
-                elif self._button is not None:
-                    self._poll_binding()
+                else:
+                    if self._button is not None:
+                        self._poll_binding()
+                    if self._actions:
+                        self._poll_actions()
             except Exception:
                 # A disconnected wheel must not take the thread down; the
                 # trigger would then be silently dead until a restart.
                 log.exception("joystick poll failed")
             self._stop.wait(POLL_SECONDS)
 
-    def _resolve_index(self) -> int | None:
-        """Where the bound device currently sits, or None if it is not attached."""
-        if not self._guid:
-            return self._device
+    def _index_for(self, guid: str, fallback: int | None) -> int | None:
+        """Where a bound device currently sits, or None if it is not attached."""
+        if not guid:
+            return fallback
 
-        # Re-enumerating every poll would be wasteful, so trust the last answer
-        # for as long as that index still holds the same device.
-        if self._resolved is not None and _guid(self._resolved) == self._guid:
-            return self._resolved
+        # Trust the last answer for as long as that index still holds the same
+        # device; re-enumerating on every poll would be wasteful.
+        cached = self._resolved.get(guid)
+        if cached is not None and _guid(cached) == guid:
+            return cached
 
         for device in devices():
-            if device.guid == self._guid:
-                self._resolved = device.index
+            if device.guid == guid:
+                self._resolved[guid] = device.index
                 return device.index
 
-        self._resolved = None
+        self._resolved.pop(guid, None)
         return None
+
+    def _resolve_index(self) -> int | None:
+        return self._index_for(self._guid, self._device)
+
+    def _poll_actions(self) -> None:
+        """Momentary bindings: one event on the press edge, none on release."""
+        for kind, (guid, device, button) in self._actions.items():
+            index = self._index_for(guid, device)
+            mask = None if index is None else _mask(index)
+            if mask is None:
+                self._action_held[kind] = False
+                continue
+            down = bool(mask & (1 << (button - 1)))
+            if down and not self._action_held.get(kind, False) and self._is_enabled():
+                self._post(kind)
+            self._action_held[kind] = down
 
     def _poll_binding(self) -> None:
         index = self._resolve_index()

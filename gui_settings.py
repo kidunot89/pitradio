@@ -195,35 +195,44 @@ def build_settings_tab(app) -> None:
     _row(trigger, 0, "Trigger key", key_row,
          "hold it to talk; it never reaches the game")
 
-    # Holds a capture until Save, so cancelling out of Settings changes nothing.
-    app.captured_joystick = (cfg.joystick.device, cfg.joystick.button,
-                             cfg.joystick.guid, cfg.joystick.name)
-    app.v_joystick = tk.StringVar(value=_joystick_label(app, cfg.joystick))
-    joy_row = ttk.Frame(trigger)
-    ttk.Label(joy_row, textvariable=app.v_joystick, foreground="#333",
-              width=34).pack(side="left")
-    app.capture_button_button = ttk.Button(
-        joy_row, text="Press a button…", command=lambda: _capture_button(app))
-    app.capture_button_button.pack(side="left", padx=6)
-    ttk.Button(joy_row, text="Clear", command=lambda: _clear_joystick(app)).pack(side="left")
-    _row(trigger, 1, "Wheel / gamepad button", joy_row,
+    # Every controller binding is held until Save, so cancelling out of
+    # Settings changes nothing.
+    app.joy_slots = {}
+    talk = joy_slot(app, "talk", cfg.joystick)
+    _row(trigger, 1, "Wheel / gamepad button", _binding_row(app, trigger, talk),
          "works alongside the key — either one triggers")
 
+    # Send and clear act on a message left waiting when a profile has
+    # auto-send off. The tap/double-tap gestures on the talk trigger do the
+    # same job; these exist for a wheel with buttons to spare, where one
+    # button per action beats counting taps at speed.
+    app.v_send_key = tk.StringVar(value=cfg.review.send_key)
+    app.v_clear_key = tk.StringVar(value=cfg.review.clear_key)
+    send = joy_slot(app, "send", cfg.send_joystick)
+    clear = joy_slot(app, "clear", cfg.clear_joystick)
+    _row(trigger, 2, "Send waiting message",
+         _binding_row(app, trigger, send, app.v_send_key),
+         "optional; same as tapping the trigger once")
+    _row(trigger, 3, "Clear waiting message",
+         _binding_row(app, trigger, clear, app.v_clear_key),
+         "optional; same as tapping the trigger twice")
+
     if app.joystick is None:
-        app.capture_button_button.state(["disabled"])
+        for slot in app.joy_slots.values():
+            slot["button"].state(["disabled"])
         ttk.Label(
             trigger,
             text="Joystick input is unavailable in this run.",
             foreground="#777",
-        ).grid(row=2, column=0, columnspan=3, sticky="w")
+        ).grid(row=4, column=0, columnspan=3, sticky="w")
     else:
         app.v_joystick_devices = tk.StringVar(value="")
         ttk.Label(trigger, textvariable=app.v_joystick_devices, foreground="#777",
                   wraplength=640, justify="left").grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+            row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
         ttk.Button(trigger, text="Rescan controllers",
                    command=lambda: _refresh_joystick_devices(app)).grid(
-            row=3, column=1, sticky="w", pady=(4, 0))
+            row=5, column=1, sticky="w", pady=(4, 0))
         _refresh_joystick_devices(app)
 
     defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
@@ -391,38 +400,60 @@ def _capture_key(app) -> None:
     app.trigger_capture.start()
 
 
-def _capture_button(app) -> None:
+def joy_slot(app, name: str, binding) -> dict:
+    """State for one controller binding in the Settings tab.
+
+    The talk trigger, send and clear each get one. They behave identically, so
+    they share the capture machinery rather than having three near-copies that
+    drift apart — which is how the talk binding ended up with a timeout message
+    the others would have lacked.
+    """
+    slot = {
+        "name": name,
+        "binding": binding,
+        # Held until Save, so leaving Settings without saving changes nothing.
+        "captured": (binding.device, binding.button, binding.guid, binding.name),
+        "var": tk.StringVar(value=_joystick_label(app, binding)),
+        "button": None,
+        "deadline": 0,
+        "timer": None,
+    }
+    app.joy_slots[name] = slot
+    return slot
+
+
+def _capture_button(app, slot) -> None:
     """Bind the next wheel or gamepad button pressed."""
     if app.joystick is None:
         return
 
-    app.capture_button_button.state(["disabled"])
-    app.v_joystick.set("waiting for a button…")
-    app._button_capture_deadline = CAPTURE_TIMEOUT_MS
-    _tick_button_capture(app)
+    slot["button"].state(["disabled"])
+    slot["var"].set("waiting for a button…")
+    slot["deadline"] = CAPTURE_TIMEOUT_MS
+    _tick_button_capture(app, slot)
 
     def done(device, button) -> None:
         def apply() -> None:
-            _end_button_capture(app)
-            app.captured_joystick = (device.index, button, device.guid, device.name)
-            app.v_joystick.set(app.joystick.describe(device.index, button))
-            log.info("captured %s on %r [%s] (save to apply)",
+            _end_button_capture(app, slot)
+            slot["captured"] = (device.index, button, device.guid, device.name)
+            slot["var"].set(app.joystick.describe(device.index, button))
+            log.info("captured %s on %r [%s] for %s (save to apply)",
                      app.joystick.describe(device.index, button),
-                     device.name, device.guid or "no identity")
+                     device.name, device.guid or "no identity", slot["name"])
 
         app.root.after(0, apply)
 
     app.joystick.start_capture(done)
 
 
-def _tick_button_capture(app) -> None:
-    remaining = getattr(app, "_button_capture_deadline", 0)
+def _tick_button_capture(app, slot) -> None:
+    remaining = slot["deadline"]
     if remaining <= 0:
         log.info("button capture timed out; no button was pressed")
-        _end_button_capture(app)
+        _end_button_capture(app, slot)
         # Say why, rather than silently reverting: with no detected controller
         # this is the expected outcome and the user needs to know that.
-        app.v_joystick.set(_joystick_label(app, app.store.config.joystick))
+        slot["var"].set(_joystick_label(app, slot["binding"]))
         if not app.joystick.list_devices():
             messagebox.showinfo(
                 "PitRadio",
@@ -431,30 +462,47 @@ def _tick_button_capture(app) -> None:
                 "PitRadio can currently see.",
             )
         return
-    app.capture_button_button.configure(text=f"Press a button… {remaining // 1000}")
-    app._button_capture_deadline = remaining - 1000
-    app._button_capture_timer = app.root.after(1000, lambda: _tick_button_capture(app))
+    slot["button"].configure(text=f"Press a button… {remaining // 1000}")
+    slot["deadline"] = remaining - 1000
+    slot["timer"] = app.root.after(1000, lambda: _tick_button_capture(app, slot))
 
 
-def _end_button_capture(app) -> None:
-    timer = getattr(app, "_button_capture_timer", None)
-    if timer is not None:
-        app.root.after_cancel(timer)
-        app._button_capture_timer = None
-    app._button_capture_deadline = 0
+def _end_button_capture(app, slot) -> None:
+    if slot["timer"] is not None:
+        app.root.after_cancel(slot["timer"])
+        slot["timer"] = None
+    slot["deadline"] = 0
     if app.joystick is not None:
         app.joystick.cancel_capture()
-    app.capture_button_button.state(["!disabled"])
-    app.capture_button_button.configure(text="Press a button…")
+    slot["button"].state(["!disabled"])
+    slot["button"].configure(text="Press a button…")
 
 
-def _clear_joystick(app) -> None:
-    app.captured_joystick = (None, None, None, None)
-    app.v_joystick.set("(not bound)")
-    if app.joystick is not None:
-        app.joystick.cancel_capture()
-    app.capture_button_button.state(["!disabled"])
-    app.capture_button_button.configure(text="Press a button…")
+def _clear_joystick(app, slot) -> None:
+    slot["captured"] = (None, None, None, None)
+    slot["var"].set("(not bound)")
+    _end_button_capture(app, slot)
+
+
+def _binding_row(app, parent, slot, key_var=None, key_label="Press a key…"):
+    """A key box and a controller box side by side, for one action."""
+    row = ttk.Frame(parent)
+
+    if key_var is not None:
+        _entry(row, key_var, 14).pack(side="left")
+        key_button = ttk.Button(row, text=key_label)
+        key_button.pack(side="left", padx=(4, 10))
+        capture = KeyCapture(app, key_var, key_button, append=False, label=key_label)
+        key_button.configure(command=capture.start)
+
+    ttk.Label(row, textvariable=slot["var"], foreground="#333",
+              width=30).pack(side="left")
+    slot["button"] = ttk.Button(
+        row, text="Press a button…", command=lambda: _capture_button(app, slot))
+    slot["button"].pack(side="left", padx=6)
+    ttk.Button(row, text="Clear",
+               command=lambda: _clear_joystick(app, slot)).pack(side="left")
+    return row
 
 
 def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
@@ -640,10 +688,18 @@ def _save_settings(app) -> None:
     cfg = app.store.config
     cfg.trigger_key = app.v_trigger.get().strip() or cfg.trigger_key
 
-    device, button, guid, name = getattr(
-        app, "captured_joystick", (None, None, None, None))
-    cfg.joystick.device, cfg.joystick.button = device, button
-    cfg.joystick.guid, cfg.joystick.name = guid, name
+    for slot_name, binding in (
+        ("talk", cfg.joystick),
+        ("send", cfg.send_joystick),
+        ("clear", cfg.clear_joystick),
+    ):
+        slot = app.joy_slots.get(slot_name)
+        if slot is None:
+            continue
+        binding.device, binding.button, binding.guid, binding.name = slot["captured"]
+
+    cfg.review.send_key = app.v_send_key.get().strip()
+    cfg.review.clear_key = app.v_clear_key.get().strip()
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 

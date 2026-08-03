@@ -338,6 +338,46 @@ def run_gui_only() -> int:
 # -- the real thing ------------------------------------------------------
 
 
+def _action_keys(cfg) -> dict:
+    """Parsed send/clear keys, skipping any that no longer resolve.
+
+    A bad name must cost that one binding, not startup — the config may have
+    been hand-edited, and refusing to launch over an optional key would be a
+    poor trade.
+    """
+    import keys
+
+    actions = {}
+    for kind, spec in (
+        (state_mod.TRIGGER_SEND, cfg.review.send_key),
+        (state_mod.TRIGGER_CLEAR, cfg.review.clear_key),
+    ):
+        if not spec:
+            continue
+        try:
+            mods, vk = keys.parse_trigger(spec)
+        except keys.KeyNameError as exc:
+            log.error("ignoring %s key %r: %s", kind, spec, exc)
+            continue
+        actions[kind] = (vk, mods)
+        log.info("%s key: %s", kind, spec)
+    return actions
+
+
+def _action_buttons(cfg) -> dict:
+    buttons = {}
+    for kind, binding in (
+        (state_mod.TRIGGER_SEND, cfg.send_joystick),
+        (state_mod.TRIGGER_CLEAR, cfg.clear_joystick),
+    ):
+        if binding.button is None:
+            continue
+        buttons[kind] = (binding.guid or "", binding.device, binding.button)
+        log.info("%s button: %s button %s", kind,
+                 binding.name or f"device {binding.device}", binding.button)
+    return buttons
+
+
 def run(args) -> int:
     import tkinter as tk
 
@@ -400,6 +440,12 @@ def run(args) -> int:
     joystick = joystick_mod.JoystickWatcher(
         events, lambda: app_state.enabled,
         cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid)
+    # Send/clear act on a message left waiting when a profile has auto-send
+    # off. Armed here as well as on save, or they would only work after
+    # visiting Settings once.
+    hook.set_actions(_action_keys(cfg))
+    joystick.set_actions(_action_buttons(cfg))
+
     registry = plugins_mod.PluginRegistry()
     registry.start_all()
     for name, status in registry.describe():

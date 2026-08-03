@@ -83,7 +83,7 @@ class Worker(threading.Thread):
                     self._on_gesture_elapsed()
                 except Exception:
                     log.exception("pending message gesture failed")
-                    self._drop_pending()
+                    self._abandon()
                 continue
 
             try:
@@ -93,6 +93,8 @@ class Worker(threading.Thread):
                     self._on_down(float(payload))
                 elif kind == hook_mod.TRIGGER_UP:
                     self._on_up(float(payload))
+                elif kind in (hook_mod.TRIGGER_SEND, hook_mod.TRIGGER_CLEAR):
+                    self._on_action(kind)
                 elif kind == EV_RESEND:
                     self._resend(str(payload))
             except Exception:
@@ -321,9 +323,27 @@ class Worker(threading.Thread):
         """The double-tap window closed on a lone tap, so it was a send."""
         if self._gestures.elapsed(time.monotonic()) != gestures_mod.SEND:
             return
+        self._send_pending()
+
+    def _on_action(self, kind: str) -> None:
+        """A dedicated send or clear binding fired.
+
+        Acts immediately — there is no window to wait out, which is the whole
+        reason to bind a button for it rather than counting taps.
+        """
+        if self._pending is None:
+            log.info("%s pressed, but no message is waiting to be sent", kind)
+            return
+        self._gestures.reset()
+        self._discard_recording()
+        if kind == hook_mod.TRIGGER_SEND:
+            self._send_pending()
+        else:
+            self._clear_pending()
+
+    def _send_pending(self) -> None:
         if self._pending is None:
             return
-
         pending, self._pending = self._pending, None
         profile: Profile = pending["profile"]
         inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)

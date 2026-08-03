@@ -301,6 +301,7 @@ class App:
         self.store.load()
         self._apply_trigger_key()
         self._apply_joystick_binding()
+        self._apply_action_bindings()
         self._refresh_warnings()
         if problems:
             log.warning("config saved with %d problem(s); see the banner", len(problems))
@@ -333,8 +334,52 @@ class App:
             return
         joy = self.store.config.joystick
         self.joystick.set_binding(joy.device, joy.button, joy.guid)
-        if joy.device is not None and joy.button is not None:
-            log.info("joystick trigger: device %s button %s", joy.device, joy.button)
+        if joy.button is not None:
+            log.info("joystick trigger: %s button %s",
+                     joy.name or f"device {joy.device}", joy.button)
+
+    def _apply_action_bindings(self) -> None:
+        """Arm the send and clear bindings.
+
+        Applied on save for the same reason as the trigger: these act on a
+        message that is waiting *now*, so leaving them to the worker's next
+        reload would mean they do nothing exactly when they are wanted.
+
+        Event kinds come from `state`, never from `hook` — importing hook here
+        would drag winapi in and break `--gui-only` off Windows.
+        """
+        import keys
+
+        cfg = self.store.config
+        if self.hook is not None:
+            actions = {}
+            for kind, spec in (
+                (state_mod.TRIGGER_SEND, cfg.review.send_key),
+                (state_mod.TRIGGER_CLEAR, cfg.review.clear_key),
+            ):
+                if not spec:
+                    continue
+                try:
+                    mods, vk = keys.parse_trigger(spec)
+                except keys.KeyNameError as exc:
+                    log.error("ignoring the %s key %r: %s", kind, spec, exc)
+                    continue
+                actions[kind] = (vk, mods)
+                log.info("%s key is now %s", kind, spec)
+            self.hook.set_actions(actions)
+
+        if self.joystick is not None:
+            buttons = {}
+            for kind, binding in (
+                (state_mod.TRIGGER_SEND, cfg.send_joystick),
+                (state_mod.TRIGGER_CLEAR, cfg.clear_joystick),
+            ):
+                if binding.button is None:
+                    continue
+                buttons[kind] = (binding.guid or "", binding.device, binding.button)
+                log.info("%s button is now %s button %s", kind,
+                         binding.name or f"device {binding.device}", binding.button)
+            self.joystick.set_actions(buttons)
 
     def reload_model(self) -> None:
         """Load the configured model now, off the Tk thread.

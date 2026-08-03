@@ -15,6 +15,9 @@ off Windows at all.
 """
 
 import ast
+import ctypes
+import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -175,3 +178,163 @@ def test_a_tab_with_a_save_button_scrolls(source, builder):
         f"{source}:{builder.name} builds a Save button but does not use "
         f"scrolling_tab/scrolling_pane, so Save can end up off-screen"
     )
+
+
+# -- a class must define the methods it calls on itself ------------------
+
+
+# Everything with a thread body, where an AttributeError surfaces as the
+# thread dying quietly rather than as a traceback anyone sees.
+SELF_CALL_SOURCES = [
+    "worker.py", "hook.py", "joystick.py", "sdlinput.py", "updater.py",
+    "speech.py", "state.py", "tray.py",
+]
+
+
+def _self_calls(class_node):
+    """(name, line) for every self.foo(...) inside a class body."""
+    calls = []
+    for node in ast.walk(class_node):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"):
+            calls.append((node.func.attr, node.lineno))
+    return calls
+
+
+def _defined_names(class_node):
+    names = set()
+    for node in class_node.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+    # Attributes assigned anywhere in the class, e.g. in __init__.
+    for node in ast.walk(class_node):
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and isinstance(node.ctx, ast.Store)):
+            names.add(node.attr)
+    return names
+
+
+# Bases whose inherited methods are legitimate self-calls. A class with any
+# base outside this map is skipped rather than guessed at — a false failure
+# here would be worse than the gap, because it would train people to ignore it.
+KNOWN_BASES = {
+    "Thread": threading.Thread,
+    "threading.Thread": threading.Thread,
+    "Handler": logging.Handler,
+    "logging.Handler": logging.Handler,
+    "Structure": ctypes.Structure,
+    "ctypes.Structure": ctypes.Structure,
+    "Union": ctypes.Union,
+    "ctypes.Union": ctypes.Union,
+}
+
+
+def _base_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return None
+
+
+def _inherited_names(class_node):
+    """Names from base classes, or None if a base cannot be resolved."""
+    names = set()
+    for base in class_node.bases:
+        name = _base_name(base)
+        if name not in KNOWN_BASES:
+            return None
+        names |= set(dir(KNOWN_BASES[name]))
+    return names
+
+
+@pytest.mark.parametrize("source", SELF_CALL_SOURCES)
+def test_every_self_call_resolves(source):
+    """`self._foo()` where `_foo` does not exist is an AttributeError at runtime.
+
+    Worker and hook methods run on their own threads and several are called
+    from inside `except` blocks, so this fails as a thread quietly dying rather
+    than as anything anyone sees. v0.1.22 shipped a call to a `_drop_pending`
+    that was never written, on the error path of the pending-message handler.
+    """
+    tree = ast.parse((ROOT / source).read_text(encoding="utf-8"))
+    missing = []
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        inherited = _inherited_names(node)
+        if inherited is None:
+            continue  # a base we cannot resolve; guessing would be worse
+        known = _defined_names(node) | inherited | set(dir(object))
+        for name, line in _self_calls(node):
+            if name not in known:
+                missing.append(f"{source}:{line} {node.name}.{name}()")
+
+    assert not missing, "called but never defined: " + ", ".join(missing)
+
+
+# -- portable modules must never reach winapi ----------------------------
+
+
+# The modules that make --check-config and --gui-only work anywhere. Each must
+# stay importable on a machine with no Win32 at all.
+PORTABLE = [
+    "config.py", "keys.py", "paths.py", "state.py", "updater.py",
+    "languages.py", "mentions.py", "gestures.py",
+    "gui.py", "gui_settings.py", "gui_language.py",
+]
+
+
+def _local_imports(source: str) -> set[str]:
+    """Every module in this repo that `source` imports, at any nesting depth.
+
+    Function-level imports count. `pitradio.py` defers its Windows imports into
+    functions deliberately, but for these modules that only moves the crash
+    from startup to whenever the function runs — which is worse, because it
+    survives every check that merely imports the module.
+    """
+    tree = ast.parse((ROOT / source).read_text(encoding="utf-8"))
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            found.add(node.module.split(".")[0])
+    return {name for name in found if (ROOT / f"{name}.py").exists()}
+
+
+def _reaches_winapi(source: str, seen=None) -> list[str] | None:
+    """The import chain from `source` to winapi, or None if there is none."""
+    seen = seen or set()
+    if source in seen:
+        return None
+    seen.add(source)
+
+    for name in sorted(_local_imports(source)):
+        if name == "winapi":
+            return [source, "winapi"]
+        chain = _reaches_winapi(f"{name}.py", seen)
+        if chain is not None:
+            return [source, *chain]
+    return None
+
+
+@pytest.mark.parametrize("source", PORTABLE)
+def test_portable_modules_do_not_reach_winapi(source):
+    """`--check-config` and `--gui-only` have to run on the development machine.
+
+    This is the rule the whole GUI/Win32 split exists to enforce, and nothing
+    was checking it: adding `import hook` inside one method of gui.py was
+    enough to break `--gui-only` everywhere but Windows, and the module still
+    imported fine so every test passed.
+    """
+    chain = _reaches_winapi(source)
+    assert chain is None, "import chain reaches winapi: " + " -> ".join(chain)

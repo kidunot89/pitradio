@@ -207,6 +207,21 @@ The timing logic is pure and lives outside `worker.py` precisely so it can be
 tested — every case in [tests/test_gestures.py](tests/test_gestures.py) is one
 that would otherwise only be found mid-race.
 
+**Send and clear can also be bound directly** — `review.send_key`,
+`review.clear_key`, `send_joystick` and `clear_joystick`, all shown in
+Settings → Trigger. These are *momentary*: the hook and the joystick watcher
+post one event on the press edge and nothing on release, so the worker never
+has to pair them up. They work alongside the gestures rather than replacing
+them.
+
+The event kind strings (`TRIGGER_DOWN`/`UP`/`SEND`/`CLEAR`) live in
+[state.py](state.py) and are re-exported by `hook` and `joystick`. They cannot
+live in `hook.py`: the GUI names them when arming a binding, and importing
+`hook` from `gui.py` drags in `winapi` and breaks `--gui-only` everywhere but
+Windows. `test_portable_modules_do_not_reach_winapi` walks the import graph to
+enforce that, because nothing did before and the mistake is invisible — the
+module still imports fine and every test passes.
+
 ## The editing tabs scroll
 
 Tab content outgrew the window and tkinter silently clips the overflow, so Save

@@ -121,6 +121,11 @@ trigger then controls what happens to it, without letting go of the wheel:
 
 The status bar shows **waiting to send** while a message is sitting there.
 
+If you have buttons to spare, **Settings → Trigger** also lets you bind a key
+or a wheel button directly to *Send waiting message* and *Clear waiting
+message*. Those act immediately, with no double-tap window to wait out, and
+work alongside the gestures rather than replacing them.
+
 Because a single tap might turn out to be the first half of a double, sending
 waits for the double-tap window to close — about a third of a second. If you'd
 rather not wait, set `review.double_tap_ms` to `0` in the config, which sends

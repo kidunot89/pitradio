@@ -198,3 +198,78 @@ def test_a_controller_unplugged_mid_press_closes_the_cycle(joystick, monkeypatch
 
     kinds = [events.get_nowait()[0] for _ in range(events.qsize())]
     assert kinds == [joystick.TRIGGER_DOWN, joystick.TRIGGER_UP]
+
+
+# -- send / clear buttons --------------------------------------------------
+
+
+def test_an_action_button_fires_once_per_press(joystick, monkeypatch):
+    """Momentary, not held: the worker never has to pair a press with a release."""
+    monkeypatch.setattr(joystick, "devices", lambda: [
+        device(joystick, 0, "Wheel", guid="wheel-guid")])
+    monkeypatch.setattr(joystick, "_guid", lambda index: "wheel-guid")
+    masks = iter([0, 1 << 4, 1 << 4, 1 << 4, 0, 1 << 4])
+    monkeypatch.setattr(joystick, "_mask", lambda index: next(masks))
+
+    events = queue.Queue()
+    w = joystick.JoystickWatcher(events, lambda: True)
+    w.set_actions({joystick.TRIGGER_SEND: ("wheel-guid", 0, 5)})
+    for _ in range(6):
+        w._poll_actions()
+
+    kinds = [events.get_nowait()[0] for _ in range(events.qsize())]
+    assert kinds == [joystick.TRIGGER_SEND, joystick.TRIGGER_SEND]
+
+
+def test_send_and_clear_are_independent(joystick, monkeypatch):
+    monkeypatch.setattr(joystick, "devices", lambda: [
+        device(joystick, 0, "Wheel", guid="wheel-guid")])
+    monkeypatch.setattr(joystick, "_guid", lambda index: "wheel-guid")
+    # One mask read per action per poll, so a scripted iterator would run out.
+    held = {"mask": 0}
+    monkeypatch.setattr(joystick, "_mask", lambda index: held["mask"])
+
+    events = queue.Queue()
+    w = joystick.JoystickWatcher(events, lambda: True)
+    w.set_actions({
+        joystick.TRIGGER_SEND: ("wheel-guid", 0, 1),
+        joystick.TRIGGER_CLEAR: ("wheel-guid", 0, 2),
+    })
+    w._poll_actions()
+    held["mask"] = 1 << 1              # button 2 only
+    w._poll_actions()
+
+    kinds = [events.get_nowait()[0] for _ in range(events.qsize())]
+    assert kinds == [joystick.TRIGGER_CLEAR]
+
+
+def test_an_action_on_a_missing_device_is_silent(joystick, monkeypatch):
+    """Not an error: the wheel may simply be unplugged."""
+    monkeypatch.setattr(joystick, "devices", lambda: [])
+    monkeypatch.setattr(joystick, "_guid", lambda index: "")
+
+    events = queue.Queue()
+    w = joystick.JoystickWatcher(events, lambda: True)
+    w.set_actions({joystick.TRIGGER_SEND: ("gone-guid", 0, 3)})
+    w._poll_actions()
+
+    assert events.empty()
+
+
+def test_actions_and_the_talk_trigger_share_one_poll(joystick, monkeypatch):
+    """Both must be serviced each tick, or binding one would disable the other."""
+    monkeypatch.setattr(joystick, "devices", lambda: [
+        device(joystick, 0, "Wheel", guid="wheel-guid")])
+    monkeypatch.setattr(joystick, "_guid", lambda index: "wheel-guid")
+    # Talk on button 1, send on button 5, both pressed at once.
+    monkeypatch.setattr(joystick, "_mask", lambda index: 0b10001)
+
+    events = queue.Queue()
+    w = joystick.JoystickWatcher(
+        events, lambda: True, device=0, button=1, guid="wheel-guid")
+    w.set_actions({joystick.TRIGGER_SEND: ("wheel-guid", 0, 5)})
+    w._poll_binding()
+    w._poll_actions()
+
+    kinds = sorted(events.get_nowait()[0] for _ in range(events.qsize()))
+    assert kinds == sorted([joystick.TRIGGER_DOWN, joystick.TRIGGER_SEND])
