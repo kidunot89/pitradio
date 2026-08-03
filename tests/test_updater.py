@@ -175,10 +175,11 @@ def test_the_shim_waits_for_this_process_before_installing():
     """
     from pathlib import Path
 
-    command = updater.shim_command(Path("C:/tmp/setup.exe"), 4321, Path("C:/app/pitradio.exe"))
+    installer = Path("C:/tmp/setup.exe")
+    command = updater.shim_command(installer, 4321, Path("C:/app/pitradio.exe"))
 
     assert "Wait-Process -Id 4321" in command
-    assert command.index("Wait-Process") < command.index("setup.exe"), (
+    assert command.index("Wait-Process") < command.index(str(installer)), (
         "the installer must not start until this process has exited")
 
 
@@ -195,9 +196,13 @@ def test_the_shim_relaunches_only_on_success():
     """A failed install should leave the old build in place, not start it."""
     from pathlib import Path
 
-    command = updater.shim_command(Path("setup.exe"), 1, Path("C:/app/pitradio.exe"))
+    # Rendered through Path, not written literally: Windows turns forward
+    # slashes into backslashes, so a hardcoded path only matches on one OS.
+    app = Path("C:/app/pitradio.exe")
+    command = updater.shim_command(Path("setup.exe"), 1, app)
+
     assert "$p.ExitCode -eq 0" in command
-    assert command.index("ExitCode") < command.index("C:/app/pitradio.exe")
+    assert command.index("ExitCode") < command.index(str(app))
 
 
 def test_the_shim_suppresses_dialogs():
