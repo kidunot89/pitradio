@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 log = logging.getLogger("pitradio")
 
@@ -219,7 +219,26 @@ def cmd_self_test() -> int:
         root.withdraw()
         store = config_mod.ConfigStore(paths.config_path())
         store.load()
-        gui.App(root, store, AppState(), __version__, use_tray=False)
+
+        # Real collaborators, not None. Every one of them is optional, and the
+        # None branches skip most of the attribute access — so building with
+        # None proves far less than it appears to. v0.1.4 shipped calling a
+        # method on the joystick watcher that did not exist, and this test
+        # passed anyway because it had handed App a None.
+        wiring = {}
+        if sys.platform == "win32":
+            import hook as hook_mod
+            import joystick as joystick_mod
+            import keys as keys_mod
+
+            events: queue.Queue = queue.Queue()
+            # Constructing these does not install the hook or start polling;
+            # only their run() does, and nothing starts a thread here.
+            wiring["hook"] = hook_mod.KeyboardHook(
+                keys_mod.VK["f13"], events, lambda: True)
+            wiring["joystick"] = joystick_mod.JoystickWatcher(events, lambda: True)
+
+        gui.App(root, store, AppState(), __version__, use_tray=False, **wiring)
         root.update()
         root.destroy()
         out("  ok      GUI construction")

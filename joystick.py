@@ -77,6 +77,15 @@ class JoystickWatcher(threading.Thread):
 
     # -- public ----------------------------------------------------------
 
+    # The GUI holds a watcher, not the module, so enumeration has to be
+    # reachable from the instance. Shipping these as module functions only is
+    # what broke v0.1.4 on startup.
+    def list_devices(self) -> list[tuple[int, str, int]]:
+        return list_devices()
+
+    def describe(self, device: int, button: int) -> str:
+        return describe(device, button)
+
     def set_binding(self, device: int | None, button: int | None) -> None:
         self._device, self._button = device, button
         self._pressed = False
