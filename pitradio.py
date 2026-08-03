@@ -71,9 +71,10 @@ def setup_logging(app_state: AppState | None, verbose: bool) -> None:
         gui_handler.setFormatter(logging.Formatter(GUI_LOG_FORMAT, TIME_FORMAT))
         root.addHandler(gui_handler)
 
-    # ctranslate2 and huggingface are chatty at INFO and drown out the stage
-    # timings this log exists to surface.
-    for noisy in ("urllib3", "huggingface_hub", "filelock"):
+    # The point of this log is the per-trigger stage timings — when the chat box
+    # opened, how long transcription took, when the message went. The model
+    # download alone emits about twenty httpx request lines, which buries them.
+    for noisy in ("httpx", "httpcore", "urllib3", "huggingface_hub", "filelock"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _install_crash_logging()
