@@ -100,9 +100,12 @@ def build_settings_tab(app) -> None:
     app.v_trigger = tk.StringVar(value=cfg.trigger_key)
     key_row = ttk.Frame(trigger)
     _entry(key_row, app.v_trigger, 20).pack(side="left")
-    app.capture_key_button = ttk.Button(
-        key_row, text="Press a key…", command=lambda: _capture_key(app))
+    app.capture_key_button = ttk.Button(key_row, text="Press a key…")
     app.capture_key_button.pack(side="left", padx=6)
+    app.trigger_capture = KeyCapture(
+        app, app.v_trigger, app.capture_key_button,
+        append=False, label="Press a key…")
+    app.capture_key_button.configure(command=app.trigger_capture.start)
     _row(trigger, 0, "Trigger key", key_row,
          "hold it to talk; it never reaches the game")
 
@@ -202,62 +205,86 @@ def _refresh_joystick_devices(app) -> None:
         log.info("joystick: %s", line)
 
 
-def _capture_key(app) -> None:
-    """Bind the next key pressed.
+class KeyCapture:
+    """Binds the next key pressed into a text field.
 
     Capture runs through the low-level hook rather than a tkinter key binding,
     for two reasons: the hook reports raw virtual-key codes, which map directly
     onto the config's key names — including F13-F24, which no keyboard has and
     tkinter reports inconsistently — and it swallows the press, so binding Enter
     or Escape doesn't also actuate the window behind the prompt.
+
+    One instance per field. The trigger key replaces; the profile's key lists
+    append, because those are sequences and you usually want to add to one.
     """
-    if app.hook is None:
-        messagebox.showinfo("PitRadio", "Key capture needs the keyboard hook, "
-                                        "which isn't running in this mode.")
-        return
 
-    app.capture_key_button.state(["disabled"])
-    app.capture_key_button.configure(text="Press any key… 5")
-    app._key_capture_deadline = CAPTURE_TIMEOUT_MS
-    _tick_key_capture(app)
+    def __init__(self, app, var, button, *, append: bool, label: str = "Set…"):
+        self.app = app
+        self.var = var
+        self.button = button
+        self.append = append
+        self.label = label
+        self._remaining = 0
+        self._timer = None
 
-    def done(modifiers, vk) -> None:
+    def start(self) -> None:
+        if self.app.hook is None:
+            messagebox.showinfo(
+                "PitRadio",
+                "Key capture needs the keyboard hook, which isn't running in "
+                "this mode.")
+            return
+
+        self.button.state(["disabled"])
+        self._remaining = CAPTURE_TIMEOUT_MS
+        self._tick()
+        self.app.hook.start_capture(self._captured)
+
+    # -- countdown -------------------------------------------------------
+
+    def _tick(self) -> None:
+        """Count down visibly, so a capture about to lapse says so."""
+        if self._remaining <= 0:
+            log.info("key capture timed out; nothing was pressed")
+            self.finish()
+            return
+        self.button.configure(text=f"Press a key… {self._remaining // 1000}")
+        self._remaining -= 1000
+        self._timer = self.app.root.after(1000, self._tick)
+
+    def finish(self) -> None:
+        if self._timer is not None:
+            self.app.root.after_cancel(self._timer)
+            self._timer = None
+        self._remaining = 0
+        if self.app.hook is not None:
+            self.app.hook.cancel_capture()
+        self.button.state(["!disabled"])
+        self.button.configure(text=self.label)
+
+    # -- result ----------------------------------------------------------
+
+    def _captured(self, modifiers, vk) -> None:
+        """Called on the hook thread; marshals back to Tk before touching it."""
         import keys
 
         spec = keys.format_combo(modifiers, vk)
+        self.app.root.after(0, lambda: self._apply(spec))
 
-        def apply() -> None:
-            _end_key_capture(app)
-            app.v_trigger.set(spec)
-            log.info("captured trigger key: %s (save to apply)", spec)
-
-        app.root.after(0, apply)
-
-    app.hook.start_capture(done)
-
-
-def _tick_key_capture(app) -> None:
-    """Count down visibly, so a capture that is about to lapse says so."""
-    remaining = getattr(app, "_key_capture_deadline", 0)
-    if remaining <= 0:
-        log.info("key capture timed out; nothing was pressed")
-        _end_key_capture(app)
-        return
-    app.capture_key_button.configure(text=f"Press any key… {remaining // 1000}")
-    app._key_capture_deadline = remaining - 1000
-    app._key_capture_timer = app.root.after(1000, lambda: _tick_key_capture(app))
+    def _apply(self, spec: str) -> None:
+        self.finish()
+        if self.append:
+            existing = _text_to_keys(self.var.get())
+            existing.append(spec)
+            self.var.set(_keys_to_text(existing))
+        else:
+            self.var.set(spec)
+        log.info("captured %s (save to apply)", spec)
 
 
-def _end_key_capture(app) -> None:
-    timer = getattr(app, "_key_capture_timer", None)
-    if timer is not None:
-        app.root.after_cancel(timer)
-        app._key_capture_timer = None
-    app._key_capture_deadline = 0
-    if app.hook is not None:
-        app.hook.cancel_capture()
-    app.capture_key_button.state(["!disabled"])
-    app.capture_key_button.configure(text="Press a key…")
+def _capture_key(app) -> None:
+    """The trigger key's own capture, kept as a named entry point."""
+    app.trigger_capture.start()
 
 
 def _capture_button(app) -> None:
@@ -340,11 +367,13 @@ def _profile_vars(app, parent, profile) -> dict:
         "text_mode": tk.StringVar(value=profile.text_mode),
     }
 
-    _row(parent, 0, "Keys to open chat", _entry(parent, v["pre_keys"]),
-         "comma separated, e.g. enter")
-    _row(parent, 1, "Keys to send", _entry(parent, v["post_keys"]))
-    _row(parent, 2, "Keys to abort", _entry(parent, v["abort_keys"]),
-         "used when nothing was said")
+    v["_captures"] = []
+    for row, (field, label, hint) in enumerate((
+        ("pre_keys", "Keys to open chat", "comma separated; modifiers like ctrl+enter work"),
+        ("post_keys", "Keys to send", ""),
+        ("abort_keys", "Keys to abort", "used when nothing was said"),
+    )):
+        _row(parent, row, label, _key_list_row(app, parent, v, field), hint)
     _row(parent, 3, "Delay after opening chat (ms)", _entry(parent, v["pre_delay_ms"], 10),
          "raise this if the first characters go missing")
     _row(parent, 4, "Delay before sending (ms)", _entry(parent, v["post_delay_ms"], 10))
@@ -369,6 +398,24 @@ def _profile_vars(app, parent, profile) -> dict:
     _row(parent, 10, "Session plugin", picker,
          "reads who is in the session, for name accuracy and mentions")
     return v
+
+
+def _key_list_row(app, parent, v, field: str):
+    """An entry for a key sequence, with capture and clear beside it."""
+    frame = ttk.Frame(parent)
+    _entry(frame, v[field], 26).pack(side="left")
+
+    button = ttk.Button(frame, text="Add key…")
+    button.pack(side="left", padx=6)
+    capture = KeyCapture(app, v[field], button, append=True, label="Add key…")
+    button.configure(command=capture.start)
+    # Held so the capture object outlives this function; a garbage-collected
+    # one would leave its countdown running against a dead button.
+    v["_captures"].append(capture)
+
+    ttk.Button(frame, text="Clear", width=6,
+               command=lambda var=v[field]: var.set("")).pack(side="left")
+    return frame
 
 
 def _plugin_label(choices, plugin_id: str) -> str:

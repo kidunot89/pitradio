@@ -121,3 +121,77 @@ def test_version_matches_the_app():
 )
 def test_four_part_version(version, expected):
     assert build._four_part(version) == expected
+
+
+# -- vendored modules ----------------------------------------------------
+
+
+def test_nuitka_env_makes_vendored_modules_importable():
+    """Nuitka runs as a subprocess and does not inherit this script's sys.path.
+
+    v0.1.9 failed to build with "failed to locate package 'pylmusharedmemory'"
+    because the vendor directory was added to build.py's own sys.path, which
+    the subprocess never sees. PYTHONPATH is what actually carries it across.
+    """
+    import subprocess
+    import sys
+
+    env = build.nuitka_env()
+    assert "PYTHONPATH" in env
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import pylmusharedmemory; print('ok')"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, (
+        f"a subprocess with build.nuitka_env() cannot import the vendored "
+        f"package, so Nuitka will not find it either:\n{result.stderr}"
+    )
+
+
+def test_nuitka_env_preserves_an_existing_pythonpath():
+    """Clobbering PYTHONPATH would break any environment that relies on it."""
+    import os
+
+    original = os.environ.get("PYTHONPATH")
+    os.environ["PYTHONPATH"] = "/somewhere/else"
+    try:
+        env = build.nuitka_env()
+        assert "/somewhere/else" in env["PYTHONPATH"]
+        assert "vendor" in env["PYTHONPATH"]
+    finally:
+        if original is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = original
+
+
+def test_every_included_package_is_importable(args):
+    """--include-package on something Nuitka cannot find is a fatal error.
+
+    Checked against the environment the build actually uses, which is the part
+    that was wrong.
+    """
+    import importlib.util
+    import subprocess
+    import sys
+
+    names = [a.split("=", 1)[1] for a in args if a.startswith("--include-package=")]
+    assert names
+
+    unavailable = []
+    for name in names:
+        if importlib.util.find_spec(name) is not None:
+            continue
+        # Might still be reachable through the build's PYTHONPATH.
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {name}"],
+            env=build.nuitka_env(), capture_output=True, check=False,
+        )
+        if result.returncode != 0:
+            unavailable.append(name)
+
+    assert not unavailable, (
+        f"the build asks Nuitka to include {unavailable}, which cannot be "
+        f"imported even with its PYTHONPATH. That is a fatal build error."
+    )

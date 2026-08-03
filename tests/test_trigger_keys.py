@@ -128,3 +128,92 @@ def test_a_combo_trigger_reaches_the_hook_with_its_modifiers():
     gui.App._apply_trigger_key(app)
     assert app.hook.vk == keys.VK["f12"]
     assert app.hook.modifiers == [keys.VK["ctrl"]]
+
+
+# -- capture into profile key lists --------------------------------------
+
+
+class _FakeButton:
+    def __init__(self):
+        self.text = "Add key…"
+        self.enabled = True
+
+    def configure(self, **kwargs):
+        self.text = kwargs.get("text", self.text)
+
+    def state(self, flags):
+        self.enabled = "!disabled" in flags
+
+
+class _FakeVar:
+    def __init__(self, value=""):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
+class _FakeRoot:
+    def after(self, _ms, _fn=None):
+        return "timer"
+
+    def after_cancel(self, _timer):
+        pass
+
+
+class _FakeApp:
+    def __init__(self):
+        self.root = _FakeRoot()
+        self.hook = None
+
+
+def _capture(var, *, append):
+    import gui_settings
+
+    return gui_settings.KeyCapture(_FakeApp(), var, _FakeButton(), append=append)
+
+
+def test_capture_appends_to_a_key_sequence():
+    """Profile key fields are sequences; capturing should add, not replace."""
+    var = _FakeVar("enter")
+    _capture(var, append=True)._apply("ctrl+enter")
+    assert var.get() == "enter, ctrl+enter"
+
+
+def test_capture_appends_to_an_empty_field():
+    var = _FakeVar("")
+    _capture(var, append=True)._apply("escape")
+    assert var.get() == "escape"
+
+
+def test_capture_replaces_for_the_trigger_key():
+    """Only one trigger key can be armed, so capture replaces there."""
+    var = _FakeVar("f13")
+    _capture(var, append=False)._apply("ctrl+f12")
+    assert var.get() == "ctrl+f12"
+
+
+def test_a_captured_combo_is_a_valid_profile_key():
+    """What capture writes must survive config validation."""
+    var = _FakeVar("")
+    _capture(var, append=True)._apply("ctrl+shift+enter")
+
+    cfg = config.Config()
+    cfg.default_profile.pre_keys = [
+        part.strip() for part in var.get().split(",") if part.strip()]
+    assert cfg.validate() == []
+
+
+def test_capture_restores_the_button_when_it_finishes():
+    import gui_settings
+
+    button = _FakeButton()
+    capture = gui_settings.KeyCapture(
+        _FakeApp(), _FakeVar(), button, append=True, label="Add key…")
+    button.configure(text="Press a key… 3")
+    capture.finish()
+    assert button.text == "Add key…"
+    assert button.enabled

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -30,7 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT / "build"
 
-# Vendored third-party modules live here rather than in site-packages.
+# Vendored third-party modules live here rather than in site-packages. This is
+# for av_extension_modules() and the tests; Nuitka gets it via nuitka_env().
 if str(ROOT / "vendor") not in sys.path:
     sys.path.insert(0, str(ROOT / "vendor"))
 
@@ -138,7 +140,6 @@ def nuitka_args(version: str) -> list[str]:
         # The vendored LMU struct definitions are loaded via a sys.path
         # entry at runtime, which Nuitka cannot see.
         "--include-package=pylmusharedmemory",
-        f"--include-data-dir={ROOT / 'vendor'}=vendor",
         "--product-name=PitRadio",
         f"--product-version={_four_part(version)}",
         f"--file-version={_four_part(version)}",
@@ -165,6 +166,20 @@ def nuitka_args(version: str) -> list[str]:
     return args
 
 
+def nuitka_env() -> dict:
+    """Environment for the Nuitka subprocess.
+
+    Nuitka runs as a separate process, so adding `vendor/` to this script's
+    sys.path does nothing for it — it resolves --include-package against its
+    own import path. PYTHONPATH is how the vendored modules become findable.
+    """
+    env = dict(os.environ)
+    vendor = str(ROOT / "vendor")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{vendor}{os.pathsep}{existing}" if existing else vendor
+    return env
+
+
 def build() -> int:
     version = read_version()
     BUILD_DIR.mkdir(exist_ok=True)
@@ -172,7 +187,7 @@ def build() -> int:
     args = nuitka_args(version)
     print(f"building PitRadio {version}")
     print(" ".join(args))
-    result = subprocess.run(args, cwd=ROOT, check=False)
+    result = subprocess.run(args, cwd=ROOT, check=False, env=nuitka_env())
     if result.returncode != 0:
         return result.returncode
 
