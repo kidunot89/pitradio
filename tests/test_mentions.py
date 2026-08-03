@@ -206,3 +206,47 @@ def test_two_names_are_both_marked_at_the_right_offsets():
 
 def test_punctuation_around_a_name_survives():
     assert mentions.apply_mentions("box, Tandy, now", FIELD) == "box, @Tandy, now"
+
+
+# -- multi-word surnames -------------------------------------------------
+
+DUTCH = ["Nyck de Vries", "Kelvin van der Linde", "Antonio Felix da Costa"]
+
+
+@pytest.mark.parametrize(
+    ("said", "expected"),
+    [
+        ("de Vries is quick", "@de Vries is quick"),
+        ("van der Linde went long", "@van der Linde went long"),
+        ("tell da Costa to box", "tell @da Costa to box"),
+    ],
+)
+def test_a_multi_word_surname_is_marked_from_its_start(said, expected):
+    """Sportscar grids are full of these.
+
+    Matching only the final token produced "de @Vries" and "van der @Linde",
+    marking someone mid-surname.
+    """
+    assert mentions.apply_mentions(said, DUTCH) == expected
+
+
+def test_the_full_name_still_wins_over_the_surname():
+    assert mentions.apply_mentions("Nyck de Vries is quick", DUTCH) == (
+        "@Nyck de Vries is quick")
+
+
+def test_the_final_token_alone_still_matches():
+    """Someone may well just say "Vries"."""
+    assert mentions.apply_mentions("Vries is catching", DUTCH) == "@Vries is catching"
+
+
+def test_trailing_runs_are_longest_first():
+    """Order decides which match wins, so it is worth stating."""
+    assert mentions.trailing_runs(["nyck", "de", "vries"]) == [
+        ["nyck", "de", "vries"], ["de", "vries"], ["vries"],
+    ]
+
+
+def test_a_leading_particle_alone_is_not_a_match():
+    """"de" and "van" are ordinary words in their own right."""
+    assert mentions.find_mentions("de la and van the", DUTCH) == []

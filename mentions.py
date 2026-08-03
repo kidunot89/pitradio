@@ -89,17 +89,29 @@ def find_mentions(
     return found
 
 
-def _matches(words: list[str], parts: list[str], *, fuzzy: bool, threshold: float) -> bool:
-    """A driver is named if the full name appears in order, or a surname does.
+def trailing_runs(parts: list[str]) -> list[list[str]]:
+    """The full name, then each shorter run ending at the surname.
 
-    Surnames are how people actually refer to drivers over the radio, and a
-    first name alone is far too likely to be an ordinary word.
+    Surnames are how drivers are referred to on the radio and how sims label
+    them on screen — and plenty of them are more than one word. Matching only
+    the final token turns "de Vries" into "de @Vries" and "van der Linde" into
+    "van der @Linde", marking someone mid-surname.
+
+    Longest first, so the most complete match wins.
     """
-    if _contains_sequence(words, parts, fuzzy=fuzzy, threshold=threshold):
-        return True
-    surname = parts[-1]
-    return len(parts) > 1 and _contains_sequence(
-        words, [surname], fuzzy=fuzzy, threshold=threshold)
+    return [parts[start:] for start in range(len(parts))]
+
+
+def _matches(words: list[str], parts: list[str], *, fuzzy: bool, threshold: float) -> bool:
+    """A driver is named if the full name, or any trailing run of it, appears.
+
+    A first name alone is deliberately not enough: "Max" and "Nick" are
+    ordinary words, and marking them would be worse than missing them.
+    """
+    return any(
+        _contains_sequence(words, run, fuzzy=fuzzy, threshold=threshold)
+        for run in trailing_runs(parts)
+    )
 
 
 def _contains_sequence(
@@ -182,13 +194,14 @@ def apply_mentions(
         if not parts:
             continue
 
-        # Full name first, so the prefix lands at its start; then the surname,
-        # which is how people actually refer to drivers.
-        at = _find_span(tokens, parts, fuzzy=fuzzy, threshold=threshold)
-        if at is None and len(parts) > 1:
-            at = _find_span(tokens, parts[-1:], fuzzy=fuzzy, threshold=threshold)
-        if at is not None and at not in inserts:
-            inserts.append(at)
+        # Longest run first, so the prefix lands at the start of whatever was
+        # actually said — "@de Vries", not "de @Vries".
+        for run in trailing_runs(parts):
+            at = _find_span(tokens, run, fuzzy=fuzzy, threshold=threshold)
+            if at is not None:
+                if at not in inserts:
+                    inserts.append(at)
+                break
 
     # Right to left, so earlier offsets stay valid as the string grows.
     result = text
