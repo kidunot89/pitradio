@@ -77,9 +77,11 @@ swallowed so binding Enter doesn't also do something behind the window.
 removes the need for JoyToKey entirely. The key and the button work alongside
 each other — either one triggers.
 
-Buttons are read through SDL2, the same layer sims use, so it sees DirectInput
-wheels, XInput pads and Steam Input devices, and it reads them while the game
-has focus rather than only when PitRadio does. A few details worth knowing:
+Buttons are read through four backends at once — **SDL3, SDL2, XInput** and the
+Windows multimedia API — because no single one sees everything. A wheel on SDL2
+and a pad on XInput is an ordinary rig, so PitRadio combines what they all
+report instead of picking one. It reads them while the game has focus, not only
+when PitRadio does. A few details worth knowing:
 
 - The binding is stored against the **device itself**, not its position in the
   list, so plugging in a headset or starting Steam won't quietly point it at
@@ -90,8 +92,13 @@ has focus rather than only when PitRadio does. A few details worth knowing:
 - If the bound controller isn't plugged in, Settings says so rather than
   showing a stale device.
 
+- The detector names **which API found each device**, which is the first useful
+  thing to know when one misbehaves.
+
 If a controller doesn't show up at all, **Settings → Rescan controllers** lists
-everything detected along with which backend is in use — start there.
+every backend and everything each one detected — start there. A device missing
+from all four is usually one Steam has captured, or one in desktop mode, where
+it presents as a keyboard and mouse rather than a controller.
 
 To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
 choices: present on most keyboards, rarely bound by sims.
