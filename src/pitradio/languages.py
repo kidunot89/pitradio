@@ -12,6 +12,8 @@ language is still worth doing: multilingual `small` is meaningfully weaker than
 
 from __future__ import annotations
 
+import sys
+
 # Size -> (approximate download, note). Sizes are the user-facing choice; the
 # actual model name is derived by model_name().
 SIZES: dict[str, tuple[str, str]] = {
@@ -87,6 +89,86 @@ WHISPER_LANGUAGES: dict[str, str] = {
     "tt": "Tatar", "haw": "Hawaiian", "ln": "Lingala", "ha": "Hausa",
     "ba": "Bashkir", "jw": "Javanese", "su": "Sundanese", "yue": "Cantonese",
 }
+
+
+# Locale tags that do not simply truncate to a Whisper code.
+_LOCALE_ALIASES = {
+    "zh_hant": "zh", "zh_hans": "zh", "zh_tw": "zh", "zh_cn": "zh",
+    "zh_hk": "zh", "yue_hant": "yue", "pt_br": "pt", "nb": "no", "nb_no": "no",
+    "nn_no": "nn", "he_il": "he", "iw": "he", "in": "id", "ji": "yi",
+    "fil": "tl", "fil_ph": "tl",
+}
+
+
+def normalise_locale(tag: str) -> str:
+    """A locale tag reduced to a Whisper language code, or "" if unsupported.
+
+    Handles the shapes a real system produces: `en_GB.UTF-8`, `pt-BR`,
+    `zh_Hans_CN`, and the three ISO codes Java-era locales still spell the old
+    way (`iw`, `in`, `ji`).
+    """
+    if not tag:
+        return ""
+    cleaned = tag.strip().split(".")[0].split("@")[0].replace("-", "_").lower()
+    if not cleaned or cleaned in ("c", "posix"):
+        return ""
+
+    for candidate in (cleaned, "_".join(cleaned.split("_")[:2])):
+        if candidate in _LOCALE_ALIASES:
+            return _LOCALE_ALIASES[candidate]
+
+    primary = cleaned.split("_")[0]
+    if primary in _LOCALE_ALIASES:
+        return _LOCALE_ALIASES[primary]
+    return primary if primary in WHISPER_LANGUAGES else ""
+
+
+def system_language(default: str = "en") -> str:
+    """The desktop's language, as a Whisper code.
+
+    Used to seed the config on first run so someone in Spain is not handed an
+    English-only model. Only ever a *default*: once a config exists the choice
+    is the user's, and re-deriving it would overwrite what they picked.
+
+    Falls back to `default` whenever the system will not say, or says something
+    Whisper has no model for.
+    """
+    import locale
+    import os
+
+    candidates: list[str] = []
+    if sys.platform == "win32":
+        # The UI language, not the formatting locale — LANG is rarely set on
+        # Windows and the formatting locale follows the region, so a British
+        # user with a US regional format would otherwise be misread.
+        try:
+            import ctypes
+
+            windll = ctypes.windll  # type: ignore[attr-defined]
+            language_id = windll.kernel32.GetUserDefaultUILanguage()
+            buffer = ctypes.create_unicode_buffer(85)
+            if windll.kernel32.LCIDToLocaleName(language_id, buffer, 85, 0):
+                candidates.append(buffer.value)
+        except Exception:
+            pass
+
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        value = os.environ.get(name)
+        if value:
+            candidates.append(value.split(":")[0])
+
+    try:
+        current = locale.getlocale()[0]
+        if current:
+            candidates.append(current)
+    except Exception:
+        pass
+
+    for tag in candidates:
+        code = normalise_locale(tag)
+        if code:
+            return code
+    return default
 
 
 def language_name(code: str) -> str:

@@ -6,6 +6,8 @@ languages. The mapping from a user's "Spanish, medium" to an actual model name
 is the only place that distinction lives, so it's worth pinning.
 """
 
+from pathlib import Path
+
 import pytest
 
 from pitradio import config, languages
@@ -146,3 +148,150 @@ def test_a_saved_active_language_agrees_with_its_model():
         cfg.whisper.language = code
         cfg.whisper.model = languages.model_name(code, size)
         assert cfg.validate() == [], f"{code}/{size} produced problems"
+
+
+# -- following the system language ---------------------------------------
+
+
+@pytest.mark.parametrize("tag,expected", [
+    ("en_GB.UTF-8", "en"),
+    ("pt-BR", "pt"),
+    ("zh_Hans_CN", "zh"),
+    ("es_ES@euro", "es"),
+    ("de_DE", "de"),
+    ("fr", "fr"),
+    # Locale tags that predate the current ISO codes and still turn up.
+    ("iw_IL", "he"),
+    ("in_ID", "id"),
+    ("ji", "yi"),
+    ("nb_NO", "no"),
+    ("fil_PH", "tl"),
+])
+def test_a_locale_tag_becomes_a_whisper_code(tag, expected):
+    assert languages.normalise_locale(tag) == expected
+
+
+@pytest.mark.parametrize("tag", ["", "C", "POSIX", "xx_YY", "klingon", None])
+def test_an_unusable_locale_yields_nothing(tag):
+    """Whisper has no model for it, so guessing would be worse than the default."""
+    assert languages.normalise_locale(tag or "") == ""
+
+
+def test_every_alias_maps_to_a_language_whisper_knows():
+    """An alias pointing at a code with no model would seed an unusable config."""
+    for tag, code in languages._LOCALE_ALIASES.items():
+        assert code in languages.WHISPER_LANGUAGES, f"{tag} -> {code}"
+
+
+def test_the_system_language_falls_back_when_nothing_is_set(monkeypatch):
+    import locale
+
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(locale, "getlocale", lambda *a: (None, None))
+
+    assert languages.system_language() == "en"
+
+
+def test_the_environment_is_read_in_precedence_order(monkeypatch):
+    """LC_ALL wins over LANG, as every POSIX system defines it."""
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    monkeypatch.setenv("LANG", "fr_FR.UTF-8")
+    assert languages.system_language() == "de"
+
+    monkeypatch.delenv("LC_ALL")
+    assert languages.system_language() == "fr"
+
+
+def test_a_language_list_entry_is_skipped_when_unsupported(monkeypatch):
+    """LANGUAGE holds a colon-separated fallback chain."""
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LANGUAGE", "es_ES:en_US")
+    assert languages.system_language() == "es"
+
+
+def test_a_seeded_model_exists_for_every_detectable_language():
+    """model_name must return something loadable for anything we might detect."""
+    for code in set(languages._LOCALE_ALIASES.values()) | {"en", "de", "es"}:
+        model = languages.model_name(code, languages.DEFAULT_SIZE)
+        assert model
+        assert code == "en" or not model.endswith(".en"), (
+            f"{code} would be seeded with an English-only model"
+        )
+
+
+# -- first-run seeding ----------------------------------------------------
+
+
+@pytest.fixture
+def seeding(monkeypatch, tmp_path):
+    """`seed_config` pointed at a temporary directory."""
+    from pitradio import __main__ as cli
+    from pitradio import paths
+
+    target = tmp_path / "config.json"
+    monkeypatch.setattr(paths, "config_path", lambda: target)
+    monkeypatch.setattr(cli.paths, "config_path", lambda: target)
+    monkeypatch.setattr(cli.paths, "default_config_path",
+                        lambda: Path(__file__).parent.parent / "config.default.json")
+    return cli, target
+
+
+def test_a_new_config_follows_the_system_language(seeding, monkeypatch):
+    cli, target = seeding
+    monkeypatch.setattr(languages, "system_language", lambda default="en": "es")
+
+    cli.seed_config()
+
+    cfg = config.load(target)
+    assert cfg.whisper.language == "es"
+    assert cfg.whisper.languages == {"es": languages.DEFAULT_SIZE}
+    # Never an English-only build for a non-English language: faster-whisper
+    # would transcribe English anyway and say nothing about it.
+    assert not cfg.whisper.model.endswith(".en")
+    assert cfg.validate() == []
+
+
+def test_an_english_system_leaves_the_shipped_defaults_alone(seeding, monkeypatch):
+    cli, target = seeding
+    monkeypatch.setattr(languages, "system_language", lambda default="en": "en")
+
+    cli.seed_config()
+
+    cfg = config.load(target)
+    assert cfg.whisper.language == "en"
+    assert cfg.whisper.model == "small.en"
+
+
+def test_an_existing_config_is_never_relanguaged(seeding, monkeypatch):
+    """The choice is the user's once made; re-deriving it would revert them."""
+    cli, target = seeding
+    monkeypatch.setattr(languages, "system_language", lambda default="en": "de")
+
+    cli.seed_config()
+    assert config.load(target).whisper.language == "de"
+
+    # The user picks something else, then restarts.
+    cfg = config.load(target)
+    cfg.whisper.language = "fr"
+    cfg.whisper.languages = {"fr": "small"}
+    cfg.whisper.model = languages.model_name("fr", "small")
+    config.save(target, cfg)
+
+    cli.seed_config()
+    assert config.load(target).whisper.language == "fr"
+
+
+def test_a_detection_failure_still_leaves_a_usable_config(seeding, monkeypatch):
+    """First run is the worst possible moment to raise."""
+    cli, target = seeding
+
+    def explode(default="en"):
+        raise RuntimeError("no locale for you")
+
+    monkeypatch.setattr(languages, "system_language", explode)
+
+    cli.seed_config()
+    assert target.exists()
+    assert config.load(target).validate() == []

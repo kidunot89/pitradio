@@ -114,6 +114,39 @@ def seed_config() -> None:
         log.info("created %s from the bundled defaults", target)
     except OSError as exc:
         log.warning("could not seed %s from %s: %s", target, source, exc)
+        return
+
+    _seed_language(target)
+
+
+def _seed_language(path) -> None:
+    """Point a brand-new config at the desktop's own language.
+
+    Only on the run that creates the file. Deriving it every startup would
+    overwrite whatever the user later chose in the Language tab, and a config
+    that silently reverts is worse than one that guessed wrong once.
+
+    English is the shipped default and needs no rewrite — it also spares an
+    install on an English machine a pointless save.
+    """
+    from pitradio import languages as languages_mod
+
+    try:
+        code = languages_mod.system_language()
+        if code == "en":
+            return
+
+        cfg = config_mod.load(path)
+        size = cfg.whisper.languages.get(code, languages_mod.DEFAULT_SIZE)
+        cfg.whisper.language = code
+        cfg.whisper.languages = {code: size}
+        cfg.whisper.model = languages_mod.model_name(code, size)
+        config_mod.save(path, cfg)
+        log.info("system language is %s; defaulting transcription to it (model %s)",
+                 languages_mod.language_name(code), cfg.whisper.model)
+    except Exception as exc:
+        # A bad guess must not stop the app starting on its very first run.
+        log.warning("could not apply the system language: %s", exc)
 
 
 # -- command-line modes --------------------------------------------------
