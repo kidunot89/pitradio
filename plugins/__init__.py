@@ -97,6 +97,31 @@ class PluginRegistry:
             log.exception("plugin %s failed while reading drivers", plugin.name)
             return []
 
+    def vocabulary_for(self, plugin_id: str | None) -> list[str]:
+        """Session terms from the profile's plugin, or an empty list."""
+        plugin = self.by_id(plugin_id)
+        if plugin is None:
+            return []
+        try:
+            return plugin.vocabulary()
+        except Exception:
+            log.exception("plugin %s failed while reading vocabulary", plugin.name)
+            return []
+
+    def vocabularies(self) -> list[tuple[str, list[str], str]]:
+        """(plugin name, terms, status) for every plugin, for the GUI.
+
+        Shows all of them rather than only the active one: when a term is
+        missing, the question is usually which plugin should have supplied it.
+        """
+        rows = []
+        for plugin in self.plugins:
+            try:
+                rows.append((plugin.name, plugin.vocabulary(), plugin.status()))
+            except Exception as exc:
+                rows.append((plugin.name, [], f"error: {type(exc).__name__}: {exc}"))
+        return rows
+
     def describe(self) -> list[tuple[str, str]]:
         """(name, status) for the GUI's plugin list."""
         rows = []

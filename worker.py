@@ -127,6 +127,11 @@ class Worker(threading.Thread):
             "exe": exe or "<unknown>",
             "matched": matched,
             "drivers": drivers,
+            # Read alongside the drivers, from the same moment in the session.
+            "vocabulary": (
+                self.plugins.vocabulary_for(profile.plugin)
+                if drivers and cfg.mentions.add_names_to_vocabulary else []
+            ),
         }
 
     def _on_up(self, released_at: float) -> None:
@@ -150,10 +155,8 @@ class Worker(threading.Thread):
         self.state.set_status(state_mod.STATUS_TRANSCRIBING)
         transcribe_started = time.perf_counter()
         drivers = active.get("drivers") or []
-        hint = (
-            mentions_mod.vocabulary_hint(drivers, cfg.mentions.max_names)
-            if drivers and cfg.mentions.add_names_to_vocabulary else ""
-        )
+        hint = mentions_mod.vocabulary_hint(
+            active.get("vocabulary") or [], cfg.mentions.max_names)
         raw = self.transcriber.transcribe(audio, cfg.whisper, hint)
         transcribe_seconds = time.perf_counter() - transcribe_started
         log.info(

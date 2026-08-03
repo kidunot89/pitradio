@@ -172,7 +172,13 @@ Adding a sim means a pull request, and it's two small steps: see
 
 ## Accuracy
 
-The **Vocabulary** tab feeds Whisper a list of words to expect. It ships with
+The **Vocabulary** tab feeds Whisper a list of words to expect. Below the
+editable list it also shows the **runtime vocabulary** — terms plugins supply
+for the current session, and the exact prompt Whisper receives once the two are
+combined. If a name keeps coming out wrong, that panel tells you whether it was
+ever offered in the first place.
+
+ It ships with
 corner names, series terms and radio phrases, and it measurably improves proper
 nouns. Add your regular team mates' names, your series' jargon, tracks you run
 often.

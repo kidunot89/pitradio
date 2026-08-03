@@ -667,12 +667,69 @@ def build_vocabulary_tab(app) -> None:
         foreground="#666", wraplength=880, justify="left",
     ).pack(fill="x", pady=(0, 8))
 
-    app.vocab_text = tk.Text(frame, wrap="word", height=16)
+    app.vocab_text = tk.Text(frame, wrap="word", height=10)
     app.vocab_text.insert("1.0", app.store.config.whisper.initial_prompt)
     app.vocab_text.pack(fill="both", expand=True)
 
     ttk.Button(frame, text="Save", command=lambda: _save_vocab(app)).pack(
         anchor="e", pady=(10, 0))
+
+    session = ttk.LabelFrame(frame, text="From the session (read-only)", padding=8)
+    session.pack(fill="both", expand=True, pady=(12, 0))
+
+    ttk.Label(
+        session,
+        text=("Supplied by plugins at the moment you trigger, and prepended to "
+              "the text above. Today that means driver names; another sim's "
+              "plugin might contribute car names, teams or commentators. Shown "
+              "here because a name Whisper keeps mangling is usually a name it "
+              "was never told about."),
+        foreground="#666", wraplength=860, justify="left",
+    ).pack(fill="x", pady=(0, 6))
+
+    app.runtime_vocab_text = tk.Text(session, wrap="word", height=8,
+                                     state="disabled", font=("Consolas", 9))
+    app.runtime_vocab_text.pack(fill="both", expand=True)
+
+    ttk.Button(session, text="Refresh",
+               command=lambda: refresh_runtime_vocabulary(app)).pack(
+        anchor="w", pady=(6, 0))
+
+    refresh_runtime_vocabulary(app)
+
+
+def refresh_runtime_vocabulary(app) -> None:
+    """Show what plugins currently supply, and the prompt Whisper would get."""
+    import mentions as mentions_mod
+
+    lines: list[str] = []
+    if app.plugins is None:
+        lines.append("Plugins are unavailable in this run.")
+    else:
+        for name, terms, status in app.plugins.vocabularies():
+            lines.append(f"{name}: {status}")
+            if terms:
+                lines.append(f"  {len(terms)} term(s): " + ", ".join(terms[:40]))
+                if len(terms) > 40:
+                    lines.append(f"  (+{len(terms) - 40} more)")
+            lines.append("")
+
+        cfg = app.store.config
+        # The exact string handed to Whisper, truncation and ordering included,
+        # so what is shown is what it receives rather than an approximation.
+        active = next(
+            (terms for _n, terms, _s in app.plugins.vocabularies() if terms), [])
+        hint = mentions_mod.vocabulary_hint(active, cfg.mentions.max_names)
+        import speech as speech_mod
+
+        effective = speech_mod._join_prompt(cfg.whisper.initial_prompt, hint) or ""
+        lines.append("-- prompt Whisper receives --")
+        lines.append(effective)
+
+    app.runtime_vocab_text.configure(state="normal")
+    app.runtime_vocab_text.delete("1.0", "end")
+    app.runtime_vocab_text.insert("1.0", "\n".join(lines))
+    app.runtime_vocab_text.configure(state="disabled")
 
 
 def _save_vocab(app) -> None:

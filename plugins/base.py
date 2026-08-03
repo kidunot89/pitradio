@@ -61,6 +61,17 @@ class SessionPlugin:
         """
         return []
 
+    def vocabulary(self) -> list[str]:
+        """Terms to feed Whisper's initial_prompt for this session.
+
+        Separate from drivers() because the two answer different questions.
+        Mentions need *names* to match against; the prompt just needs words
+        Whisper would otherwise have no reason to expect — which for another
+        sim might be car names, teams, tracks or commentators rather than
+        people. Defaults to the driver list, which is the common case.
+        """
+        return self.drivers()
+
     def status(self) -> str:
         """A line for the GUI's plugin list — connected, idle, or why not."""
         return "not connected"

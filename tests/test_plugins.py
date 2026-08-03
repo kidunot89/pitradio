@@ -267,3 +267,52 @@ def test_status_says_not_connected_when_lmu_is_absent():
     plugin = plugins.LeMansUltimatePlugin()
     assert plugin.drivers() == []
     assert "not connected" in plugin.status()
+
+
+# -- vocabulary ----------------------------------------------------------
+
+
+class Announcer(SessionPlugin):
+    """A plugin whose useful terms are not people."""
+
+    id = "announcer"
+    name = "Some Other Sim"
+
+    def drivers(self):
+        return ["Geoff Taylor"]
+
+    def vocabulary(self):
+        return ["Porsche 963", "Hypercar", "Eau Rouge"]
+
+
+def test_vocabulary_defaults_to_the_driver_list():
+    """The common case, so a plugin only has to implement drivers()."""
+    registry = plugins.PluginRegistry((Working,))
+    assert registry.vocabulary_for("fake") == ["Geoff Taylor", "Nick Tandy"]
+
+
+def test_vocabulary_can_differ_from_drivers():
+    """Another sim's useful terms might be cars or commentators, not names."""
+    registry = plugins.PluginRegistry((Announcer,))
+    assert registry.vocabulary_for("announcer") == [
+        "Porsche 963", "Hypercar", "Eau Rouge"]
+    assert registry.drivers_for("announcer") == ["Geoff Taylor"]
+
+
+def test_a_plugin_that_raises_on_vocabulary_costs_only_its_terms():
+    registry = plugins.PluginRegistry((Exploding,))
+    assert registry.vocabulary_for("boom") == []
+
+
+def test_vocabularies_lists_every_plugin_for_the_gui():
+    """All of them, not just the active one: when a term is missing the
+    question is usually which plugin should have supplied it."""
+    rows = plugins.PluginRegistry((Working, Announcer)).vocabularies()
+    names = [name for name, _terms, _status in rows]
+    assert names == ["Fake Sim", "Some Other Sim"]
+
+
+def test_vocabularies_survives_a_broken_plugin():
+    rows = plugins.PluginRegistry((Exploding,)).vocabularies()
+    assert rows[0][1] == []
+    assert "error" in rows[0][2]

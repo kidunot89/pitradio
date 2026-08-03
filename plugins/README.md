@@ -27,9 +27,18 @@ class YourSimPlugin(SessionPlugin):
     def drivers(self) -> list[str]:
         return [...]                     # empty list when unavailable
 
+    def vocabulary(self) -> list[str]:
+        return [...]                     # optional; defaults to drivers()
+
     def status(self) -> str:
         return "connected"               # one line for the plugin list
 ```
+
+`vocabulary()` is what gets fed to Whisper so it expects those words. It
+defaults to `drivers()` because that is the common case, but override it when
+the useful terms are not people — car names, teams, tracks, commentators. The
+Vocabulary tab shows what every plugin currently supplies, which is how someone
+debugs a term that keeps coming out wrong.
 
 **2. Register it.** Add the class to `BUILTIN` in `plugins/__init__.py`.
 
