@@ -126,6 +126,28 @@ def _word_matches(word: str, part: str, *, fuzzy: bool, threshold: float) -> boo
     return _similarity(word, part) >= threshold
 
 
+def _tokens(text: str) -> list[tuple[int, int, str]]:
+    """(start, end, normalised) for every word, so spans map back to the text."""
+    return [(m.start(), m.end(), _normalise(m.group())) for m in _WORD.finditer(text)]
+
+
+def _find_span(
+    tokens: list[tuple[int, int, str]],
+    parts: list[str],
+    *,
+    fuzzy: bool,
+    threshold: float,
+) -> int | None:
+    """Character offset where a run of tokens matches `parts`, or None."""
+    span = len(parts)
+    for start in range(len(tokens) - span + 1):
+        window = tokens[start:start + span]
+        if all(_word_matches(t[2], p, fuzzy=fuzzy, threshold=threshold)
+               for t, p in zip(window, parts, strict=True)):
+            return window[0][0]
+    return None
+
+
 def apply_mentions(
     text: str,
     drivers: list[str],
@@ -136,24 +158,44 @@ def apply_mentions(
 ) -> str:
     """Prefix any driver named in the text, e.g. 'box Smith' -> 'box @Smith'.
 
-    Rewrites what was actually said rather than substituting the full name: if
-    someone says a surname, replacing it with the driver's full name changes
-    their words for no benefit.
+    Works on token positions rather than a regex over the raw text, for two
+    reasons. Matching normalises accents — "lopez" finds "José María López" —
+    and a regex built from the stored name would then fail to mark up what was
+    actually written. And when a full name appears, the prefix belongs at the
+    start of it: substituting on the longest part alone produced
+    "Geoff @Taylor", marking someone mid-name.
+
+    Rewrites what was said rather than substituting the stored name: if someone
+    says a surname, replacing it with the full name changes their words for no
+    benefit.
     """
     if not text or not drivers:
         return text
 
-    result = text
+    tokens = _tokens(text)
+    if not tokens:
+        return text
+
+    inserts: list[int] = []
     for name in find_mentions(text, drivers, fuzzy=fuzzy, threshold=threshold):
-        for part in sorted(name_parts(name), key=len, reverse=True):
-            pattern = re.compile(
-                rf"(?<![\w{re.escape(prefix)}]){re.escape(part)}(?![\w])",
-                re.IGNORECASE,
-            )
-            replaced, count = pattern.subn(f"{prefix}{part}", result, count=1)
-            if count:
-                result = replaced
-                break
+        parts = [_normalise(p) for p in name_parts(name)]
+        if not parts:
+            continue
+
+        # Full name first, so the prefix lands at its start; then the surname,
+        # which is how people actually refer to drivers.
+        at = _find_span(tokens, parts, fuzzy=fuzzy, threshold=threshold)
+        if at is None and len(parts) > 1:
+            at = _find_span(tokens, parts[-1:], fuzzy=fuzzy, threshold=threshold)
+        if at is not None and at not in inserts:
+            inserts.append(at)
+
+    # Right to left, so earlier offsets stay valid as the string grows.
+    result = text
+    for at in sorted(inserts, reverse=True):
+        if result[max(0, at - len(prefix)):at] == prefix:
+            continue  # already marked
+        result = result[:at] + prefix + result[at:]
     return result
 
 

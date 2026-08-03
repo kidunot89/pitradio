@@ -160,3 +160,49 @@ def test_prompt_joining_handles_missing_parts(base, extra, expected):
     import speech
 
     assert speech._join_prompt(base, extra) == expected
+
+
+# -- where the prefix lands ----------------------------------------------
+
+
+def test_a_full_name_is_prefixed_at_its_start():
+    """Marking the longest part alone produced 'Geoff @Taylor', mid-name."""
+    assert mentions.apply_mentions("Geoff Taylor is quick", FIELD) == (
+        "@Geoff Taylor is quick")
+
+
+def test_an_accented_name_said_plainly_is_still_marked():
+    """Matching normalises accents; the markup has to agree with it.
+
+    A regex built from the stored name would find nothing in "lopez", so the
+    driver was recognised and then not marked — the worst of both.
+    """
+    assert mentions.apply_mentions("lopez is on old tyres", FIELD) == (
+        "@lopez is on old tyres")
+
+
+def test_a_single_token_name_works():
+    """Plenty of sim drivers race under a handle rather than a real name."""
+    assert mentions.apply_mentions("kidunot89 is quick", ["kidunot89"]) == (
+        "@kidunot89 is quick")
+
+
+def test_your_own_name_is_marked_like_anyone_else():
+    """LMU lists every vehicle including the player, so a solo session works."""
+    assert mentions.apply_mentions("Taylor boxing this lap", ["Geoff Taylor"]) == (
+        "@Taylor boxing this lap")
+
+
+def test_the_prefix_is_not_doubled():
+    assert mentions.apply_mentions("@Taylor already marked", FIELD) == (
+        "@Taylor already marked")
+
+
+def test_two_names_are_both_marked_at_the_right_offsets():
+    """Inserting left to right would shift every later offset."""
+    assert mentions.apply_mentions("Taylor and Tandy are racing", FIELD) == (
+        "@Taylor and @Tandy are racing")
+
+
+def test_punctuation_around_a_name_survives():
+    assert mentions.apply_mentions("box, Tandy, now", FIELD) == "box, @Tandy, now"

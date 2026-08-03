@@ -114,7 +114,12 @@ class Worker(threading.Thread):
         if self.plugins is not None and cfg.mentions.enabled:
             drivers = self.plugins.drivers_for(profile.plugin)
             if drivers:
-                log.info("session has %d driver(s)", len(drivers))
+                # Named, not just counted: whether a mention works comes down to
+                # what the sim actually calls someone, and "session has 1
+                # driver" leaves you guessing at it.
+                shown = ", ".join(drivers[:12])
+                more = f" (+{len(drivers) - 12} more)" if len(drivers) > 12 else ""
+                log.info("session drivers: %s%s", shown, more)
 
         self._active = {
             "started": started,
