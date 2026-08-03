@@ -58,10 +58,43 @@ def _have(module: str) -> bool:
         return False
 
 
-def build() -> int:
-    version = read_version()
-    BUILD_DIR.mkdir(exist_ok=True)
+def av_extension_modules() -> list[str]:
+    """Every compiled submodule of av, named explicitly.
 
+    PyAV ships each submodule as a prebuilt extension with a `.py` typing stub
+    beside it. Nuitka uses the extension, and imports made *from inside* one are
+    invisible to static analysis — so following imports alone reached 47 of the
+    48 modules and silently dropped `av.utils`. v0.1.0 shipped that way and died
+    with "No module named 'av.utils'" the first time it loaded Whisper.
+
+    `--include-package=av` would cover it, but crashes Nuitka's optimiser with
+    an internal AssertionError. Naming the modules avoids both problems, and
+    computing the list here rather than hardcoding it means a PyAV upgrade that
+    adds a module doesn't quietly reintroduce the bug.
+    """
+    try:
+        import av
+    except ImportError:
+        return []
+
+    root = Path(av.__file__).parent
+    names = set()
+    for pattern in ("*.pyd", "*.so"):
+        for path in root.rglob(pattern):
+            relative = path.relative_to(root)
+            # Strip the platform tag: utils.abi3.so / utils.cp312-win_amd64.pyd
+            stem = relative.name.split(".")[0]
+            names.add(".".join(["av", *relative.parent.parts, stem]))
+    return sorted(names)
+
+
+def nuitka_args(version: str) -> list[str]:
+    """The full Nuitka command line.
+
+    Split out from build() so the flags can be asserted on directly rather than
+    by grepping this file — a packaging mistake here otherwise costs a ~30
+    minute Windows build to discover.
+    """
     args = [
         sys.executable, "-m", "nuitka",
         "--standalone",
@@ -83,14 +116,7 @@ def build() -> int:
         "--include-package-data=faster_whisper",
         "--include-package=ctranslate2",
         "--include-package-data=ctranslate2",
-        # av (PyAV) ships each submodule as a prebuilt extension with a .py
-        # typing stub beside it. Nuitka uses the extension, and imports made
-        # from inside one are invisible to static analysis — so following
-        # imports alone silently misses av.utils and the app dies with
-        # "No module named 'av.utils'" the first time it loads Whisper.
-        # Including the whole package is the only reliable fix.
-        "--include-package=av",
-        "--include-package-data=av",
+        # av's compiled submodules are added below; see av_extension_modules.
         # sounddevice is a single module, not a package — --include-package
         # is a fatal error for it. Its PortAudio DLL lives in the separate
         # _sounddevice_data package, added below.
@@ -107,6 +133,9 @@ def build() -> int:
         str(ROOT / "pitradio.py"),
     ]
 
+    for name in av_extension_modules():
+        args.insert(-1, f"--include-module={name}")
+
     # PortAudio's DLL lives in a separate data package on Windows wheels.
     if _have("_sounddevice_data"):
         args.insert(-1, "--include-package-data=_sounddevice_data")
@@ -117,6 +146,14 @@ def build() -> int:
         args.insert(-1, "--include-package=onnxruntime")
         args.insert(-1, "--include-package-data=onnxruntime")
 
+    return args
+
+
+def build() -> int:
+    version = read_version()
+    BUILD_DIR.mkdir(exist_ok=True)
+
+    args = nuitka_args(version)
     print(f"building PitRadio {version}")
     print(" ".join(args))
     result = subprocess.run(args, cwd=ROOT, check=False)
