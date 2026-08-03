@@ -49,6 +49,11 @@ class Profile:
     type_delay_ms: int = 8
     max_chars: int = 200
     text_mode: str = "unicode"
+    # Whether to fire post_keys once the text is typed. Off leaves the message
+    # sitting in the chat box for the driver to read and send themselves —
+    # Whisper does mishear things, and an unreviewed mistake goes out to
+    # everyone in the session.
+    auto_send: bool = True
     # Which sim plugin supplies session data for this game. Empty means
     # none. Held on the profile rather than the plugin so one plugin can
     # serve several games.
@@ -64,10 +69,36 @@ class JoystickConfig:
 
     Works alongside the keyboard trigger rather than replacing it: either fires
     the same cycle. Buttons are 1-based, matching how wheels label them.
+
+    `guid` is what the binding actually resolves against — device indices shift
+    whenever anything else is plugged in, so storing one alone silently rebinds
+    the trigger to a different device. `device` remains as the fallback for
+    configs written before identities were recorded, and `name` exists only so
+    the GUI can say which controller is bound while it is unplugged.
     """
 
     device: Any = None      # joystick id, or null for "not bound"
     button: Any = None      # 1-based button number
+    guid: Any = None        # stable device identity; preferred over `device`
+    name: Any = None        # remembered label, for display only
+
+
+@dataclass
+class ReviewConfig:
+    """Trigger gestures for a message left waiting when auto_send is off.
+
+    A press shorter than `tap_ms` is a tap; anything longer is a hold, which
+    clears the message and records a replacement. A second tap within
+    `double_tap_ms` clears instead of sending.
+
+    The cost of the double-tap gesture is that a single tap cannot act until
+    that window closes, so `double_tap_ms` is the delay between tapping and the
+    message going out. Set it to 0 to send immediately and give up clearing by
+    double tap.
+    """
+
+    tap_ms: int = 300
+    double_tap_ms: int = 350
 
 
 @dataclass
@@ -154,6 +185,7 @@ class Config:
     enabled: bool = True
     trigger_key: str = "f13"
     joystick: JoystickConfig = field(default_factory=JoystickConfig)
+    review: ReviewConfig = field(default_factory=ReviewConfig)
     mentions: MentionConfig = field(default_factory=MentionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
@@ -173,6 +205,7 @@ class Config:
         cfg.trigger_key = str(data.get("trigger_key", cfg.trigger_key))
 
         cfg.joystick = _section(JoystickConfig, data.get("joystick"))
+        cfg.review = _section(ReviewConfig, data.get("review"))
         cfg.mentions = _section(MentionConfig, data.get("mentions"))
         cfg.audio = _section(AudioConfig, data.get("audio"))
         cfg.whisper = _section(WhisperConfig, data.get("whisper"))
@@ -198,6 +231,7 @@ class Config:
             "enabled": self.enabled,
             "trigger_key": self.trigger_key,
             "joystick": asdict(self.joystick),
+            "review": asdict(self.review),
             "mentions": asdict(self.mentions),
             "audio": asdict(self.audio),
             "whisper": asdict(self.whisper),
@@ -233,14 +267,30 @@ class Config:
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
 
-        joystick_bound = self.joystick.device is not None or self.joystick.button is not None
+        joystick_bound = (
+            self.joystick.device is not None
+            or self.joystick.button is not None
+            or self.joystick.guid is not None
+        )
         if joystick_bound:
-            if not isinstance(self.joystick.device, int) or self.joystick.device < 0:
+            # An identity is enough on its own: the index is only consulted when
+            # no identity was recorded, so a binding may legitimately omit it.
+            if self.joystick.guid is None and (
+                not isinstance(self.joystick.device, int) or self.joystick.device < 0
+            ):
                 problems.append("joystick.device must be a device number, or null")
-            # 1-based to match the numbering printed on wheels; the legacy API
-            # this uses exposes at most 32.
-            if not isinstance(self.joystick.button, int) or not 1 <= self.joystick.button <= 32:
-                problems.append("joystick.button must be between 1 and 32, or null")
+            if self.joystick.guid is not None and not isinstance(self.joystick.guid, str):
+                problems.append("joystick.guid must be a device identity string, or null")
+            # 1-based to match the numbering printed on wheels. The ceiling
+            # covers button boxes and the POV hats folded in above them.
+            if not isinstance(self.joystick.button, int) or not 1 <= self.joystick.button <= 128:
+                problems.append("joystick.button must be between 1 and 128, or null")
+
+        if not isinstance(self.review.tap_ms, int) or not 0 <= self.review.tap_ms <= 2000:
+            problems.append("review.tap_ms must be between 0 and 2000")
+        if (not isinstance(self.review.double_tap_ms, int)
+                or not 0 <= self.review.double_tap_ms <= 2000):
+            problems.append("review.double_tap_ms must be between 0 and 2000")
 
         if not self.mentions.prefix:
             problems.append("mentions.prefix cannot be empty")

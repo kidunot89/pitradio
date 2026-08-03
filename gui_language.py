@@ -18,6 +18,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import gui_settings
 import languages as languages_mod
 import paths
 import speech
@@ -26,8 +27,7 @@ log = logging.getLogger(__name__)
 
 
 def build_language_tab(app) -> None:
-    frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Language")
+    frame, footer = gui_settings.scrolling_tab(app, "Language")
     cfg = app.store.config
 
     ttk.Label(
@@ -98,8 +98,7 @@ def build_language_tab(app) -> None:
     ttk.Label(frame, textvariable=app.v_language_status, foreground="#333",
               wraplength=880, justify="left").pack(fill="x", pady=(10, 0))
 
-    buttons = ttk.Frame(frame)
-    buttons.pack(fill="x", pady=(6, 0))
+    buttons = footer
     app.language_save_button = ttk.Button(
         buttons, text="Save and download", command=lambda: _save_languages(app))
     app.language_save_button.pack(side="right")

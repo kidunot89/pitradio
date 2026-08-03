@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.21"
+__version__ = "0.1.22"
 
 log = logging.getLogger("pitradio")
 
@@ -398,7 +398,8 @@ def run(args) -> int:
     # A wheel button feeds the same queue, so the worker never learns which
     # input fired -- and does not need to.
     joystick = joystick_mod.JoystickWatcher(
-        events, lambda: app_state.enabled, cfg.joystick.device, cfg.joystick.button)
+        events, lambda: app_state.enabled,
+        cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid)
     registry = plugins_mod.PluginRegistry()
     registry.start_all()
     for name, status in registry.describe():

@@ -75,8 +75,23 @@ swallowed so binding Enter doesn't also do something behind the window.
 
 **Settings → Press a button…** binds a wheel or gamepad button directly, which
 removes the need for JoyToKey entirely. The key and the button work alongside
-each other — either one triggers. Button detection uses Windows' built-in
-joystick interface, which reports up to 32 buttons per device.
+each other — either one triggers.
+
+Buttons are read through SDL2, the same layer sims use, so it sees DirectInput
+wheels, XInput pads and Steam Input devices, and it reads them while the game
+has focus rather than only when PitRadio does. A few details worth knowing:
+
+- The binding is stored against the **device itself**, not its position in the
+  list, so plugging in a headset or starting Steam won't quietly point it at
+  something else.
+- **D-pads and POV hats can be bound**, and appear as `POV up` and so on.
+- Capture waits for a button to be **pressed**, so the latched switches and
+  rotary encoders on a rim don't grab the binding before you touch anything.
+- If the bound controller isn't plugged in, Settings says so rather than
+  showing a stale device.
+
+If a controller doesn't show up at all, **Settings → Rescan controllers** lists
+everything detected along with which backend is in use — start there.
 
 To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
 choices: present on most keyboards, rarely bound by sims.
@@ -86,6 +101,31 @@ key the sim needs.
 
 Closing the window minimises to the tray; the trigger key keeps working. Quit
 from the tray menu to actually stop the app.
+
+---
+
+## Checking a message before it goes out
+
+By default the message is sent as soon as it's typed. Whisper does mishear
+things, and in a public session a mistake is everyone's problem — so each
+profile has a **Send automatically** toggle (Profiles → *your sim*).
+
+With it off, the message is typed into the chat box and left there. Your
+trigger then controls what happens to it, without letting go of the wheel:
+
+| Gesture | What it does |
+| --- | --- |
+| **Tap** | Send it |
+| **Tap twice** | Clear it |
+| **Hold** | Clear it and record a replacement |
+
+The status bar shows **waiting to send** while a message is sitting there.
+
+Because a single tap might turn out to be the first half of a double, sending
+waits for the double-tap window to close — about a third of a second. If you'd
+rather not wait, set `review.double_tap_ms` to `0` in the config, which sends
+immediately and gives up clearing by double tap. `review.tap_ms` is the line
+between a tap and a hold.
 
 ---
 

@@ -55,7 +55,9 @@ def _kind_for(status: str, enabled: bool) -> str:
     if status == state_mod.STATUS_RECORDING:
         return "recording"
     if status in (state_mod.STATUS_TRANSCRIBING, state_mod.STATUS_TYPING,
-                  state_mod.STATUS_LOADING):
+                  state_mod.STATUS_LOADING, state_mod.STATUS_REVIEW):
+        # A message waiting to be sent counts as busy: the trigger is doing
+        # something other than idling, and the icon should not claim otherwise.
         return "busy"
     return "idle"
 

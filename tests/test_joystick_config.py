@@ -27,11 +27,18 @@ def test_a_valid_binding_passes():
     assert cfg.validate() == []
 
 
-@pytest.mark.parametrize("button", [0, 33, -1, "13", None])
-def test_button_must_be_one_to_thirty_two(button):
-    """1-based to match wheel labelling; 32 is the legacy API's ceiling."""
+@pytest.mark.parametrize("button", [0, 129, -1, "13", None])
+def test_button_must_be_one_to_one_twenty_eight(button):
+    """1-based to match wheel labelling; the ceiling covers hats and button boxes."""
     cfg = config.Config.from_dict({"joystick": {"device": 0, "button": button}})
     assert any("joystick.button" in p for p in cfg.validate())
+
+
+@pytest.mark.parametrize("button", [1, 32, 33, 128])
+def test_button_boxes_past_thirty_two_are_accepted(button):
+    """A 32-button ceiling would reject half the rims this is meant to bind."""
+    cfg = config.Config.from_dict({"joystick": {"device": 0, "button": button}})
+    assert [p for p in cfg.validate() if "joystick.button" in p] == []
 
 
 @pytest.mark.parametrize("device", [-1, "first", 1.5])
@@ -40,16 +47,46 @@ def test_device_must_be_a_non_negative_int(device):
     assert any("joystick.device" in p for p in cfg.validate())
 
 
+def test_an_identity_alone_is_a_complete_binding():
+    """The index is only a fallback, so a binding may legitimately omit it."""
+    cfg = config.Config.from_dict(
+        {"joystick": {"guid": "03000000d81400000862000000000000", "button": 13}})
+    assert cfg.validate() == []
+
+
+def test_device_is_not_required_once_an_identity_is_recorded():
+    cfg = config.Config.from_dict(
+        {"joystick": {"device": None, "guid": "abc", "button": 4}})
+    assert [p for p in cfg.validate() if "joystick.device" in p] == []
+
+
+@pytest.mark.parametrize("guid", [7, 1.5, ["a"]])
+def test_identity_must_be_a_string(guid):
+    cfg = config.Config.from_dict({"joystick": {"guid": guid, "button": 3}})
+    assert any("joystick.guid" in p for p in cfg.validate())
+
+
 def test_binding_survives_a_save_load_round_trip(tmp_path):
     cfg = config.Config()
     cfg.joystick.device = 1
     cfg.joystick.button = 7
+    cfg.joystick.guid = "03000000d81400000862000000000000"
+    cfg.joystick.name = "Fanatec CSL Elite"
 
     path = tmp_path / "config.json"
     config.save(path, cfg)
     reloaded = config.load(path)
 
     assert (reloaded.joystick.device, reloaded.joystick.button) == (1, 7)
+    assert reloaded.joystick.guid == "03000000d81400000862000000000000"
+    assert reloaded.joystick.name == "Fanatec CSL Elite"
+
+
+def test_a_binding_written_before_identities_still_loads():
+    """Upgrading must not invalidate a binding someone already made."""
+    cfg = config.Config.from_dict({"joystick": {"device": 0, "button": 13}})
+    assert cfg.validate() == []
+    assert cfg.joystick.guid is None
 
 
 def test_clearing_a_binding_is_valid():

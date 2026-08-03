@@ -30,6 +30,9 @@ STATUS_IDLE = "idle"
 STATUS_RECORDING = "recording"
 STATUS_TRANSCRIBING = "transcribing"
 STATUS_TYPING = "typing"
+# Typed into the chat box and waiting for the driver to send or clear it,
+# which only happens when a profile has auto_send off.
+STATUS_REVIEW = "waiting to send"
 STATUS_DISABLED = "disabled"
 
 

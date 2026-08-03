@@ -17,6 +17,7 @@ import queue
 import threading
 import time
 
+import gestures as gestures_mod
 import hook as hook_mod
 import inject
 import mentions as mentions_mod
@@ -51,6 +52,10 @@ class Worker(threading.Thread):
         self.plugins = None
 
         self._active: dict | None = None
+        # A message typed but not sent, waiting on a gesture. Only ever set
+        # when the matched profile has auto_send off.
+        self._pending: dict | None = None
+        self._gestures = gestures_mod.Gestures()
         # Anything queued before this instant belongs to a cycle we already
         # handled and is stale by the time we get to it.
         self._cycle_ended = 0.0
@@ -67,7 +72,20 @@ class Worker(threading.Thread):
 
     def run(self) -> None:
         while True:
-            kind, payload = self.events.get()
+            # A lone tap only becomes a send once the double-tap window closes,
+            # and nothing else will wake us to notice that — so when one is
+            # outstanding, wait for it rather than blocking indefinitely.
+            timeout = self._gestures.deadline(time.monotonic())
+            try:
+                kind, payload = self.events.get(timeout=timeout)
+            except queue.Empty:
+                try:
+                    self._on_gesture_elapsed()
+                except Exception:
+                    log.exception("pending message gesture failed")
+                    self._drop_pending()
+                continue
+
             try:
                 if kind == EV_STOP:
                     return
@@ -86,6 +104,15 @@ class Worker(threading.Thread):
     # -- cycle -----------------------------------------------------------
 
     def _on_down(self, pressed_at: float) -> None:
+        if self._pending is not None:
+            self._gestures.press(pressed_at)
+            # Start capturing straight away. If this turns out to be a hold it
+            # is a re-record, and waiting to find out would swallow the first
+            # words; if it turns out to be a tap the buffer is thrown away.
+            if not self.recorder.active:
+                self.recorder.start(self.store.config.audio)
+            return
+
         if pressed_at < self._cycle_ended:
             log.info("ignored a trigger pressed while the previous one was still running")
             return
@@ -143,6 +170,10 @@ class Worker(threading.Thread):
         }
 
     def _on_up(self, released_at: float) -> None:
+        if self._pending is not None:
+            self._pending_up(released_at)
+            return
+
         active = self._active
         self._active = None
         if active is None:
@@ -205,10 +236,24 @@ class Worker(threading.Thread):
         self.state.set_status(state_mod.STATUS_TYPING)
         inject.type_text(text, profile.type_delay_ms, profile.text_mode)
         _sleep_ms(profile.post_delay_ms)
-        inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)
+
+        if profile.auto_send:
+            inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)
+        else:
+            # Left in the chat box for the driver to read. Say what the trigger
+            # now does, because otherwise a message that never arrives looks
+            # exactly like a failure.
+            self._pending = {"text": text, "profile": profile, "active": active}
+            self._gestures = gestures_mod.Gestures(
+                cfg.review.tap_ms, cfg.review.double_tap_ms)
+            log.info(
+                "auto-send is off: tap the trigger to send, tap twice to clear, "
+                "hold to re-record"
+            )
 
         total = time.perf_counter() - active["started"]
-        log.info("sent %d chars in %.2fs total", len(text), total)
+        log.info("%s %d chars in %.2fs total",
+                 "sent" if profile.auto_send else "typed", len(text), total)
 
         self._finish(
             HistoryEntry(
@@ -238,7 +283,15 @@ class Worker(threading.Thread):
 
     def _finish(self, entry: HistoryEntry) -> None:
         self.state.add_history(entry)
+        self._settle()
+
+    def _settle(self) -> None:
         self._cycle_ended = time.monotonic()
+        if self._pending is not None:
+            # Not idle: the trigger means something different until this is
+            # dealt with, and the status bar is where that is visible.
+            self.state.set_status(state_mod.STATUS_REVIEW)
+            return
         self.state.set_status(
             state_mod.STATUS_IDLE if self.state.enabled else state_mod.STATUS_DISABLED
         )
@@ -246,15 +299,75 @@ class Worker(threading.Thread):
     def _abandon(self) -> None:
         """Best-effort cleanup after an unexpected failure mid-cycle."""
         self._active = None
+        self._pending = None
+        self._gestures.reset()
+        self._discard_recording()
+        self._settle()
+
+    # -- a message waiting to be sent ------------------------------------
+
+    def _pending_up(self, released_at: float) -> None:
+        action = self._gestures.release(released_at)
+        if action == gestures_mod.RETRY:
+            self._retry(released_at)
+        elif action == gestures_mod.CLEAR:
+            self._clear_pending()
+        else:
+            # A lone tap so far. Nothing happens until the double-tap window
+            # closes, so the speculative recording is of no further use.
+            self._discard_recording()
+
+    def _on_gesture_elapsed(self) -> None:
+        """The double-tap window closed on a lone tap, so it was a send."""
+        if self._gestures.elapsed(time.monotonic()) != gestures_mod.SEND:
+            return
+        if self._pending is None:
+            return
+
+        pending, self._pending = self._pending, None
+        profile: Profile = pending["profile"]
+        inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)
+        log.info("sent the waiting message (%d chars)", len(pending["text"]))
+        self._settle()
+
+    def _clear_pending(self) -> None:
+        pending, self._pending = self._pending, None
+        self._gestures.reset()
+        self._discard_recording()
+        profile: Profile = pending["profile"]
+        inject.send_keys(profile.abort_keys, profile.key_hold_ms, profile.key_gap_ms)
+        log.info("cleared the waiting message without sending it")
+        self._settle()
+
+    def _retry(self, released_at: float) -> None:
+        """Throw the waiting message away and use what was just recorded.
+
+        The recording has been running since the button went down, so nothing
+        said during the hold is lost. The chat box is cleared and reopened
+        before the replacement is typed into it.
+        """
+        pending, self._pending = self._pending, None
+        self._gestures.reset()
+
+        profile: Profile = pending["profile"]
+        log.info("re-recording: clearing the waiting message first")
+        inject.send_keys(profile.abort_keys, profile.key_hold_ms, profile.key_gap_ms)
+        inject.send_keys(profile.pre_keys, profile.key_hold_ms, profile.key_gap_ms)
+        _sleep_ms(profile.pre_delay_ms)
+
+        # Same session context as the message being replaced — the drivers in
+        # the session have not changed in the seconds since.
+        active = dict(pending["active"])
+        active["started"] = time.perf_counter()
+        self._active = active
+        self._on_up(released_at)
+
+    def _discard_recording(self) -> None:
         try:
             if self.recorder.active:
                 self.recorder.stop()
         except Exception:
             log.debug("recorder cleanup failed", exc_info=True)
-        self._cycle_ended = time.monotonic()
-        self.state.set_status(
-            state_mod.STATUS_IDLE if self.state.enabled else state_mod.STATUS_DISABLED
-        )
 
     # -- resend ----------------------------------------------------------
 
@@ -282,7 +395,10 @@ class Worker(threading.Thread):
         clipped = speech.sanitize(text, profile.max_chars)
         inject.type_text(clipped, profile.type_delay_ms, profile.text_mode)
         _sleep_ms(profile.post_delay_ms)
-        inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)
+        if profile.auto_send:
+            inject.send_keys(profile.post_keys, profile.key_hold_ms, profile.key_gap_ms)
+        else:
+            log.info("auto-send is off; the message is waiting in the chat box")
 
         self._finish(
             HistoryEntry(

@@ -86,12 +86,98 @@ def open_log_folder() -> None:
     open_folder(paths.log_dir())
 
 
+def scrolling_tab(app, title: str) -> tuple[ttk.Frame, ttk.Frame]:
+    """A tab whose content scrolls, with a footer that does not.
+
+    Returns `(body, footer)`. Put the fields in `body` and the Save button in
+    `footer`, which stays pinned to the bottom of the tab.
+
+    Tabs grew past the height of a small window, and tkinter simply clips what
+    does not fit — so Save was off the bottom with nothing to indicate it
+    existed. Sizing the window larger only moves the problem, since the content
+    of the Profiles tab depends on which plugin is assigned.
+    """
+    outer = ttk.Frame(app.notebook)
+    app.notebook.add(outer, text=title)
+    return scrolling_pane(outer)
+
+
+def scrolling_pane(outer, padding: int = 12) -> tuple[ttk.Frame, ttk.Frame]:
+    """The scroll-plus-sticky-footer machinery, for a tab or a pane inside one."""
+    # Packed before the canvas so it keeps its height when space runs short.
+    footer = ttk.Frame(outer, padding=(padding, 8))
+    footer.pack(side="bottom", fill="x")
+    ttk.Separator(outer, orient="horizontal").pack(side="bottom", fill="x")
+
+    canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+    bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    canvas.pack(side="left", fill="both", expand=True)
+
+    body = ttk.Frame(canvas, padding=padding)
+    window = canvas.create_window((0, 0), window=body, anchor="nw")
+
+    def resized(_event=None) -> None:
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        # Only show the scrollbar when there is something to scroll: a
+        # permanent one on a short tab reads as content being cut off.
+        needed = body.winfo_reqheight() > canvas.winfo_height()
+        if needed and not bar.winfo_ismapped():
+            bar.pack(side="right", fill="y")
+        elif not needed and bar.winfo_ismapped():
+            bar.pack_forget()
+            canvas.yview_moveto(0)
+
+    body.bind("<Configure>", resized)
+    canvas.bind(
+        "<Configure>",
+        lambda event: (canvas.itemconfigure(window, width=event.width), resized()),
+    )
+    _bind_mousewheel(canvas, body)
+    return body, footer
+
+
+def _bind_mousewheel(canvas, body) -> None:
+    """Scroll on hover only.
+
+    A global binding would hijack the wheel over the log pane and the history
+    list, which have their own scrolling.
+    """
+
+    def scroll(event) -> None:
+        if not canvas.winfo_exists():
+            return
+        if body.winfo_reqheight() <= canvas.winfo_height():
+            return
+        # Windows reports multiples of 120; macOS reports small counts; X11
+        # sends button 4/5 with no delta at all.
+        if getattr(event, "num", None) in (4, 5):
+            step = -1 if event.num == 4 else 1
+        elif abs(event.delta) >= 120:
+            step = -int(event.delta / 120)
+        else:
+            step = -int(event.delta) or (-1 if event.delta > 0 else 1)
+        canvas.yview_scroll(step, "units")
+
+    def bind(_event=None) -> None:
+        canvas.bind_all("<MouseWheel>", scroll)
+        canvas.bind_all("<Button-4>", scroll)
+        canvas.bind_all("<Button-5>", scroll)
+
+    def unbind(_event=None) -> None:
+        canvas.unbind_all("<MouseWheel>")
+        canvas.unbind_all("<Button-4>")
+        canvas.unbind_all("<Button-5>")
+
+    canvas.bind("<Enter>", bind)
+    canvas.bind("<Leave>", unbind)
+
+
 # -- Settings ------------------------------------------------------------
 
 
 def build_settings_tab(app) -> None:
-    frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Settings")
+    frame, footer = scrolling_tab(app, "Settings")
     cfg = app.store.config
 
     trigger = ttk.LabelFrame(frame, text="Trigger", padding=10)
@@ -110,7 +196,8 @@ def build_settings_tab(app) -> None:
          "hold it to talk; it never reaches the game")
 
     # Holds a capture until Save, so cancelling out of Settings changes nothing.
-    app.captured_joystick = (cfg.joystick.device, cfg.joystick.button)
+    app.captured_joystick = (cfg.joystick.device, cfg.joystick.button,
+                             cfg.joystick.guid, cfg.joystick.name)
     app.v_joystick = tk.StringVar(value=_joystick_label(app, cfg.joystick))
     joy_row = ttk.Frame(trigger)
     ttk.Label(joy_row, textvariable=app.v_joystick, foreground="#333",
@@ -176,15 +263,32 @@ def build_settings_tab(app) -> None:
             foreground="#777",
         ).pack(anchor="w")
 
-    ttk.Button(frame, text="Save", command=lambda: _save_settings(app)).pack(
-        anchor="e", pady=(12, 0))
+    ttk.Button(footer, text="Save", command=lambda: _save_settings(app)).pack(anchor="e")
 
 
 def _joystick_label(app, joystick_cfg) -> str:
-    if joystick_cfg.device is None or joystick_cfg.button is None:
+    """What the binding is, whether or not the controller is plugged in.
+
+    A binding resolves by identity, so the bound device may be absent — saying
+    "(not bound)" then would be a lie, and showing a stale index would be worse.
+    The remembered name covers that case.
+    """
+    if joystick_cfg.button is None:
         return "(not bound)"
+
+    remembered = joystick_cfg.name or None
     if app.joystick is None:
-        return f"device {joystick_cfg.device}, button {joystick_cfg.button}"
+        return f"{remembered or f'device {joystick_cfg.device}'}, button {joystick_cfg.button}"
+
+    if joystick_cfg.guid:
+        for device in app.joystick.devices():
+            if device.guid == joystick_cfg.guid:
+                return app.joystick.describe(device.index, joystick_cfg.button)
+        if remembered:
+            return f"{remembered} - button {joystick_cfg.button} (not connected)"
+
+    if joystick_cfg.device is None:
+        return f"button {joystick_cfg.button} (not connected)"
     return app.joystick.describe(joystick_cfg.device, joystick_cfg.button)
 
 
@@ -300,10 +404,11 @@ def _capture_button(app) -> None:
     def done(device, button) -> None:
         def apply() -> None:
             _end_button_capture(app)
-            app.captured_joystick = (device, button)
-            app.v_joystick.set(app.joystick.describe(device, button))
-            log.info("captured joystick device %d button %d (save to apply)",
-                     device, button)
+            app.captured_joystick = (device.index, button, device.guid, device.name)
+            app.v_joystick.set(app.joystick.describe(device.index, button))
+            log.info("captured %s on %r [%s] (save to apply)",
+                     app.joystick.describe(device.index, button),
+                     device.name, device.guid or "no identity")
 
         app.root.after(0, apply)
 
@@ -344,7 +449,7 @@ def _end_button_capture(app) -> None:
 
 
 def _clear_joystick(app) -> None:
-    app.captured_joystick = (None, None)
+    app.captured_joystick = (None, None, None, None)
     app.v_joystick.set("(not bound)")
     if app.joystick is not None:
         app.joystick.cancel_capture()
@@ -365,6 +470,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
         "type_delay_ms": tk.StringVar(value=str(profile.type_delay_ms)),
         "max_chars": tk.StringVar(value=str(profile.max_chars)),
         "text_mode": tk.StringVar(value=profile.text_mode),
+        "auto_send": tk.BooleanVar(value=profile.auto_send),
     }
 
     v["_captures"] = []
@@ -388,6 +494,15 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     _row(parent, 9, "Text injection", mode,
          "switch to scancode if the game ignores typed text")
 
+    # Off leaves the message in the chat box to be read before it goes out.
+    # Whisper does mishear things, and in a public session a mistake is
+    # everyone's problem.
+    ttk.Checkbutton(
+        parent, text="Send automatically", variable=v["auto_send"],
+    ).grid(row=10, column=1, sticky="w", pady=3, padx=(8, 0))
+    ttk.Label(parent, text="off types the message and leaves it for you to send",
+              foreground="#777").grid(row=10, column=2, sticky="w", padx=(8, 0))
+
     # Hidden on the default profile. A session plugin reads one specific game,
     # and the default profile is what applies to games that have none — so a
     # choice there can never take effect. Offering it anyway meant setting it
@@ -406,7 +521,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
                           values=[name for _id, name in choices], state="readonly")
-    _row(parent, 10, "Session plugin", picker,
+    _row(parent, 11, "Session plugin", picker,
          "reads who is in the session; automatic picks by executable name")
 
     # The assigned plugin's own options, rebuilt whenever the choice changes so
@@ -414,7 +529,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
     v["_settings_vars"] = {}
     v["_settings_frame"] = ttk.Frame(parent)
-    v["_settings_frame"].grid(row=11, column=0, columnspan=3, sticky="we", pady=(4, 0))
+    v["_settings_frame"].grid(row=12, column=0, columnspan=3, sticky="we", pady=(4, 0))
     _rebuild_plugin_settings(app, v)
     picker.bind("<<ComboboxSelected>>",
                 lambda _e: _rebuild_plugin_settings(app, v))
@@ -515,6 +630,7 @@ def _read_profile_vars(v: dict, profile) -> None:
     profile.type_delay_ms = _as_int(v["type_delay_ms"], profile.type_delay_ms)
     profile.max_chars = _as_int(v["max_chars"], profile.max_chars)
     profile.text_mode = v["text_mode"].get() or "unicode"
+    profile.auto_send = bool(v["auto_send"].get())
     if v.get("_plugin_choices"):
         profile.plugin = _plugin_id(v["_plugin_choices"], v["plugin"].get())
         profile.plugin_settings = _read_plugin_settings(v)
@@ -524,8 +640,10 @@ def _save_settings(app) -> None:
     cfg = app.store.config
     cfg.trigger_key = app.v_trigger.get().strip() or cfg.trigger_key
 
-    device, button = getattr(app, "captured_joystick", (None, None))
+    device, button, guid, name = getattr(
+        app, "captured_joystick", (None, None, None, None))
     cfg.joystick.device, cfg.joystick.button = device, button
+    cfg.joystick.guid, cfg.joystick.name = guid, name
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 
@@ -635,14 +753,15 @@ def build_profiles_tab(app) -> None:
     ttk.Button(buttons, text="Remove", command=lambda: _remove_profile(app)).pack(
         side="left", padx=4)
 
-    right = ttk.LabelFrame(body, text="Profile settings", padding=10)
+    right = ttk.LabelFrame(body, text="Profile settings", padding=0)
     right.pack(side="left", fill="both", expand=True, padx=(10, 0))
+    fields, profile_footer = scrolling_pane(right, padding=10)
 
     import config as config_mod
 
-    app.v_profile = _profile_vars(app, right, config_mod.Profile())
-    ttk.Button(right, text="Save profile", command=lambda: _save_profile(app)).grid(
-        row=10, column=1, sticky="e", pady=(10, 0))
+    app.v_profile = _profile_vars(app, fields, config_mod.Profile())
+    ttk.Button(profile_footer, text="Save profile",
+               command=lambda: _save_profile(app)).pack(anchor="e")
 
     _refresh_profile_list(app)
 
@@ -681,6 +800,7 @@ def _load_profile(app) -> None:
     v["type_delay_ms"].set(str(profile.type_delay_ms))
     v["max_chars"].set(str(profile.max_chars))
     v["text_mode"].set(profile.text_mode)
+    v["auto_send"].set(profile.auto_send)
     v["plugin"].set(_plugin_label(v["_plugin_choices"], profile.plugin))
     v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
     # Redraw, or the controls would still show the previously selected
@@ -732,8 +852,7 @@ def _save_profile(app) -> None:
 
 
 def build_vocabulary_tab(app) -> None:
-    frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Vocabulary")
+    frame, footer = scrolling_tab(app, "Vocabulary")
 
     ttk.Label(
         frame,
@@ -747,8 +866,7 @@ def build_vocabulary_tab(app) -> None:
     app.vocab_text.insert("1.0", app.store.config.whisper.initial_prompt)
     app.vocab_text.pack(fill="both", expand=True)
 
-    ttk.Button(frame, text="Save", command=lambda: _save_vocab(app)).pack(
-        anchor="e", pady=(10, 0))
+    ttk.Button(footer, text="Save", command=lambda: _save_vocab(app)).pack(anchor="e")
 
     session = ttk.LabelFrame(frame, text="From the session (read-only)", padding=8)
     session.pack(fill="both", expand=True, pady=(12, 0))
@@ -817,8 +935,7 @@ def _save_vocab(app) -> None:
 
 
 def build_audio_tab(app) -> None:
-    frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Audio")
+    frame, footer = scrolling_tab(app, "Audio")
     cfg = app.store.config
 
     inputs = ttk.LabelFrame(frame, text="Microphone", padding=10)
@@ -878,8 +995,7 @@ def build_audio_tab(app) -> None:
                command=lambda: _play_test_cue(app)).grid(
         row=2, column=1, sticky="w", pady=(8, 0))
 
-    ttk.Button(frame, text="Save", command=lambda: _save_audio(app)).pack(
-        anchor="e", pady=(12, 0))
+    ttk.Button(footer, text="Save", command=lambda: _save_audio(app)).pack(anchor="e")
 
 
 def _device_label(devices, spec) -> str:

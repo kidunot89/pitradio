@@ -16,6 +16,12 @@ which is the failure mode this project has paid for repeatedly.
 Deliberately does not use SDL's event queue. SDL_PumpEvents must run on the
 main thread, which belongs to tkinter; SDL_JoystickUpdate can be called from
 our polling thread and is all that state polling needs.
+
+That choice is also what makes the trigger work globally. Polling device state
+asks the driver directly and does not care which window has focus — the thing
+that *would* care is SDL's event queue, and we never touch it. SDL is
+initialised without a video subsystem for the same reason: with no window,
+there is no focus for SDL to gate input on.
 """
 
 from __future__ import annotations
@@ -39,7 +45,33 @@ HINT_BACKGROUND_EVENTS = b"SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"
 HINT_HIDAPI = b"SDL_JOYSTICK_HIDAPI"
 HINT_HIDAPI_STEAM = b"SDL_JOYSTICK_HIDAPI_STEAM"
 
-MAX_BUTTONS = 32  # matches the config's range; wheels rarely expose more
+MAX_BUTTONS = 128  # button boxes and wheel rims routinely pass 32
+
+# POV hat directions. A hat is not a button as far as SDL is concerned, but it
+# is one as far as a driver is concerned: the D-pad on a wheel rim is a hat, and
+# a binding UI that cannot see it looks broken to the person pressing it.
+SDL_HAT_UP = 0x01
+SDL_HAT_RIGHT = 0x02
+SDL_HAT_DOWN = 0x04
+SDL_HAT_LEFT = 0x08
+HAT_DIRECTIONS = (
+    (SDL_HAT_UP, "up"),
+    (SDL_HAT_RIGHT, "right"),
+    (SDL_HAT_DOWN, "down"),
+    (SDL_HAT_LEFT, "left"),
+)
+
+
+class SDL_JoystickGUID(ctypes.Structure):
+    """SDL's stable per-device identity — vendor, product and version.
+
+    This is what a binding must be stored against. SDL device indices are
+    positional: unplug a pedal set, or start Steam, and every index after it
+    shifts. A binding recorded against index 2 then silently points at whatever
+    is now second, which is indistinguishable from the trigger being broken.
+    """
+
+    _fields_ = [("data", ctypes.c_uint8 * 16)]
 
 
 def _candidate_paths() -> list[Path]:
@@ -155,6 +187,14 @@ class SdlJoysticks:
         lib.SDL_JoystickGetButton.restype = ctypes.c_uint8
         lib.SDL_JoystickGetAttached.argtypes = (ctypes.c_void_p,)
         lib.SDL_JoystickGetAttached.restype = ctypes.c_int
+        lib.SDL_JoystickNumHats.argtypes = (ctypes.c_void_p,)
+        lib.SDL_JoystickNumHats.restype = ctypes.c_int
+        lib.SDL_JoystickGetHat.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        lib.SDL_JoystickGetHat.restype = ctypes.c_uint8
+        lib.SDL_JoystickGetGUID.argtypes = (ctypes.c_void_p,)
+        lib.SDL_JoystickGetGUID.restype = SDL_JoystickGUID
+        lib.SDL_JoystickGetGUIDString.argtypes = (
+            SDL_JoystickGUID, ctypes.c_char_p, ctypes.c_int)
 
     @staticmethod
     def _error(lib: ctypes.CDLL) -> str:
@@ -206,15 +246,23 @@ class SdlJoysticks:
                         continue
                     raw = self._lib.SDL_JoystickName(handle) or b""
                     name = raw.decode("utf-8", "replace") or f"joystick {index}"
-                    buttons = min(self._lib.SDL_JoystickNumButtons(handle), MAX_BUTTONS)
-                    devices.append((index, name, buttons))
+                    # Hats are bindable too, so count them as inputs — the
+                    # number here is what the binding UI offers.
+                    count = self._buttons(handle) + self._hats(handle) * len(HAT_DIRECTIONS)
+                    devices.append((index, name, count))
                 return devices
             except Exception:
                 log.exception("SDL joystick enumeration failed")
                 return []
 
     def button_mask(self, index: int) -> int | None:
-        """Bitmask of held buttons, or None when the device isn't usable."""
+        """Bitmask of held inputs, or None when the device isn't usable.
+
+        Physical buttons occupy the low bits, then four bits per POV hat. Hats
+        are folded in rather than exposed separately so that everything above
+        this layer — binding, capture, config, the GUI — deals in one flat
+        button number, which is also how a wheel labels them.
+        """
         with self._lock:
             if self._lib is None:
                 return None
@@ -223,15 +271,72 @@ class SdlJoysticks:
                 handle = self._handle(index)
                 if handle is None:
                     return None
-                count = min(self._lib.SDL_JoystickNumButtons(handle), MAX_BUTTONS)
+
                 mask = 0
-                for button in range(count):
+                bit = 0
+                for button in range(self._buttons(handle)):
                     if self._lib.SDL_JoystickGetButton(handle, button):
-                        mask |= 1 << button
+                        mask |= 1 << bit
+                    bit += 1
+
+                for hat in range(self._hats(handle)):
+                    value = self._lib.SDL_JoystickGetHat(handle, hat)
+                    for direction, _label in HAT_DIRECTIONS:
+                        if value & direction:
+                            mask |= 1 << bit
+                        bit += 1
                 return mask
             except Exception:
                 log.exception("SDL button read failed")
                 return None
+
+    def _buttons(self, handle) -> int:
+        return max(0, min(self._lib.SDL_JoystickNumButtons(handle), MAX_BUTTONS))
+
+    def _hats(self, handle) -> int:
+        return max(0, self._lib.SDL_JoystickNumHats(handle))
+
+    def guid(self, index: int) -> str | None:
+        """Stable identity for the device at `index`, as a 32-character hex string."""
+        with self._lock:
+            if self._lib is None:
+                return None
+            try:
+                handle = self._handle(index)
+                if handle is None:
+                    return None
+                buffer = ctypes.create_string_buffer(33)
+                self._lib.SDL_JoystickGetGUIDString(
+                    self._lib.SDL_JoystickGetGUID(handle), buffer, len(buffer))
+                text = buffer.value.decode("ascii", "replace")
+                # All zeroes means SDL had no identity for it, which is no more
+                # useful for matching than nothing at all.
+                return text if text.strip("0") else None
+            except Exception:
+                log.exception("SDL GUID read failed")
+                return None
+
+    def label(self, index: int, button: int) -> str:
+        """'button 13' or 'POV up' for a 1-based flat button number."""
+        with self._lock:
+            if self._lib is None:
+                return f"button {button}"
+            try:
+                handle = self._handle(index)
+                if handle is None:
+                    return f"button {button}"
+                buttons = self._buttons(handle)
+                if button <= buttons:
+                    return f"button {button}"
+                offset = button - buttons - 1
+                hat, direction = divmod(offset, len(HAT_DIRECTIONS))
+                if hat >= self._hats(handle):
+                    return f"button {button}"
+                name = HAT_DIRECTIONS[direction][1]
+                return f"POV {name}" if hat == 0 else f"POV {hat + 1} {name}"
+            except Exception:
+                log.exception("SDL button label failed")
+                return f"button {button}"
 
     def name(self, index: int) -> str | None:
         for device, label, _count in self.list_devices():

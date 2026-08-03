@@ -132,6 +132,33 @@ def test_bad_text_mode_is_rejected():
     assert any("text_mode" in p for p in _problems(mutate))
 
 
+def test_auto_send_defaults_on():
+    """The existing behaviour, so upgrading changes nothing for anyone."""
+    assert config.Profile().auto_send is True
+
+
+def test_a_profile_written_before_auto_send_still_sends():
+    """Every config in the wild predates this field."""
+    cfg = config.Config.from_dict(
+        {"profiles": {"iracing.exe": {"pre_keys": ["enter"]}}})
+    assert cfg.profiles["iracing.exe"].auto_send is True
+
+
+def test_auto_send_can_be_turned_off_per_profile(tmp_path):
+    """Per profile rather than globally: one sim's chat may be public and
+    another's a private team channel, and the risk is not the same."""
+    cfg = config.Config()
+    cfg.profiles["le mans ultimate.exe"] = config.Profile(auto_send=False)
+
+    path = tmp_path / "config.json"
+    config.save(path, cfg)
+    reloaded = config.load(path)
+
+    assert reloaded.profiles["le mans ultimate.exe"].auto_send is False
+    assert reloaded.default_profile.auto_send is True
+    assert reloaded.validate() == []
+
+
 def test_profile_key_without_exe_suffix_is_flagged():
     def mutate(r):
         r["profiles"]["notanexe"] = {}

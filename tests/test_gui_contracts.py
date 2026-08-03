@@ -118,3 +118,60 @@ def test_every_collaborator_is_covered():
         f"App gained optional collaborators not covered here: "
         f"{sorted(optional_objects - set(COLLABORATORS))}"
     )
+
+
+# -- editing tabs must scroll, with Save pinned --------------------------
+
+
+TAB_SOURCES = ["gui_settings.py", "gui_language.py"]
+
+
+def _tab_builders():
+    """Every build_*_tab function, with its source module."""
+    for name in TAB_SOURCES:
+        tree = ast.parse((ROOT / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("build_"):
+                yield name, node
+
+
+def _calls_named(node, names):
+    return any(
+        (isinstance(call.func, ast.Name) and call.func.id in names)
+        or (isinstance(call.func, ast.Attribute) and call.func.attr in names)
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+    )
+
+
+def _save_buttons(node):
+    """Button(...) calls whose text starts with 'Save'."""
+    found = []
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        for kw in call.keywords:
+            if (kw.arg == "text" and isinstance(kw.value, ast.Constant)
+                    and str(kw.value.value).startswith("Save")):
+                found.append(call)
+    return found
+
+
+@pytest.mark.parametrize("source,builder", [
+    (source, node) for source, node in _tab_builders()
+], ids=lambda v: v.name if isinstance(v, ast.FunctionDef) else v)
+def test_a_tab_with_a_save_button_scrolls(source, builder):
+    """Save must stay reachable however small the window is.
+
+    Tab content outgrew the default window height and tkinter simply clips the
+    overflow, so Save sat below the bottom edge with nothing to suggest it was
+    there. Anyone adding a field to one of these tabs would reintroduce that
+    without noticing, because it only shows up at small window sizes.
+    """
+    if not _save_buttons(builder):
+        pytest.skip(f"{builder.name} has no Save button")
+
+    assert _calls_named(builder, {"scrolling_tab", "scrolling_pane"}), (
+        f"{source}:{builder.name} builds a Save button but does not use "
+        f"scrolling_tab/scrolling_pane, so Save can end up off-screen"
+    )

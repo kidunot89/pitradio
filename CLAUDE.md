@@ -106,6 +106,19 @@ is caught rather than silently losing devices.
 
 `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS` is not optional: without it SDL drops
 joystick input whenever PitRadio isn't focused, which is always, while racing.
+SDL is also initialised without a video subsystem, so it has no window and no
+focus to gate on, and state polling (`SDL_JoystickUpdate` + `GetButton`) asks
+the driver directly rather than going through an event queue. That combination
+is what makes the wheel trigger work while the sim is in front.
+
+**Bindings are stored against the device's SDL GUID, not its index** — see
+`JoystickConfig` and `JoystickWatcher._resolve_index`. Indices are positional:
+plug in a headset that enumerates as a controller, or start Steam, and every
+index after it shifts, silently rebinding the trigger to a different device.
+`device` is kept only as the fallback for bindings written before identities
+were recorded. POV hats are folded into the button mask above the physical
+buttons, because a wheel rim's D-pad is a hat and a binding UI that cannot see
+it looks broken to the person pressing it.
 
 Worker and hook never call into Tk. They publish onto `AppState.events`, which
 the GUI drains on a `root.after(100, …)` tick. Log lines reach the GUI through
@@ -168,6 +181,41 @@ produces a bug with no error message.
   one key at a time, so `ctrl+f12` works by asking `GetAsyncKeyState` about Ctrl
   when F12 arrives. Only the main key is swallowed; swallowing Ctrl would break
   it system-wide.
+- **Button capture waits for a press, not a held button.** Wheel rims and button
+  boxes are covered in toggle switches and rotary encoders that read as
+  permanently down, so "the first button that reads as down" captures one nobody
+  touched. `JoystickWatcher._poll_capture` snapshots what is already held and
+  waits for a change.
+
+## Reviewing before sending
+
+`Profile.auto_send` off types the message into the chat box and leaves it. The
+trigger then means something else, and [gestures.py](gestures.py) decides what:
+tap to send, tap twice to clear, hold to clear and re-record.
+
+Two consequences worth knowing before changing it:
+
+- **A tap cannot be acted on immediately** — until the double-tap window closes
+  it might be the first half of one. That delay is `review.double_tap_ms`, and
+  it is why the worker's queue `get()` takes a timeout rather than blocking
+  forever. Nothing else would wake the worker to notice the window had passed.
+- **A press while a message is pending starts recording straight away**, before
+  it is known to be a tap or a hold. Waiting to find out would swallow the first
+  words of a re-record; the buffer is discarded if it turns out to be a tap.
+
+The timing logic is pure and lives outside `worker.py` precisely so it can be
+tested — every case in [tests/test_gestures.py](tests/test_gestures.py) is one
+that would otherwise only be found mid-race.
+
+## The editing tabs scroll
+
+Tab content outgrew the window and tkinter silently clips the overflow, so Save
+sat below the bottom edge with nothing to indicate it existed. `scrolling_tab`
+and `scrolling_pane` in [gui_settings.py](gui_settings.py) put the fields on a
+scrolling canvas and pin the button to a footer. Adding a field to one of these
+tabs is otherwise enough to push Save off-screen again at small window sizes,
+which is what `test_gui_contracts.py::test_a_tab_with_a_save_button_scrolls`
+guards.
 
 ## Build locally before pushing
 
