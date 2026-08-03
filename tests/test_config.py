@@ -275,3 +275,32 @@ def test_multilingual_models_accept_any_language(model, language):
         r["whisper"].update(model=model, language=language)
 
     assert [p for p in _problems(mutate) if "English-only" in p] == []
+
+
+# -- the shipped vocabulary ----------------------------------------------
+
+
+def test_the_shipped_prompt_matches_the_constant():
+    """Two copies of the same string, and nothing kept them together.
+
+    `RACING_VOCABULARY` seeds a config built from defaults; the copy in
+    config.default.json seeds a fresh install. Editing one and not the other
+    means the two disagree with no error anywhere — the app just expects
+    different words depending on how its config came to exist.
+    """
+    assert _base()["whisper"]["initial_prompt"] == config.RACING_VOCABULARY
+
+
+def test_the_app_knows_its_own_name():
+    """Whisper hears "PitRadio" as "pit radio" or "big radio" without help."""
+    assert "PitRadio" in config.RACING_VOCABULARY
+    assert "PitRadio" in _base()["whisper"]["initial_prompt"]
+
+
+def test_the_prompt_fits_whispers_window():
+    """initial_prompt is truncated around 224 tokens, quietly.
+
+    Everything past the cut is simply not applied, so a vocabulary that grows
+    past it loses its tail without saying so. Roughly four characters a token.
+    """
+    assert len(config.RACING_VOCABULARY) < 224 * 4

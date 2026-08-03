@@ -23,7 +23,9 @@ from pitradio import languages as languages_mod
 CONFIG_VERSION = 1
 
 RACING_VOCABULARY = (
-    "Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, "
+    # The app's own name first: initial_prompt weights what comes early, and
+    # "PitRadio" is otherwise heard as "pit radio" or "big radio".
+    "PitRadio, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, "
     "Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, "
     "Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, "
     "Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, "
