@@ -77,8 +77,9 @@ keep as much as possible testable anyway, and both are load-bearing:
   `--check-config` work on any platform.
 - **`gui.py` and `gui_settings.py` must not import `winapi` either.** That is
   what makes `--gui-only` able to launch the real window locally. They reach
-  Windows-only functionality through the objects passed into `App`, all of
-  which may be `None`.
+  Windows-only functionality through the objects passed into `App` — `hook`,
+  `joystick`, `recorder`, `transcriber`, `worker` — all of which may be `None`,
+  and every use site must cope with that.
 
 `pitradio.py` imports `winapi`, `hook`, `worker` and `inject` *inside*
 functions, never at module scope, for the same reason.
@@ -93,6 +94,7 @@ Four threads, and mixing them up is how this breaks:
 | hook | `WH_KEYBOARD_LL` + its `GetMessageW` pump |
 | worker | audio, transcription, injection — everything slow |
 | tray | pystray's blocking `run()` |
+| joystick | polls wheel/gamepad buttons; feeds the same queue as the hook |
 
 Worker and hook never call into Tk. They publish onto `AppState.events`, which
 the GUI drains on a `root.after(100, …)` tick. Log lines reach the GUI through
@@ -138,6 +140,17 @@ produces a bug with no error message.
   working.
 - **Frozen GUI builds may have `sys.stdout is None`.** `pitradio.out()` and the
   console log handler both guard for it.
+- **A GUI build launched from a shortcut has invalid std handles.** Every
+  `subprocess` call must redirect `stdin` as well as stdout/stderr, or Windows
+  fails process creation with `[WinError 6]`. This killed every shortcut launch
+  through 0.1.2; `tests/test_subprocess_safety.py` walks the AST to enforce it.
+- **Config changes that arm hardware must be applied on save**, not left to the
+  worker's next-trigger reload — changing the trigger key would otherwise need
+  the *old* key pressed to take effect. See `App._apply_trigger_key`.
+- **The trigger's modifiers are checked, not tracked.** A low-level hook reports
+  one key at a time, so `ctrl+f12` works by asking `GetAsyncKeyState` about Ctrl
+  when F12 arrives. Only the main key is swallowed; swallowing Ctrl would break
+  it system-wide.
 
 ## Packaging
 

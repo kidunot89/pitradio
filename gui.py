@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import queue
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -83,6 +84,8 @@ class App:
         self.exe_var = tk.StringVar(value="—")
         self.profile_var = tk.StringVar(value="—")
         self.last_var = tk.StringVar(value="—")
+        self.armed_var = tk.StringVar(value="—")
+        self.last_trigger_var = tk.StringVar(value="not yet this session")
 
         self.header = ttk.Frame(self.root, padding=(12, 10))
         self.header.pack(fill="x")
@@ -116,6 +119,7 @@ class App:
         gui_settings.build_history_tab(self)
         gui_settings.build_updates_tab(self)
 
+        self.refresh_armed()
         self._refresh_warnings()
 
     def _build_status_tab(self) -> None:
@@ -125,7 +129,9 @@ class App:
         grid = ttk.Frame(frame)
         grid.pack(fill="x")
         for row, (label, var) in enumerate(
-            (("Focused app", self.exe_var),
+            (("Listening for", self.armed_var),
+             ("Last trigger", self.last_trigger_var),
+             ("Focused app", self.exe_var),
              ("Profile in use", self.profile_var),
              ("Last message", self.last_var)),
         ):
@@ -136,8 +142,10 @@ class App:
 
         ttk.Label(
             frame,
-            text=("Hold the trigger key while a sim is focused. The executable name "
-                  "shown above is the key to use when adding a profile for it."),
+            text=("\"Listening for\" is what the hook is armed with right now — not "
+                  "what's saved. If it doesn't match Settings, the change hasn't "
+                  "been applied. \"Last trigger\" updates the moment a press is "
+                  "detected, so you can tell input from transcription problems."),
             foreground="#666", wraplength=880, justify="left",
         ).pack(fill="x", pady=(10, 6))
 
@@ -193,6 +201,12 @@ class App:
             self.status_var.set(snap["status"])
             self.exe_var.set(snap["exe"] or "—")
             self.profile_var.set(snap["profile"])
+            self.refresh_armed()
+            if snap["status"] == state_mod.STATUS_RECORDING:
+                # Stamped on detection, before any audio or transcription work,
+                # so "did it see my key?" is answerable separately from "did it
+                # transcribe?".
+                self.last_trigger_var.set(time.strftime("%H:%M:%S"))
             if self.tray is not None:
                 self.tray.refresh(snap["status"], snap["enabled"])
         elif kind == state_mod.EV_HISTORY:
@@ -202,6 +216,24 @@ class App:
             gui_settings.set_level(self, float(payload))
         elif kind == state_mod.EV_UPDATE:
             self._show_update(payload)
+
+    def refresh_armed(self) -> None:
+        """Show the binding the hook actually holds, plus any wheel button."""
+        parts = []
+        if self.hook is not None:
+            parts.append(self.hook.describe_binding())
+            if not self.hook.is_installed():
+                parts.append("(hook not installed)")
+        else:
+            parts.append(self.store.config.trigger_key)
+
+        joy = self.store.config.joystick
+        if joy.device is not None and joy.button is not None:
+            parts.append(f"or button {joy.button}")
+
+        if not self.state.enabled:
+            parts.append("— disabled")
+        self.armed_var.set(" ".join(parts))
 
     def _append_log(self, line: str) -> None:
         self.log_text.configure(state="normal")

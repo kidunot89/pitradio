@@ -75,6 +75,18 @@ class KeyboardHook(threading.Thread):
 
     # -- public ----------------------------------------------------------
 
+    def describe_binding(self) -> str:
+        """What the hook is armed with *right now*.
+
+        Read from the hook rather than from config on purpose: the whole point
+        is to show what will actually fire, so a key that was saved but never
+        applied is visible instead of silently doing nothing.
+        """
+        return keys.format_combo(self._modifiers, self._trigger_vk)
+
+    def is_installed(self) -> bool:
+        return self._hook is not None
+
     def start_capture(self, on_captured: Callable[[list[int], int], None]) -> None:
         """Report the next non-modifier keypress instead of acting on it."""
         self._capture = on_captured

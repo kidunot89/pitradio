@@ -712,6 +712,18 @@ def build_history_tab(app) -> None:
         app.history_tree.column(column, width=width, anchor="w")
     app.history_tree.pack(fill="both", expand=True)
 
+    # An empty table looks broken. Say why it's empty instead.
+    app.history_empty = ttk.Label(
+        frame,
+        text=("Nothing yet. Messages appear here after a trigger completes.\n\n"
+              "If you've used the trigger and this is still empty, the press "
+              "isn't reaching PitRadio — check \"Listening for\" on the Status "
+              "tab against what you expect.\n\n"
+              "History is kept in memory only, so it starts empty every time "
+              "the app launches."),
+        foreground="#777", wraplength=680, justify="left",
+    )
+
     buttons = ttk.Frame(frame)
     buttons.pack(fill="x", pady=(8, 0))
     ttk.Button(buttons, text="Copy", command=lambda: _copy_history(app)).pack(side="left")
@@ -723,6 +735,14 @@ def build_history_tab(app) -> None:
 
     for entry in reversed(app.state.history):
         add_history_row(app, entry)
+    _refresh_history_placeholder(app)
+
+
+def _refresh_history_placeholder(app) -> None:
+    if app.history_tree.get_children():
+        app.history_empty.pack_forget()
+    else:
+        app.history_empty.pack(fill="x", pady=(8, 0))
 
 
 def add_history_row(app, entry) -> None:
@@ -731,6 +751,7 @@ def add_history_row(app, entry) -> None:
         values=(entry.clock, entry.exe, "yes" if entry.typed else "no",
                 entry.text or "(nothing said)"),
     )
+    _refresh_history_placeholder(app)
 
 
 def _selected_text(app) -> str | None:
