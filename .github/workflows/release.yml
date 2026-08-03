@@ -56,6 +56,13 @@ jobs:
       # in it, but it changes constantly and Nuitka's cache is content-addressed
       # internally, so a coarse key hits far more often and stale entries are
       # harmless.
+      # SDL3 has no Python package that ships a Windows binary, so the DLL
+      # comes from the official libsdl-org release, verified against a
+      # pinned hash. Without it the build falls back to SDL2 and loses the
+      # devices SDL3 was added for.
+      - name: Fetch SDL3
+        run: python packaging/fetch_sdl3.py
+
       - name: Restore the Nuitka compilation cache
         uses: actions/cache/restore@v4
         with:

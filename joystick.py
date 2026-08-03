@@ -28,118 +28,227 @@ from __future__ import annotations
 
 import logging
 import queue
+import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import sdl3input
 import sdlinput
 import winapi
 
-log = logging.getLogger(__name__)
-
-# SDL is preferred and the legacy interface is the fallback. SDL's HIDAPI
-# drivers see devices the legacy API cannot -- a Steam Controller is invisible
-# to it entirely -- but SDL is a bundled DLL that can fail to load, and this app
-# must not lose its trigger because of that.
-_sdl = sdlinput.SdlJoysticks()
-_use_sdl: bool | None = None
-
 # Re-exported from state so every producer of these events agrees on the
 # strings. Actions are momentary: one event on press, none on release.
-from state import (  # noqa: E402,F401  (re-exported for callers)
+from state import (  # noqa: F401  (re-exported for callers)
     TRIGGER_CLEAR,
     TRIGGER_DOWN,
     TRIGGER_SEND,
     TRIGGER_UP,
 )
 
+log = logging.getLogger(__name__)
+
 POLL_SECONDS = 0.012
 MAX_DEVICES = 16
 
+# Backends in preference order. Every one of them sees hardware the others
+# miss, so they are combined rather than chosen between:
+#
+#   SDL3    native drivers for devices SDL2 never covered, read over HIDAPI
+#           without depending on any other software being present
+#   SDL2    the widest coverage of wheels, pedals and button boxes
+#   XInput  four fixed slots; catches pads that present as an Xbox controller,
+#           including anything a wrapper re-presents as one
+#   legacy  the Windows multimedia joystick API, as a floor
+#
+# A rig routinely spans more than one: a wheel on SDL2 and a pad on XInput is
+# ordinary. Picking a single backend would silently drop half the hardware,
+# which is what the earlier SDL2-only path did.
+_BACKENDS: list = []
+_STARTED = False
 
-def backend():
-    """The SDL backend, or None when the legacy interface is in use."""
-    global _use_sdl
-    if _use_sdl is None:
-        _use_sdl = _sdl.start()
-        if not _use_sdl:
-            log.info(
-                "SDL2 unavailable (%s); falling back to the legacy joystick "
-                "interface, which cannot see Steam Input devices",
-                _sdl.failure,
-            )
-    return _sdl if _use_sdl else None
+
+def _ensure_started() -> list:
+    """Start every backend once, keeping the ones that loaded."""
+    global _STARTED
+    if _STARTED:
+        return _BACKENDS
+
+    _STARTED = True
+    candidates = [sdl3input.Sdl3Joysticks(), sdlinput.SdlJoysticks()]
+    if sys.platform == "win32":
+        # Imported here, not at module scope: ctypes.wintypes raises off
+        # Windows, and this module has to stay importable for the tests.
+        import xinput
+
+        candidates.append(xinput.XInputPads())
+    candidates.append(LegacyPads())
+
+    for backend in candidates:
+        try:
+            if backend.start():
+                _BACKENDS.append(backend)
+            else:
+                log.info("%s unavailable: %s", backend.version, backend.failure)
+        except Exception:
+            # A backend that throws on load must cost only itself.
+            log.exception("%s failed to start", backend.version)
+    return _BACKENDS
+
+
+class LegacyPads:
+    """The Windows multimedia joystick API, wrapped to match the others.
+
+    Cannot see Steam Input devices at all and caps at 32 buttons, but it needs
+    no library and works when everything else has failed to load.
+    """
+
+    version = "Windows legacy"
+
+    def __init__(self) -> None:
+        self._failure: str | None = None
+
+    def start(self) -> bool:
+        if sys.platform != "win32":
+            self._failure = "not Windows"
+            return False
+        return True
+
+    @property
+    def failure(self) -> str | None:
+        return self._failure
+
+    def stop(self) -> None:
+        pass
+
+    def list_devices(self) -> list[tuple[int, str, int]]:
+        found = []
+        for index in range(min(winapi.joystick_count(), MAX_DEVICES)):
+            name = winapi.joystick_name(index)
+            if name is None:
+                continue
+            # Named but unreadable means present in the driver list and not
+            # actually connected.
+            if winapi.joystick_button_mask(index) is None:
+                continue
+            found.append((index, name, winapi.joystick_buttons(index) or 0))
+        return found
+
+    def button_mask(self, index: int) -> int | None:
+        return winapi.joystick_button_mask(index)
+
+    def guid(self, index: int) -> str | None:
+        """No identity exists here, so the name stands in.
+
+        Weaker than a GUID — two identical wheels are indistinguishable — but
+        it still survives the reordering that breaks a bare index.
+        """
+        name = winapi.joystick_name(index)
+        return f"legacy:{name}" if name else None
+
+    def label(self, index: int, button: int) -> str:
+        return f"button {button}"
+
+    def name(self, index: int) -> str | None:
+        return winapi.joystick_name(index)
+
+
+def backends() -> list:
+    return _ensure_started()
 
 
 def backend_name() -> str:
-    return "SDL2" if backend() is not None else "Windows legacy joystick API"
+    live = [b.version for b in backends()]
+    return ", ".join(live) if live else "none"
 
 
 @dataclass(frozen=True)
 class Device:
     """One attached controller, as both the config and the GUI need it."""
 
-    index: int
+    index: int          # position in the combined list; the legacy fallback
     name: str
     buttons: int
     guid: str
+    api: str            # which backend found it
+    native: int         # the id that backend addresses it by
+    owner: object = None
 
     @property
     def key(self) -> str:
         """What a binding is matched on."""
-        return self.guid or f"index:{self.index}"
-
-
-def _mask(device: int) -> int | None:
-    sdl = backend()
-    return sdl.button_mask(device) if sdl else winapi.joystick_button_mask(device)
-
-
-def _name(device: int) -> str | None:
-    sdl = backend()
-    return sdl.name(device) if sdl else winapi.joystick_name(device)
-
-
-def _guid(device: int, name: str | None = None) -> str:
-    """Stable identity for a device.
-
-    The legacy interface has no notion of one, so its name stands in. That is
-    weaker than a GUID — two identical wheels are indistinguishable — but it
-    still survives the reordering that breaks a bare index, which is the failure
-    this exists to prevent.
-    """
-    sdl = backend()
-    if sdl is not None:
-        return sdl.guid(device) or ""
-    label = name if name is not None else winapi.joystick_name(device)
-    return f"legacy:{label}" if label else ""
-
-
-def _label(device: int, button: int) -> str:
-    sdl = backend()
-    return sdl.label(device, button) if sdl else f"button {button}"
+        return self.guid or f"{self.api}:{self.native}"
 
 
 def devices() -> list[Device]:
-    """Every attached controller, with the identity a binding is stored against."""
-    sdl = backend()
-    if sdl is not None:
-        return [Device(index, name, buttons, sdl.guid(index) or "")
-                for index, name, buttons in sdl.list_devices()]
+    """Every attached controller, across every backend that loaded.
 
-    found = []
-    for index in range(min(winapi.joystick_count(), MAX_DEVICES)):
-        name = winapi.joystick_name(index)
-        if name is None:
+    Deduplicated by identity, earlier backends winning: a pad visible to both
+    SDL3 and XInput must appear once, and should be read through the backend
+    that knows its real name and button count.
+    """
+    found: list[Device] = []
+    seen: set[str] = set()
+
+    for backend in backends():
+        try:
+            listed = backend.list_devices()
+        except Exception:
+            log.exception("%s enumeration failed", backend.version)
             continue
-        # A device with a name but no readable state is present in the driver
-        # list but not actually connected.
-        if winapi.joystick_button_mask(index) is None:
-            continue
-        found.append(Device(index, name, winapi.joystick_buttons(index) or 0,
-                            _guid(index, name)))
+
+        for native, name, buttons in listed:
+            try:
+                guid = backend.guid(native) or ""
+            except Exception:
+                guid = ""
+            identity = guid or f"{backend.version}:{native}"
+            if identity in seen:
+                continue
+            seen.add(identity)
+            found.append(Device(
+                index=len(found), name=name, buttons=buttons, guid=guid,
+                api=backend.version, native=native, owner=backend,
+            ))
     return found
+
+
+def _mask(device: Device) -> int | None:
+    if device.owner is None:
+        return None
+    try:
+        return device.owner.button_mask(device.native)
+    except Exception:
+        log.exception("%s button read failed", device.api)
+        return None
+
+
+def _still_attached(device: Device) -> bool:
+    """Whether a cached device is still the one at that position."""
+    if device.owner is None:
+        return False
+    try:
+        return any(native == device.native
+                   for native, _name, _count in device.owner.list_devices())
+    except Exception:
+        return False
+
+
+def _find(guid: str, fallback: int | None) -> Device | None:
+    """The device a binding refers to, or None if it is not attached."""
+    listed = devices()
+    if guid:
+        for device in listed:
+            if device.guid == guid:
+                return device
+        return None
+    if fallback is None:
+        return None
+    for device in listed:
+        if device.index == fallback:
+            return device
+    return None
 
 
 def list_devices() -> list[tuple[int, str, int]]:
@@ -148,37 +257,54 @@ def list_devices() -> list[tuple[int, str, int]]:
 
 
 def diagnose() -> list[str]:
-    """Why a controller might not be showing up.
+    """What was found, and through which API.
 
-    This reports what was found rather than leaving the user to guess. Steam
-    Input in particular can capture a controller and re-present it in a form the
-    legacy interface never enumerates, and a Steam Controller in desktop mode
-    acts as a keyboard and mouse rather than a joystick at all.
+    Which backend saw a device is the first thing worth knowing when one does
+    not work: a pad that only XInput can see has no usable identity, and a
+    device missing from every backend is a driver or Steam problem rather than
+    anything this app can fix.
     """
-    lines = [f"backend: {backend_name()}"]
-    if backend() is None and _sdl.failure:
-        lines.append(f"  SDL2 did not load: {_sdl.failure}")
+    live = backends()
+    lines = [f"backends: {backend_name()}"]
+    for backend in live:
+        if backend.failure:
+            lines.append(f"  {backend.version}: {backend.failure}")
 
     found = devices()
     for device in found:
         identity = device.guid or "no identity"
         lines.append(
-            f"  device {device.index}: {device.name!r} — "
+            f"  [{device.api}] device {device.index}: {device.name!r} — "
             f"{device.buttons} inputs [{identity}]"
         )
 
     if not found:
         lines.append(
-            "  no controllers detected. If one is plugged in and this is the "
-            "legacy backend, Steam Input is the usual cause — it hides the "
-            "device from that interface."
+            "  no controllers detected by any backend. A device that Steam has "
+            "captured, or one in desktop mode, presents as a keyboard and mouse "
+            "rather than a controller and cannot be seen here."
         )
     return lines
 
 
-def describe(device: int, button: int) -> str:
-    """Human-readable binding, e.g. 'Fanatec CSL Elite - button 13'."""
-    return f"{_name(device) or f'joystick {device}'} - {_label(device, button)}"
+def describe(index: int, button: int) -> str:
+    """Human-readable binding, e.g. 'Fanatec CSL Elite - button 13 (SDL2)'.
+
+    The API is part of the label because it changes what the binding can
+    promise: an XInput device has no identity beyond its slot, so a binding
+    against one is weaker than the same binding through SDL.
+    """
+    for device in devices():
+        if device.index != index:
+            continue
+        label = f"button {button}"
+        if device.owner is not None:
+            try:
+                label = device.owner.label(device.native, button)
+            except Exception:
+                log.debug("%s label failed", device.api, exc_info=True)
+        return f"{device.name} - {label} ({device.api})"
+    return f"joystick {index} - button {button}"
 
 
 class JoystickWatcher(threading.Thread):
@@ -202,10 +328,10 @@ class JoystickWatcher(threading.Thread):
         self._device = device
         self._button = button
         self._guid = guid or ""
-        # guid -> the index it currently occupies. Re-enumerating on every
-        # poll would be wasteful with three bindings to resolve.
-        self._resolved: dict[str, int] = {}
-        # kind -> (guid, device, button) for the momentary send/clear
+        # binding key -> the device it resolved to. Re-enumerating every
+        # backend on every poll would be wasteful with three bindings.
+        self._resolved: dict[str, Device] = {}
+        # kind -> (guid, index, button) for the momentary send/clear
         # bindings, and whether each is currently held.
         self._actions: dict[str, tuple[str, int | None, int]] = {}
         self._action_held: dict[str, bool] = {}
@@ -262,8 +388,11 @@ class JoystickWatcher(threading.Thread):
 
     def stop(self) -> None:
         self._stop.set()
-        if backend() is not None:
-            _sdl.stop()
+        for backend in backends():
+            try:
+                backend.stop()
+            except Exception:
+                log.debug("%s teardown failed", backend.version, exc_info=True)
 
     # -- thread body -----------------------------------------------------
 
@@ -283,33 +412,31 @@ class JoystickWatcher(threading.Thread):
                 log.exception("joystick poll failed")
             self._stop.wait(POLL_SECONDS)
 
-    def _index_for(self, guid: str, fallback: int | None) -> int | None:
-        """Where a bound device currently sits, or None if it is not attached."""
-        if not guid:
-            return fallback
+    def _device_for(self, guid: str, fallback: int | None) -> Device | None:
+        """The device a binding refers to, or None if it is not attached.
 
-        # Trust the last answer for as long as that index still holds the same
-        # device; re-enumerating on every poll would be wasteful.
-        cached = self._resolved.get(guid)
-        if cached is not None and _guid(cached) == guid:
+        Cached, because resolving three bindings against every backend on every
+        12ms poll would mean re-enumerating hundreds of times a second.
+        """
+        cached = self._resolved.get(guid or f"index:{fallback}")
+        if cached is not None and _still_attached(cached):
             return cached
 
-        for device in devices():
-            if device.guid == guid:
-                self._resolved[guid] = device.index
-                return device.index
+        found = _find(guid, fallback)
+        if found is None:
+            self._resolved.pop(guid or f"index:{fallback}", None)
+        else:
+            self._resolved[guid or f"index:{fallback}"] = found
+        return found
 
-        self._resolved.pop(guid, None)
-        return None
-
-    def _resolve_index(self) -> int | None:
-        return self._index_for(self._guid, self._device)
+    def _resolve_device(self) -> Device | None:
+        return self._device_for(self._guid, self._device)
 
     def _poll_actions(self) -> None:
         """Momentary bindings: one event on the press edge, none on release."""
-        for kind, (guid, device, button) in self._actions.items():
-            index = self._index_for(guid, device)
-            mask = None if index is None else _mask(index)
+        for kind, (guid, index, button) in self._actions.items():
+            device = self._device_for(guid, index)
+            mask = None if device is None else _mask(device)
             if mask is None:
                 self._action_held[kind] = False
                 continue
@@ -319,8 +446,8 @@ class JoystickWatcher(threading.Thread):
             self._action_held[kind] = down
 
     def _poll_binding(self) -> None:
-        index = self._resolve_index()
-        mask = None if index is None else _mask(index)
+        device = self._resolve_device()
+        mask = None if device is None else _mask(device)
         if mask is None:
             if not self._missing_logged:
                 self._missing_logged = True
@@ -352,7 +479,7 @@ class JoystickWatcher(threading.Thread):
     def _poll_capture(self) -> None:
         snapshot: dict[str, tuple[Device, int]] = {}
         for device in devices():
-            mask = _mask(device.index)
+            mask = _mask(device)
             if mask is None:
                 continue
             snapshot[device.key] = (device, mask)

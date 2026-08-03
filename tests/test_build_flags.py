@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packaging"))
 
 import build
 
+ROOT = Path(__file__).parent.parent
+
 av = pytest.importorskip("av", reason="PyAV not installed in this environment")
 
 
@@ -341,3 +343,89 @@ def test_a_second_failure_after_clearing_the_cache_gives_up(monkeypatch, tmp_pat
 
     assert build.build() == 1
     assert len(calls) == 2
+
+
+# -- the SDL3 binding must match the DLL we ship -------------------------
+
+
+def _pe_exports(path):
+    """Exported symbol names from a PE file, without loading it.
+
+    Parsed rather than dlopen'd because the tests run on Linux and macOS and
+    the DLL is Windows-only. The alternative is finding out on a user's machine
+    that a name was wrong.
+    """
+    import struct
+
+    data = Path(path).read_bytes()
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    assert data[pe:pe + 4] == b"PE\0\0", "not a PE file"
+
+    sections = struct.unpack_from("<H", data, pe + 6)[0]
+    optional_size = struct.unpack_from("<H", data, pe + 20)[0]
+    optional = pe + 24
+    magic = struct.unpack_from("<H", data, optional)[0]
+    # The export directory is data directory 0; PE32+ puts it 16 bytes later.
+    directories = optional + (112 if magic == 0x20B else 96)
+    export_rva = struct.unpack_from("<I", data, directories)[0]
+
+    table = []
+    for index in range(sections):
+        header = optional + optional_size + 40 * index
+        vsize, vaddr, _rawsize, rawptr = struct.unpack_from("<IIII", data, header + 8)
+        table.append((vaddr, max(vsize, 1), rawptr))
+
+    def offset(rva):
+        for vaddr, vsize, rawptr in table:
+            if vaddr <= rva < vaddr + vsize:
+                return rawptr + (rva - vaddr)
+        raise AssertionError(f"RVA {rva:#x} is outside every section")
+
+    directory = offset(export_rva)
+    count = struct.unpack_from("<I", data, directory + 24)[0]
+    names_rva = struct.unpack_from("<I", data, directory + 32)[0]
+    names_base = offset(names_rva)
+
+    found = set()
+    for index in range(count):
+        name_rva = struct.unpack_from("<I", data, names_base + 4 * index)[0]
+        start = offset(name_rva)
+        found.add(data[start:data.index(b"\0", start)].decode("ascii", "replace"))
+    return found
+
+
+SDL3_DLL = ROOT / "packaging" / "runtime" / "SDL3.dll"
+
+
+@pytest.mark.skipif(not SDL3_DLL.exists(),
+                    reason="run packaging/fetch_sdl3.py first")
+def test_every_sdl3_symbol_we_declare_exists():
+    """A misspelled symbol is the worst failure this binding can have.
+
+    `_declare` raises AttributeError on the first missing name, `start()`
+    catches it and reports the backend unavailable, and the app quietly drops
+    to SDL2 — which is exactly the state SDL3 was added to escape. SDL3 renamed
+    most of the SDL2 joystick calls (`SDL_JoystickUpdate` became
+    `SDL_UpdateJoysticks`, and so on), so this is a live hazard rather than a
+    theoretical one.
+    """
+    import re
+
+    declared = set(re.findall(
+        r"lib\.(SDL_[A-Za-z0-9_]+)", (ROOT / "sdl3input.py").read_text()))
+    assert declared, "no SDL3 symbols found in sdl3input.py"
+
+    missing = sorted(declared - _pe_exports(SDL3_DLL))
+    assert not missing, f"SDL3.dll does not export: {', '.join(missing)}"
+
+
+@pytest.mark.skipif(not SDL3_DLL.exists(),
+                    reason="run packaging/fetch_sdl3.py first")
+def test_the_pinned_sdl3_download_is_what_we_extracted():
+    """The hash covers the archive; this covers what came out of it."""
+    import fetch_sdl3
+
+    assert fetch_sdl3.target().exists()
+    assert (fetch_sdl3.RUNTIME / "SDL3-LICENSE.txt").exists(), (
+        "SDL3 is zlib-licensed and its licence must ship with the binary"
+    )

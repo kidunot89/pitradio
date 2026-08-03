@@ -96,20 +96,55 @@ Four threads, and mixing them up is how this breaks:
 | tray | pystray's blocking `run()` |
 | joystick | polls wheel/gamepad buttons; feeds the same queue as the hook |
 
-Joystick input has two backends. **SDL2 is preferred** ([sdlinput.py](sdlinput.py),
-a hand-written ctypes binding over a bundled `SDL2.dll`), because the legacy
-Windows joystick API cannot see Steam Input devices at all. The legacy path in
-`winapi.py` remains as a fallback, and `joystick.backend()` picks. SDL failing
-to load must degrade to the fallback, never crash — `--self-test` reports which
-backend is live and fails if SDL2 doesn't load, so a bundle that drops the DLL
-is caught rather than silently losing devices.
+Joystick input has **four backends, combined rather than chosen between**
+(`joystick._ensure_started`, in preference order):
+
+| Backend | Sees | Notes |
+| --- | --- | --- |
+| SDL3 ([sdl3input.py](sdl3input.py)) | devices SDL2 never covered, read over HIDAPI | bundled `SDL3.dll` |
+| SDL2 ([sdlinput.py](sdlinput.py)) | the widest range of wheels, pedals, button boxes | bundled `SDL2.dll` |
+| XInput ([xinput.py](xinput.py)) | four slots of anything presenting as an Xbox pad | no library to bundle |
+| legacy (`winapi` via `joystick.LegacyPads`) | whatever the multimedia API reports | the floor |
+
+A rig routinely spans more than one — a wheel on SDL2 and a pad on XInput is
+ordinary — so `devices()` merges every backend's list and deduplicates by
+identity, earlier backends winning. Picking a single backend, which is what the
+SDL2-only path did, silently drops half the hardware.
+
+**Each `Device` carries the `api` that found it**, and `diagnose()` prints it
+per device. Which backend saw something is the first useful question when it
+does not work: a pad only XInput can see has no real identity, and a device
+missing from every backend is a driver or Steam problem rather than anything
+this app can fix.
+
+A backend that fails to load, or throws while enumerating, must cost only
+itself — never the others and never the app. `--self-test` reports each one and
+fails if SDL2, or SDL3 in a frozen build, did not load, so a bundle that drops
+a DLL is caught rather than silently losing devices.
+
+**`SDL3.dll` is fetched, not committed** — [packaging/fetch_sdl3.py](packaging/fetch_sdl3.py)
+downloads the official libsdl-org release and verifies a pinned SHA256. There is
+no Python package that ships an SDL3 Windows binary (PySDL3 is a pure wrapper
+with no library in it), and a 2.8MB binary in the repo is something nobody
+reviews. CI fetches it before building.
+`tests/test_build_flags.py` parses the DLL's PE export table and asserts every
+symbol `sdl3input` declares actually exists — SDL3 renamed most of the SDL2
+joystick calls (`SDL_JoystickUpdate` became `SDL_UpdateJoysticks`), and a
+misspelling would fail inside `start()`, be caught, and drop silently to SDL2.
 
 `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS` is not optional: without it SDL drops
 joystick input whenever PitRadio isn't focused, which is always, while racing.
 SDL is also initialised without a video subsystem, so it has no window and no
-focus to gate on, and state polling (`SDL_JoystickUpdate` + `GetButton`) asks
-the driver directly rather than going through an event queue. That combination
-is what makes the wheel trigger work while the sim is in front.
+focus to gate on, and state polling asks the driver directly rather than going
+through an event queue.
+
+**`SDL_JOYSTICK_THREAD` is not optional either, and is less obvious.** SDL only
+re-scans for devices when its device-change window receives `WM_DEVICECHANGE`,
+and with that hint off SDL creates the window on whichever thread called
+`SDL_Init` — ours, which runs a polling loop and never pumps messages. The
+result is that anything connected *after* startup is never noticed, for the
+life of the process. See `WINDOWS_JoystickDetect`, which returns immediately
+unless `s_bWindowsDeviceChanged` is set.
 
 **Bindings are stored against the device's SDL GUID, not its index** — see
 `JoystickConfig` and `JoystickWatcher._resolve_index`. Indices are positional:

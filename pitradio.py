@@ -207,23 +207,34 @@ def cmd_self_test() -> int:
             failures.append((name, f"{type(exc).__name__}: {exc}"))
             out(f"  FAILED  {name}: {type(exc).__name__}: {exc}")
 
-    # Importing sdlinput proves nothing about SDL2 itself: the DLL is bundled
-    # data, loaded by path at runtime. A bundle that drops it would import fine
-    # and then silently fall back to the legacy interface, losing exactly the
-    # devices SDL was added for. Same shape as the av.utils failure.
-    try:
-        import sdlinput
-
-        probe = sdlinput.SdlJoysticks()
-        if probe.start():
-            out(f"  ok      SDL2 loaded ({len(probe.list_devices())} controllers)")
-            probe.stop()
-        else:
-            failures.append(("SDL2", probe.failure or "did not initialise"))
-            out(f"  FAILED  SDL2: {probe.failure}")
-    except Exception as exc:
-        failures.append(("SDL2", f"{type(exc).__name__}: {exc}"))
-        out(f"  FAILED  SDL2: {type(exc).__name__}: {exc}")
+    # Importing the bindings proves nothing about the libraries themselves:
+    # both DLLs are bundled data, loaded by path at runtime. A bundle that
+    # drops one would import fine and then silently fall back, losing exactly
+    # the devices that backend was added for. Same shape as the av.utils
+    # failure. SDL3 is required in a frozen build because CI fetches it; from
+    # source it is optional, since a developer may not have run fetch_sdl3.py.
+    for label, module_name, class_name, required in (
+        ("SDL3", "sdl3input", "Sdl3Joysticks", paths.is_frozen()),
+        ("SDL2", "sdlinput", "SdlJoysticks", True),
+    ):
+        try:
+            module = __import__(module_name)
+            probe = getattr(module, class_name)()
+            if probe.start():
+                out(f"  ok      {label} loaded ({len(probe.list_devices())} controllers)")
+                probe.stop()
+            elif required:
+                failures.append((label, probe.failure or "did not initialise"))
+                out(f"  FAILED  {label}: {probe.failure}")
+            else:
+                out(f"  skip    {label}: {probe.failure}")
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            if required:
+                failures.append((label, detail))
+                out(f"  FAILED  {label}: {detail}")
+            else:
+                out(f"  skip    {label}: {detail}")
 
     # Constructing the registry is what proves plugins were bundled: they are
     # registered statically, so a build that dropped the package would import

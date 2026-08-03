@@ -23,3 +23,6 @@ pitradio.log*
 .DS_Store
 .idea/
 .vscode/
+
+# Fetched by packaging/fetch_sdl3.py, verified by hash rather than committed.
+packaging/runtime/
