@@ -227,3 +227,43 @@ def test_lmu_reports_not_connected_without_the_sim():
     plugin = plugins.LeMansUltimatePlugin()
     assert plugin.drivers() == []
     assert "not connected" in plugin.status()
+
+
+# -- opening vs creating -------------------------------------------------
+
+
+def test_the_lmu_plugin_never_creates_the_mapping():
+    """It must open LMU's block, never make one.
+
+    mmap.mmap(fileno=0, tagname=...) calls CreateFileMapping on Windows, which
+    *creates* the block when absent. With LMU closed that fabricated a
+    page-file-backed block named LMU_Data full of zeros: the plugin reported
+    itself connected to a session that did not exist, and left a phantom
+    mapping under the game's own name. OpenFileMappingW only ever opens.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "plugins" / "lmu.py").read_text(
+        encoding="utf-8")
+
+    # The AST, not the text: the docstring explaining this trap mentions
+    # `tagname`, and banning the word would flag the explanation itself.
+    creating = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and any(kw.arg == "tagname" for kw in node.keywords)
+    ]
+    assert not creating, (
+        "a call passes tagname=, which creates the mapping when it is absent "
+        "and fabricates a block under the game's own name"
+    )
+    assert "OpenFileMappingW" in source, "should open an existing mapping only"
+
+
+def test_status_says_not_connected_when_lmu_is_absent():
+    """The regression this replaced: it claimed to be connected to nothing."""
+    plugin = plugins.LeMansUltimatePlugin()
+    assert plugin.drivers() == []
+    assert "not connected" in plugin.status()

@@ -7,16 +7,16 @@ rather than depended on — getting a field offset wrong would silently yield
 garbage names instead of failing, so the layout is worth taking from a
 maintained source rather than hand-deriving.
 
-Reading is cheap and lazy: the map is opened on first use and stays open. Every
-failure path returns "no drivers", because a game update that moves the layout
-must cost a feature, never a trigger.
+The block is *opened*, never created — see _open_existing_mapping for why that
+distinction matters. Connection is lazy, since the sim is usually not running
+when PitRadio starts. Every failure path returns "no drivers", because a game
+update that moves the layout must cost a feature, never a trigger.
 """
 
 from __future__ import annotations
 
 import ctypes
 import logging
-import mmap
 import sys
 import threading
 from pathlib import Path
@@ -32,6 +32,55 @@ if str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
 
 
+# Read-only view of an existing mapping.
+FILE_MAP_READ = 0x0004
+
+
+def _open_existing_mapping(name: str, size: int):
+    """Open a shared memory block only if something else already published it.
+
+    Deliberately not mmap.mmap(fileno=0, tagname=...): on Windows that calls
+    CreateFileMapping, which *creates* the block when it is absent. With LMU
+    closed that fabricated a page-file-backed block named LMU_Data full of
+    zeros, so the plugin reported itself connected to a session that did not
+    exist — and left a phantom mapping under the game's own name.
+
+    OpenFileMappingW only ever opens; it fails when the game is not running,
+    which is the answer we actually want.
+    """
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenFileMappingW.argtypes = (
+        wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+    kernel32.OpenFileMappingW.restype = wintypes.HANDLE
+    kernel32.MapViewOfFile.argtypes = (
+        wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+        ctypes.c_size_t)
+    kernel32.MapViewOfFile.restype = ctypes.c_void_p
+
+    handle = kernel32.OpenFileMappingW(FILE_MAP_READ, False, name)
+    if not handle:
+        return None
+
+    view = kernel32.MapViewOfFile(handle, FILE_MAP_READ, 0, 0, size)
+    if not view:
+        kernel32.CloseHandle(handle)
+        return None
+    return handle, view
+
+
+def _close_mapping(handle, view) -> None:
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if view:
+            kernel32.UnmapViewOfFile(ctypes.c_void_p(view))
+        if handle:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        log.debug("releasing the LMU mapping failed", exc_info=True)
+
+
 class LeMansUltimatePlugin(SessionPlugin):
     id = "lmu"
     name = "Le Mans Ultimate"
@@ -42,7 +91,8 @@ class LeMansUltimatePlugin(SessionPlugin):
     )
 
     def __init__(self) -> None:
-        self._mmap: mmap.mmap | None = None
+        self._handle = None
+        self._view = None
         self._data = None
         self._lock = threading.Lock()
         self._failure: str | None = None
@@ -63,12 +113,10 @@ class LeMansUltimatePlugin(SessionPlugin):
 
     def _release(self) -> None:
         self._data = None
-        if self._mmap is not None:
-            try:
-                self._mmap.close()
-            except (BufferError, OSError) as exc:
-                log.debug("closing the LMU shared memory failed: %s", exc)
-            self._mmap = None
+        if self._handle or self._view:
+            _close_mapping(self._handle, self._view)
+        self._handle = None
+        self._view = None
 
     # -- connection ------------------------------------------------------
 
@@ -90,25 +138,24 @@ class LeMansUltimatePlugin(SessionPlugin):
             self._fail(f"shared memory definitions unavailable: {exc}")
             return False
 
-        try:
-            block = mmap.mmap(
-                fileno=0,
-                length=ctypes.sizeof(lmu_data.LMUObjectOut),
-                tagname=lmu_data.LMUConstants.LMU_SHARED_MEMORY_FILE,
-            )
-        except (OSError, ValueError, AttributeError, TypeError) as exc:
-            # Normal when LMU isn't running, so this is not an error.
-            self._fail(f"not published ({exc})")
+        size = ctypes.sizeof(lmu_data.LMUObjectOut)
+        name = lmu_data.LMUConstants.LMU_SHARED_MEMORY_FILE
+
+        opened = _open_existing_mapping(name, size)
+        if opened is None:
+            self._fail("LMU is not running (no shared memory published)")
             return False
 
+        handle, view = opened
         try:
-            self._data = lmu_data.LMUObjectOut.from_buffer(block)
+            self._data = ctypes.cast(
+                view, ctypes.POINTER(lmu_data.LMUObjectOut)).contents
         except (ValueError, TypeError) as exc:
-            block.close()
+            _close_mapping(handle, view)
             self._fail(f"unexpected layout: {exc}")
             return False
 
-        self._mmap = block
+        self._handle, self._view = handle, view
         self._failure = None
         self._logged_failure = False
         log.info("connected to Le Mans Ultimate shared memory")

@@ -37,7 +37,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           pip install nuitka
+
+      # This workflow built and installed but never ran the suite, so a release
+      # could publish with failing tests. It nearly did.
+      - name: Run the test suite
+        run: pytest -q
 
       # Shares the cache the CI workflow populates, so a release build usually
       # starts warm rather than recompiling the whole dependency tree.
