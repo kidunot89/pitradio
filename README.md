@@ -57,8 +57,22 @@ The Status tab warns you if the app isn't elevated.
 2. Go to **Audio**, pick your microphone, and press **Record 4s and
    transcribe**. Nothing is typed anywhere — this just proves the mic and the
    model work.
-3. Bind a wheel button to **F13** in JoyToKey, or just use the F13 key.
-4. Start your sim, hold F13, say something, release.
+3. Sort out a trigger key — see below.
+4. Start your sim, hold the trigger, say something, release.
+
+### About F13
+
+The default trigger is **F13**, because no sim binds it, so holding it can never
+also do something in the game. Almost no keyboard has an F13 key: the intended
+route is to map a wheel button to F13 with **JoyToKey** (or your wheel's own
+software), after which PitRadio sees it as an ordinary keypress.
+
+If you just want to try it at a desk, change the trigger in **Settings** to a
+key you can actually press. `scrolllock` and `pause` are good choices — present
+on most keyboards, rarely bound by sims. The change applies immediately.
+
+Whatever you pick is **swallowed**: it never reaches the game, so don't use a
+key the sim needs.
 
 Closing the window minimises to the tray; the trigger key keeps working. Quit
 from the tray menu to actually stop the app.

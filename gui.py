@@ -261,11 +261,31 @@ class App:
         # Keep the store's mtime in step so this write doesn't read back as an
         # external edit on the next trigger.
         self.store.load()
+        self._apply_trigger_key()
         self._refresh_warnings()
         if problems:
             log.warning("config saved with %d problem(s); see the banner", len(problems))
         else:
             log.info("config saved")
+
+    def _apply_trigger_key(self) -> None:
+        """Push a changed trigger key straight to the hook.
+
+        The worker only re-reads config at the start of a trigger, so without
+        this a new trigger key would not take effect until the *old* one was
+        pressed. That is a trap: the usual reason to change it is that you can't
+        press the old one — F13 doesn't exist on most keyboards — and the only
+        way out would be restarting the app.
+        """
+        if self.hook is None:
+            return
+        import keys
+
+        try:
+            self.hook.set_trigger(keys.parse_key(self.store.config.trigger_key))
+            log.info("trigger key is now %s", self.store.config.trigger_key)
+        except keys.KeyNameError as exc:
+            log.error("keeping the previous trigger key: %s", exc)
 
     def check_for_updates(self) -> None:
         if self.checker is None:
