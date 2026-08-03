@@ -185,6 +185,27 @@ def play_cue(cue_cfg, frequency: int) -> None:
 # -- transcription -------------------------------------------------------
 
 
+def download_model(model: str, model_dir, compute_type: str = "int8") -> str | None:
+    """Fetch a model into the cache. Returns an error message, or None on success.
+
+    Constructing a WhisperModel is what triggers the download, and it is also
+    the only way to know the model actually loads — a downloaded-but-unusable
+    model would otherwise only surface on the first trigger, mid-session.
+    """
+    from faster_whisper import WhisperModel
+
+    started = time.perf_counter()
+    try:
+        WhisperModel(model, device="cpu", compute_type=compute_type,
+                     download_root=str(model_dir))
+    except Exception as exc:
+        log.error("could not fetch %s: %s", model, exc)
+        return f"{type(exc).__name__}: {exc}"
+
+    log.info("%s ready (%.1fs)", model, time.perf_counter() - started)
+    return None
+
+
 class Transcriber:
     """Wraps faster-whisper, holding one loaded model for the session."""
 

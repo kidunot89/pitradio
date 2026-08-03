@@ -18,6 +18,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import gui_language
 import gui_settings
 import state as state_mod
 from state import AppState
@@ -114,6 +115,7 @@ class App:
         self._build_status_tab()
         gui_settings.build_settings_tab(self)
         gui_settings.build_profiles_tab(self)
+        gui_language.build_language_tab(self)
         gui_settings.build_vocabulary_tab(self)
         gui_settings.build_audio_tab(self)
         gui_settings.build_history_tab(self)
@@ -331,6 +333,26 @@ class App:
         self.joystick.set_binding(joy.device, joy.button)
         if joy.device is not None and joy.button is not None:
             log.info("joystick trigger: device %s button %s", joy.device, joy.button)
+
+    def reload_model(self) -> None:
+        """Load the configured model now, off the Tk thread.
+
+        Changing language has to take effect without a restart, and the
+        transcriber otherwise keeps whichever model it loaded at startup until
+        the worker happens to notice the config changed.
+        """
+        if self.transcriber is None:
+            return
+
+        import threading
+
+        def work() -> None:
+            try:
+                self.transcriber.load(self.store.config.whisper)
+            except Exception as exc:
+                log.error("could not load %s: %s", self.store.config.whisper.model, exc)
+
+        threading.Thread(target=work, name="model-reload", daemon=True).start()
 
     def check_for_updates(self) -> None:
         if self.checker is None:

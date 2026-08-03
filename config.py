@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import keys
+import languages as languages_mod
 
 CONFIG_VERSION = 1
 
@@ -85,6 +86,10 @@ class WhisperConfig:
     language: str = "en"
     vad_filter: bool = True
     initial_prompt: str = RACING_VOCABULARY
+    # language code -> model size. `model` above is derived from the active
+    # language and its size, so the worker keeps loading one plain model name
+    # and knows nothing about any of this.
+    languages: dict[str, str] = field(default_factory=lambda: {"en": "small"})
 
 
 @dataclass
@@ -229,6 +234,15 @@ class Config:
         # anyway, so without a check here you would get silently wrong output
         # rather than an error. The ".en" models are English-only; multilingual
         # ones drop the suffix.
+        for code, size in (self.whisper.languages or {}).items():
+            if code not in languages_mod.WHISPER_LANGUAGES:
+                problems.append(f"whisper.languages: {code!r} is not a Whisper language")
+            if size not in languages_mod.SIZES:
+                problems.append(
+                    f"whisper.languages[{code!r}]: {size!r} is not one of "
+                    f"{', '.join(languages_mod.SIZES)}"
+                )
+
         english_only = self.whisper.model.endswith(".en")
         wanted = (self.whisper.language or "").strip().lower()
         if english_only and wanted not in ("", "en"):

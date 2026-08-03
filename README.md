@@ -157,21 +157,33 @@ CPU transcription doesn't.
 
 ### Other languages
 
-PitRadio ships `small.en`, the English-only Whisper model. It's more accurate
-for English than the multilingual model of the same size, and no slower.
+The **Language** tab configures which languages you want and how large a model
+to use for each. Add a language, pick a size, press **Save and download**, and
+the models are fetched into the cache.
 
-Whisper itself handles 99 languages. To use one, edit `config.json` (or the
-GUI's Settings) and change `whisper.model` to a multilingual name — drop the
-`.en`, so `small`, `medium`, `large-v3` — then set `whisper.language` to a code
-like `de` or `fr`, or `""` to auto-detect per clip. Larger models are slower on
-CPU, which matters when you're waiting to send a message mid-stint.
+Worth understanding, because it shapes the choices: **Whisper has no
+per-language models.** There are English-only builds (`tiny.en` … `medium.en`)
+and multilingual builds (`tiny` … `large-v3`), and every multilingual build
+handles all the languages. Picking a size per language is still useful —
+multilingual `small` is weaker than `small.en`, so a second language often wants
+a bigger model than English does. "Medium Spanish, small English" means `medium`
+when transcribing Spanish and `small.en` when transcribing English.
 
-Also replace the **Vocabulary** text: it ships as English racing terms, and a
-prompt in the wrong language works against you.
+Only one language is active at a time. The others stay configured and
+downloaded, so switching is instant.
 
-Pairing an `.en` model with a non-English language is a mistake PitRadio now
-rejects at validation. faster-whisper only warns about it and then transcribes
-English anyway, which is a confusing way to lose an afternoon.
+Sizes trade accuracy against latency, and latency is what you feel mid-stint:
+
+| Size | Download | Notes |
+| --- | --- | --- |
+| tiny | ~75 MB | fastest, least accurate |
+| base | ~145 MB | fast |
+| small | ~480 MB | the default; a good balance on CPU |
+| medium | ~1.5 GB | noticeably slower on CPU |
+| large | ~3 GB | often too slow to use between corners |
+
+Also replace the **Vocabulary** text when you change language: it ships as
+English racing terms, and a prompt in the wrong language works against you.
 
 ---
 

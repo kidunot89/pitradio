@@ -204,6 +204,22 @@ pipeline because its format must match `updater._expected_hash` — a seam that
 otherwise only gets exercised during a real release. `tests/test_checksums.py`
 pins the two together.
 
+## Languages and models
+
+Whisper has no per-language models: English-only builds (`tiny.en` …
+`medium.en`) and multilingual builds (`tiny` … `large-v3`). [languages.py](languages.py)
+owns that mapping — `model_name(language, size)` picks the `.en` build for
+English where one exists, because it beats multilingual at the same size.
+
+The Language tab writes `whisper.languages` (code → size), `whisper.language`
+(active) and derives `whisper.model` from the two. **The worker and transcriber
+never see any of this** — they load one plain model name, which is what keeps
+the runtime path unchanged.
+
+`config.validate` rejects an `.en` model paired with a non-English language:
+faster-whisper only warns and then transcribes English anyway, so without the
+check the config would be silently wrong.
+
 ## Config
 
 Ships with **one profile: Le Mans Ultimate**. Don't add speculative profiles for
