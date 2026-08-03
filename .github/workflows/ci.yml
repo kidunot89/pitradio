@@ -60,20 +60,35 @@ jobs:
       # Same suite as the Linux job, on the platform that actually ships.
       - run: pytest -q
 
-      # Nuitka compiles to C and then invokes a C compiler, so a cold build
-      # recompiles the whole dependency tree — PyAV's FFmpeg bindings and
-      # onnxruntime dominate. Persisting its cache is what keeps repeat builds
-      # from paying that again. The key covers the dependency set and the build
-      # flags, since either changing invalidates the compiled output.
-      - name: Cache the Nuitka compilation cache
-        uses: actions/cache@v4
+      # restore + save as separate steps, deliberately. actions/cache only
+      # writes its cache when the job SUCCEEDS, and a build that fails has
+      # still compiled most of the dependency tree — which is precisely the
+      # expensive part worth keeping. Every failed run was throwing that away
+      # and starting the next one cold, which is why builds sat at ~40 minutes
+      # instead of ~13.
+      #
+      # The key covers the dependency set only. packaging/build.py used to be
+      # in it, but it changes constantly and Nuitka's cache is content-addressed
+      # internally, so a coarse key hits far more often and stale entries are
+      # harmless.
+      - name: Restore the Nuitka compilation cache
+        uses: actions/cache/restore@v4
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
-          key: nuitka-${{ runner.os }}-py312-${{ hashFiles('requirements.txt', 'packaging/build.py') }}
+          key: nuitka-${{ runner.os }}-py312-${{ hashFiles('requirements.txt') }}
           restore-keys: nuitka-${{ runner.os }}-py312-
 
       - name: Build with Nuitka
         run: python packaging/build.py
+
+      # always(): the point of the split. A cancelled or failed build has done
+      # real compilation work and the next run should inherit it.
+      - name: Save the Nuitka compilation cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-${{ runner.os }}-py312-${{ hashFiles('requirements.txt') }}-${{ github.run_id }}
 
       # The reason this job exists. ctranslate2, onnxruntime, PyAV and PortAudio
       # ship native libraries that Nuitka's standalone mode does not always

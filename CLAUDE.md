@@ -221,7 +221,12 @@ minutes per attempt:
   produces output from a terminal. The consequence is a GUI-subsystem binary:
   PowerShell neither waits for it nor sets `$LASTEXITCODE` from it, so CI must
   use `Start-Process -Wait -PassThru` or it tests a stale exit code.
-- **Nuitka's cache is persisted by CI.** Cold builds are ~47 minutes, warm ~26.
+- **Nuitka's cache is persisted by CI, via `cache/restore` + `cache/save` with
+  `if: always()`.** The combined `actions/cache` action only writes on job
+  success, so every failed or cancelled build was discarding its compilation
+  work and leaving the next run cold — which is why builds sat near 40 minutes
+  rather than the ~13 a warm cache gives. A failed build has still compiled most
+  of the dependency tree and that is exactly what is worth keeping.
 
 `packaging/checksums.py` writes `SHA256SUMS`, in Python rather than a shell
 pipeline because its format must match `updater._expected_hash` — a seam that
