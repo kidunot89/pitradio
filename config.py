@@ -225,6 +225,19 @@ class Config:
         if self.whisper.beam_size < 1:
             problems.append("whisper.beam_size must be >= 1")
 
+        # faster-whisper only warns about this and then transcribes English
+        # anyway, so without a check here you would get silently wrong output
+        # rather than an error. The ".en" models are English-only; multilingual
+        # ones drop the suffix.
+        english_only = self.whisper.model.endswith(".en")
+        wanted = (self.whisper.language or "").strip().lower()
+        if english_only and wanted not in ("", "en"):
+            problems.append(
+                f"whisper.model {self.whisper.model!r} is English-only but "
+                f"whisper.language is {self.whisper.language!r}; use a "
+                f"multilingual model such as {self.whisper.model[:-3]!r}"
+            )
+
         if not 0.0 <= self.cues.volume <= 1.0:
             problems.append("cues.volume must be between 0 and 1")
 

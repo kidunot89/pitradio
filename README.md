@@ -155,6 +155,24 @@ Transcription runs on the **CPU, deliberately** — the GPU belongs to the sim. 
 model grabbing VRAM mid-corner costs frames, and a few hundred milliseconds of
 CPU transcription doesn't.
 
+### Other languages
+
+PitRadio ships `small.en`, the English-only Whisper model. It's more accurate
+for English than the multilingual model of the same size, and no slower.
+
+Whisper itself handles 99 languages. To use one, edit `config.json` (or the
+GUI's Settings) and change `whisper.model` to a multilingual name — drop the
+`.en`, so `small`, `medium`, `large-v3` — then set `whisper.language` to a code
+like `de` or `fr`, or `""` to auto-detect per clip. Larger models are slower on
+CPU, which matters when you're waiting to send a message mid-stint.
+
+Also replace the **Vocabulary** text: it ships as English racing terms, and a
+prompt in the wrong language works against you.
+
+Pairing an `.en` model with a non-English language is a mistake PitRadio now
+rejects at validation. faster-whisper only warns about it and then transcribes
+English anyway, which is a confusing way to lose an afternoon.
+
 ---
 
 ## Updates

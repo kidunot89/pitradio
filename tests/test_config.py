@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import config
 
 
@@ -214,3 +216,35 @@ def test_malformed_json_keeps_the_previous_config(tmp_path):
 
     assert store.config.default_profile.pre_delay_ms == 777
     assert any("could not be parsed" in p for p in store.problems)
+
+
+# -- language and model agreement ---------------------------------------
+
+
+def test_english_only_model_with_another_language_is_flagged():
+    """faster-whisper only warns, then transcribes English regardless."""
+    def mutate(r):
+        r["whisper"].update(model="small.en", language="de")
+
+    problems = _problems(mutate)
+    assert any("English-only" in p for p in problems)
+    assert any("'small'" in p for p in problems), "should name the multilingual model"
+
+
+@pytest.mark.parametrize("language", ["en", "EN", "", "  "])
+def test_english_only_model_with_english_is_fine(language):
+    def mutate(r):
+        r["whisper"].update(model="small.en", language=language)
+
+    assert [p for p in _problems(mutate) if "English-only" in p] == []
+
+
+@pytest.mark.parametrize(
+    ("model", "language"),
+    [("small", "de"), ("large-v3", "fr"), ("medium", ""), ("small", "en")],
+)
+def test_multilingual_models_accept_any_language(model, language):
+    def mutate(r):
+        r["whisper"].update(model=model, language=language)
+
+    assert [p for p in _problems(mutate) if "English-only" in p] == []
