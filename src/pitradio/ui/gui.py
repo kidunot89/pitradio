@@ -18,7 +18,9 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from pitradio import i18n
 from pitradio import state as state_mod
+from pitradio.i18n import t
 from pitradio.state import AppState
 from pitradio.ui import gui_language, gui_settings, theme
 
@@ -62,9 +64,10 @@ class App:
         root.title(f"PitRadio {version}")
         root.minsize(720, 520)
 
-        # Before anything is built: ttk styles are read when a widget is
-        # created, so a theme applied afterwards leaves whatever already
-        # exists in the old colours.
+        # Both before anything is built. Labels are read once when a widget is
+        # created and ttk styles likewise, so either applied afterwards leaves
+        # whatever already exists in the old language or the old colours.
+        i18n.activate(store.config.gui.language)
         self.palette = theme.apply(root, store.config.gui.theme)
         # Findable from any widget, for helpers that are handed a
         # container rather than the App.
@@ -121,7 +124,7 @@ class App:
 
         ttk.Label(self.header, textvariable=self.status_var,
                   style="Status.TLabel").pack(side="left")
-        ttk.Checkbutton(self.header, text="Enabled", variable=self.enabled_var,
+        ttk.Checkbutton(self.header, text=t("Enabled"), variable=self.enabled_var,
                         command=lambda: self.set_enabled(self.enabled_var.get())
                         ).pack(side="right")
 
@@ -134,7 +137,7 @@ class App:
         self.update_frame = ttk.Frame(self.root, padding=(12, 6))
         self.update_var = tk.StringVar(value="")
         ttk.Label(self.update_frame, textvariable=self.update_var).pack(side="left")
-        ttk.Button(self.update_frame, text="Install now",
+        ttk.Button(self.update_frame, text=t("Install now"),
                    command=self.install_update).pack(side="right")
 
         self.notebook = ttk.Notebook(self.root)
@@ -154,7 +157,7 @@ class App:
 
     def _build_status_tab(self) -> None:
         frame = ttk.Frame(self.notebook, padding=12)
-        self.notebook.add(frame, text="Status")
+        self.notebook.add(frame, text=t("Status"))
 
         grid = ttk.Frame(frame)
         grid.pack(fill="x")
@@ -181,7 +184,7 @@ class App:
             foreground="#666", wraplength=880, justify="left",
         ).pack(fill="x", pady=(10, 6))
 
-        log_frame = ttk.LabelFrame(frame, text="Log", padding=6)
+        log_frame = ttk.LabelFrame(frame, text=t("Log"), padding=6)
         log_frame.pack(fill="both", expand=True)
 
         self.log_text = tk.Text(log_frame, height=14, wrap="none", state="disabled",
@@ -194,12 +197,12 @@ class App:
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(6, 0))
-        ttk.Button(buttons, text="Open log folder",
+        ttk.Button(buttons, text=t("Open log folder"),
                    command=gui_settings.open_log_folder).pack(side="left")
-        ttk.Button(buttons, text="Open config folder",
+        ttk.Button(buttons, text=t("Open config folder"),
                    command=lambda: gui_settings.open_folder(self.store.path.parent)
                    ).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Quit", command=self.quit).pack(side="right")
+        ttk.Button(buttons, text=t("Quit"), command=self.quit).pack(side="right")
 
     def _start_tray(self) -> None:
         try:
@@ -323,7 +326,7 @@ class App:
         try:
             config_mod.save(self.store.path, self.store.config)
         except OSError as exc:
-            messagebox.showerror("PitRadio", f"Could not save config:\n{exc}")
+            messagebox.showerror(t("PitRadio"), f"Could not save config:\n{exc}")
             return
         # Keep the store's mtime in step so this write doesn't read back as an
         # external edit on the next trigger.
@@ -432,7 +435,7 @@ class App:
 
     def check_for_updates(self) -> None:
         if self.checker is None:
-            messagebox.showinfo("PitRadio", "Update checks are disabled in this run.")
+            messagebox.showinfo(t("PitRadio"), t("Update checks are disabled in this run."))
             return
         log.info("checking for updates")
         self.checker.check_now()
@@ -445,14 +448,14 @@ class App:
 
         if not updater.installed_via_installer():
             messagebox.showinfo(
-                "PitRadio",
+                t("PitRadio"),
                 "This copy was not installed with the installer, so it can't update "
                 "itself. Download the new release from GitHub.",
             )
             return
 
         if not messagebox.askyesno(
-            "PitRadio",
+            t("PitRadio"),
             f"Install version {info.version} now?\n\n"
             "PitRadio will close, update, and restart. Don't do this mid-session.",
         ):
@@ -469,7 +472,7 @@ class App:
                 message = str(exc)
                 log.error("update failed: %s", message)
                 self.root.after(
-                    0, lambda: messagebox.showerror("PitRadio", f"Update failed:\n{message}")
+                    0, lambda: messagebox.showerror(t("PitRadio"), f"Update failed:\n{message}")
                 )
                 return
             self.root.after(0, lambda: self._launch_installer(installer))

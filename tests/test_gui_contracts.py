@@ -147,6 +147,21 @@ def _calls_named(node, names):
     )
 
 
+def _literal(node):
+    """The string behind a node, seeing through a `t("…")` wrapper.
+
+    Every label is translated now, so `text="Save"` became `text=t("Save")` —
+    a Call rather than a Constant. Without this these checks found nothing and
+    skipped themselves, which is the same as not having them.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "t" and node.args):
+        return _literal(node.args[0])
+    return None
+
+
 def _save_buttons(node):
     """Button(...) calls whose text starts with 'Save'."""
     found = []
@@ -154,8 +169,7 @@ def _save_buttons(node):
         if not isinstance(call, ast.Call):
             continue
         for kw in call.keywords:
-            if (kw.arg == "text" and isinstance(kw.value, ast.Constant)
-                    and str(kw.value.value).startswith("Save")):
+            if kw.arg == "text" and (_literal(kw.value) or "").startswith("Save"):
                 found.append(call)
     return found
 

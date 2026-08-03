@@ -25,7 +25,7 @@
       "en": "small"
     },
     "vad_filter": true,
-    "initial_prompt": "PitRadio, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, Copse, Stowe, 130R, Degner, Spoon, box this lap, full course yellow, safety car, slow zone, double stint, undercut, overcut, out lap, in lap, apex, understeer, oversteer, dirty air, slipstream, blue flag, penalty, drive through, stop and go, pit window, tyre pressures, brake bias, traction control, fuel saving, lift and coast, delta, purple sector."
+    "initial_prompt": "PitRadio, GitHub, kidunot89, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, Copse, Stowe, 130R, Degner, Spoon, box this lap, full course yellow, safety car, slow zone, double stint, undercut, overcut, out lap, in lap, apex, understeer, oversteer, dirty air, slipstream, blue flag, penalty, drive through, stop and go, pit window, tyre pressures, brake bias, traction control, fuel saving, lift and coast, delta, purple sector."
   },
   "cues": {
     "enabled": true,

@@ -23,9 +23,12 @@ from pitradio import languages as languages_mod
 CONFIG_VERSION = 1
 
 RACING_VOCABULARY = (
-    # The app's own name first: initial_prompt weights what comes early, and
-    # "PitRadio" is otherwise heard as "pit radio" or "big radio".
-    "PitRadio, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, "
+    # The app's own name and where to get it, first: initial_prompt weights
+    # what comes early, and these are exactly the words a driver says to
+    # someone asking about it mid-session. Without them Whisper produces
+    # "pit radio", "get hub" and "kid unit 89".
+    "PitRadio, GitHub, kidunot89, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, "
+    "GT3, Porsche 963, Ferrari 499P, "
     "Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, "
     "Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, "
     "Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, "
@@ -180,6 +183,11 @@ class GuiConfig:
     # "system" follows the desktop's light/dark setting, which is what almost
     # everyone wants; "light" and "dark" pin it.
     theme: str = "system"
+    # The *interface* language, which is not the transcription language — you
+    # may well want a Spanish window and English chat, or the reverse.
+    # "system" follows the desktop and falls back to English when that
+    # language has no catalogue yet.
+    language: str = "system"
 
 
 @dataclass
@@ -305,6 +313,9 @@ class Config:
                 keys.parse_trigger(spec)
             except keys.KeyNameError as exc:
                 problems.append(f"{label}: {exc}")
+
+        if not isinstance(self.gui.language, str) or not self.gui.language:
+            problems.append('gui.language must be "system" or a language code')
 
         if self.gui.theme not in ("system", "light", "dark"):
             problems.append('gui.theme must be "system", "light" or "dark"')

@@ -168,6 +168,10 @@ def nuitka_args(version: str) -> list[str]:
         # Nuitka can follow them -- but naming the package guarantees a
         # new sim module is bundled even before anything imports it.
         "--include-package=pitradio.plugins",
+        # The translation catalogues are data, not code, so following imports
+        # never finds them. A build without them falls back to English
+        # everywhere and says nothing about why.
+        "--include-package-data=pitradio",
         # The vendored LMU struct definitions are loaded via a sys.path
         # entry at runtime, which Nuitka cannot see.
         "--include-package=pylmusharedmemory",

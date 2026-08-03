@@ -77,6 +77,61 @@ python packaging/build.py
   the constraint that made it look like that, because the next person will
   otherwise "simplify" it back into the bug.
 
+## Adding a language
+
+The interface is English, and the machinery for translating it is already
+there — a language is a JSON file, no tooling required.
+
+1. Copy the template:
+
+   ```bash
+   cp src/pitradio/locale/template.json src/pitradio/locale/es.json
+   ```
+
+   Use the ISO 639-1 code (`es`, `de`, `pt`, `fr`, …). `template.json` is
+   generated; don't translate it in place.
+
+2. Fill in the values. The **key is the English text**, so it reads as what it
+   renders:
+
+   ```json
+   {
+     "Trigger key": "Tecla de activación",
+     "Save": "Guardar",
+     "Rescan controllers": ""
+   }
+   ```
+
+3. Leave anything you're unsure of as `""`. An empty value means "not
+   translated yet" and falls back to English — a half-finished catalogue is
+   useful and ships fine. There is no need to do all of it.
+
+4. Check it:
+
+   ```bash
+   pytest -q tests/test_i18n.py
+   ```
+
+   That verifies your file has no keys the app stopped using, and that any
+   `{placeholder}` you kept still matches the English. A renamed placeholder
+   would raise while the window drew — in a language the maintainer cannot
+   read, on a machine they do not have — so it is checked rather than trusted.
+
+Then select it in **Settings → Appearance → Interface language**. `Match the
+system` picks it automatically for anyone whose desktop is set to that
+language.
+
+Two things worth knowing:
+
+- The **interface** language is separate from the **transcription** language.
+  A Spanish window with English chat is an ordinary thing to want.
+- If you add a *string* to the app rather than a translation, regenerate the
+  template or CI will fail:
+
+  ```bash
+  python packaging/extract_strings.py
+  ```
+
 ## Adding a sim plugin
 
 A plugin supplies session data — the driver list, so PitRadio can transcribe

@@ -20,13 +20,14 @@ from tkinter import messagebox, ttk
 
 from pitradio import languages as languages_mod
 from pitradio import paths, speech
+from pitradio.i18n import t
 from pitradio.ui import gui_settings
 
 log = logging.getLogger(__name__)
 
 
 def build_language_tab(app) -> None:
-    frame, footer = gui_settings.scrolling_tab(app, "Language")
+    frame, footer = gui_settings.scrolling_tab(app, t("Language"))
     cfg = app.store.config
 
     ttk.Label(
@@ -41,7 +42,7 @@ def build_language_tab(app) -> None:
     body = ttk.Frame(frame)
     body.pack(fill="both", expand=True)
 
-    left = ttk.LabelFrame(body, text="Languages", padding=8)
+    left = ttk.LabelFrame(body, text=t("Languages"), padding=8)
     left.pack(side="left", fill="both", expand=True)
 
     columns = ("language", "size", "model", "status")
@@ -65,15 +66,15 @@ def build_language_tab(app) -> None:
     ttk.Combobox(controls, textvariable=app.v_new_size, state="readonly",
                  values=list(languages_mod.SIZES), width=9).pack(side="left", padx=6)
 
-    ttk.Button(controls, text="Add / update",
+    ttk.Button(controls, text=t("Add / update"),
                command=lambda: _add_language(app)).pack(side="left")
-    ttk.Button(controls, text="Remove",
+    ttk.Button(controls, text=t("Remove"),
                command=lambda: _remove_language(app)).pack(side="left", padx=6)
 
-    right = ttk.LabelFrame(body, text="Active language", padding=8)
+    right = ttk.LabelFrame(body, text=t("Active language"), padding=8)
     right.pack(side="left", fill="y", padx=(10, 0))
 
-    ttk.Label(right, text="Transcribe in:").pack(anchor="w")
+    ttk.Label(right, text=t("Transcribe in:")).pack(anchor="w")
     app.v_active_language = tk.StringVar(value=languages_mod.label(cfg.whisper.language or "en"))
     app.active_language_box = ttk.Combobox(
         right, textvariable=app.v_active_language, state="readonly", width=24)
@@ -99,9 +100,9 @@ def build_language_tab(app) -> None:
 
     buttons = footer
     app.language_save_button = ttk.Button(
-        buttons, text="Save and download", command=lambda: _save_languages(app))
+        buttons, text=t("Save and download"), command=lambda: _save_languages(app))
     app.language_save_button.pack(side="right")
-    ttk.Button(buttons, text="Open model folder",
+    ttk.Button(buttons, text=t("Open model folder"),
                command=lambda: _open_models(app)).pack(side="left")
 
     _refresh_languages(app)
@@ -160,7 +161,7 @@ def _selected(app) -> str | None:
 def _add_language(app) -> None:
     code = languages_mod.code_from_label(app.v_new_language.get())
     if code not in languages_mod.WHISPER_LANGUAGES:
-        messagebox.showerror("PitRadio", f"{code!r} is not a Whisper language.")
+        messagebox.showerror(t("PitRadio"), f"{code!r} is not a Whisper language.")
         return
 
     configured = _configured(app)
@@ -179,7 +180,7 @@ def _remove_language(app) -> None:
         return
     configured = _configured(app)
     if len(configured) <= 1:
-        messagebox.showinfo("PitRadio", "At least one language has to stay configured.")
+        messagebox.showinfo(t("PitRadio"), t("At least one language has to stay configured."))
         return
     configured.pop(code, None)
     app.store.config.whisper.languages = configured
@@ -203,7 +204,7 @@ def _save_languages(app) -> None:
 
     if active not in configured:
         messagebox.showerror(
-            "PitRadio", "The active language must be one of the configured ones.")
+            t("PitRadio"), t("The active language must be one of the configured ones."))
         return
 
     cfg.whisper.languages = configured

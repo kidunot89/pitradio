@@ -267,6 +267,20 @@ def cmd_self_test() -> int:
             else:
                 out(f"  skip    {label}: {detail}")
 
+    # The catalogues are data files, so a build that dropped them imports
+    # perfectly and simply renders English forever, saying nothing.
+    try:
+        from pitradio import i18n
+
+        if i18n.LOCALE_DIR.is_dir():
+            out(f"  ok      translations ({len(i18n.available())} language(s))")
+        else:
+            failures.append(("translations", f"{i18n.LOCALE_DIR} is missing"))
+            out(f"  FAILED  translations: {i18n.LOCALE_DIR} is missing")
+    except Exception as exc:
+        failures.append(("translations", f"{type(exc).__name__}: {exc}"))
+        out(f"  FAILED  translations: {type(exc).__name__}: {exc}")
+
     # Constructing the registry is what proves plugins were bundled: they are
     # registered statically, so a build that dropped the package would import
     # `plugins` fine and simply have none.

@@ -17,8 +17,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from pitradio import paths, speech
+from pitradio import i18n, paths, speech
 from pitradio import state as state_mod
+from pitradio.i18n import t
 from pitradio.ui import theme
 
 log = logging.getLogger(__name__)
@@ -213,10 +214,10 @@ def _bind_mousewheel(canvas, body) -> None:
 
 
 def build_settings_tab(app) -> None:
-    frame, footer = scrolling_tab(app, "Settings")
+    frame, footer = scrolling_tab(app, t("Settings"))
     cfg = app.store.config
 
-    trigger = ttk.LabelFrame(frame, text="Trigger", padding=10)
+    trigger = ttk.LabelFrame(frame, text=t("Trigger"), padding=10)
     trigger.pack(fill="x")
     # Named so packaging/screenshots.py can crop to it.
     app.trigger_frame = trigger
@@ -230,14 +231,14 @@ def build_settings_tab(app) -> None:
         app, app.v_trigger, app.capture_key_button,
         append=False, label="Press a key…")
     app.capture_key_button.configure(command=app.trigger_capture.start)
-    _row(trigger, 0, "Trigger key", key_row,
-         "hold it to talk; it never reaches the game")
+    _row(trigger, 0, t("Trigger key"), key_row,
+         t("hold it to talk; it never reaches the game"))
 
     # Every controller binding is held until Save, so cancelling out of
     # Settings changes nothing.
     app.joy_slots = {}
     talk = joy_slot(app, "talk", cfg.joystick)
-    _row(trigger, 1, "Wheel / gamepad button", _binding_row(app, trigger, talk),
+    _row(trigger, 1, t("Wheel / gamepad button"), _binding_row(app, trigger, talk),
          "works alongside the key — either one triggers")
 
     # Send and clear act on a message left waiting when a profile has
@@ -248,19 +249,19 @@ def build_settings_tab(app) -> None:
     app.v_clear_key = tk.StringVar(value=cfg.review.clear_key)
     send = joy_slot(app, "send", cfg.send_joystick)
     clear = joy_slot(app, "clear", cfg.clear_joystick)
-    _row(trigger, 2, "Send waiting message",
+    _row(trigger, 2, t("Send waiting message"),
          _binding_row(app, trigger, send, app.v_send_key),
-         "optional; same as tapping the trigger once")
-    _row(trigger, 3, "Clear waiting message",
+         t("optional; same as tapping the trigger once"))
+    _row(trigger, 3, t("Clear waiting message"),
          _binding_row(app, trigger, clear, app.v_clear_key),
-         "optional; same as tapping the trigger twice")
+         t("optional; same as tapping the trigger twice"))
 
     if app.joystick is None:
         for slot in app.joy_slots.values():
             slot["button"].state(["disabled"])
         ttk.Label(
             trigger,
-            text="Joystick input is unavailable in this run.",
+            text=t("Joystick input is unavailable in this run."),
             foreground="#777",
         ).grid(row=4, column=0, columnspan=3, sticky="w")
     else:
@@ -268,48 +269,57 @@ def build_settings_tab(app) -> None:
         ttk.Label(trigger, textvariable=app.v_joystick_devices, foreground="#777",
                   wraplength=640, justify="left").grid(
             row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        ttk.Button(trigger, text="Rescan controllers",
+        ttk.Button(trigger, text=t("Rescan controllers"),
                    command=lambda: _refresh_joystick_devices(app)).grid(
             row=5, column=1, sticky="w", pady=(4, 0))
         _refresh_joystick_devices(app)
 
-    defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
+    defaults = ttk.LabelFrame(frame, text=t("Default profile"), padding=10)
     defaults.pack(fill="x", pady=(10, 0))
     app.v_default = _profile_vars(app, defaults, cfg.default_profile, show_plugin=False)
 
-    cues = ttk.LabelFrame(frame, text="Audio cues", padding=10)
+    cues = ttk.LabelFrame(frame, text=t("Audio cues"), padding=10)
     cues.pack(fill="x", pady=(10, 0))
     app.v_cues_enabled = tk.BooleanVar(value=cfg.cues.enabled)
     app.v_cue_start = tk.StringVar(value=str(cfg.cues.start_hz))
     app.v_cue_stop = tk.StringVar(value=str(cfg.cues.stop_hz))
     app.v_cue_ms = tk.StringVar(value=str(cfg.cues.duration_ms))
     app.v_cue_vol = tk.StringVar(value=str(cfg.cues.volume))
-    ttk.Checkbutton(cues, text="Beep on record start and stop",
+    ttk.Checkbutton(cues, text=t("Beep on record start and stop"),
                     variable=app.v_cues_enabled).grid(row=0, column=0, columnspan=3, sticky="w")
-    _row(cues, 1, "Start tone (Hz)", _entry(cues, app.v_cue_start, 10))
-    _row(cues, 2, "Stop tone (Hz)", _entry(cues, app.v_cue_stop, 10))
-    _row(cues, 3, "Duration (ms)", _entry(cues, app.v_cue_ms, 10))
-    _row(cues, 4, "Volume (0-1)", _entry(cues, app.v_cue_vol, 10))
+    _row(cues, 1, t("Start tone (Hz)"), _entry(cues, app.v_cue_start, 10))
+    _row(cues, 2, t("Stop tone (Hz)"), _entry(cues, app.v_cue_stop, 10))
+    _row(cues, 3, t("Duration (ms)"), _entry(cues, app.v_cue_ms, 10))
+    _row(cues, 4, t("Volume (0-1)"), _entry(cues, app.v_cue_vol, 10))
 
-    appearance = ttk.LabelFrame(frame, text="Appearance", padding=10)
+    appearance = ttk.LabelFrame(frame, text=t("Appearance"), padding=10)
     appearance.pack(fill="x", pady=(10, 0))
     app.appearance_frame = appearance
     app.v_theme = tk.StringVar(value=_theme_label(cfg.gui.theme))
-    _row(appearance, 0, "Theme",
+    _row(appearance, 0, t("Theme"),
          ttk.Combobox(appearance, textvariable=app.v_theme, width=18,
                       values=[label for _mode, label in THEME_CHOICES],
                       state="readonly"),
-         "takes effect next time PitRadio starts")
+         t("takes effect next time PitRadio starts"))
 
-    startup = ttk.LabelFrame(frame, text="Startup", padding=10)
+    # Separate from the transcription language: a Spanish window with English
+    # chat is a perfectly ordinary thing to want.
+    app.v_language = tk.StringVar(value=_language_label(cfg.gui.language))
+    _row(appearance, 1, t("Interface language"),
+         ttk.Combobox(appearance, textvariable=app.v_language, width=18,
+                      values=[label for _code, label in _language_choices()],
+                      state="readonly"),
+         t("English until someone contributes a translation"))
+
+    startup = ttk.LabelFrame(frame, text=t("Startup"), padding=10)
     startup.pack(fill="x", pady=(10, 0))
     app.v_start_min = tk.BooleanVar(value=cfg.gui.start_minimized)
-    ttk.Checkbutton(startup, text="Start minimised to tray",
+    ttk.Checkbutton(startup, text=t("Start minimised to tray"),
                     variable=app.v_start_min).pack(anchor="w")
 
     app.v_run_logon = tk.BooleanVar(value=_task_exists())
     logon = ttk.Checkbutton(
-        startup, text="Start with Windows (as administrator)",
+        startup, text=t("Start with Windows (as administrator)"),
         variable=app.v_run_logon, command=lambda: _apply_run_at_logon(app))
     logon.pack(anchor="w")
     if not paths.is_frozen():
@@ -320,7 +330,7 @@ def build_settings_tab(app) -> None:
             style="Muted.TLabel",
         ).pack(anchor="w")
 
-    ttk.Button(footer, text="Save", command=lambda: _save_settings(app)).pack(anchor="e")
+    ttk.Button(footer, text=t("Save"), command=lambda: _save_settings(app)).pack(anchor="e")
 
 
 THEME_CHOICES = (
@@ -328,6 +338,27 @@ THEME_CHOICES = (
     ("light", "Light"),
     ("dark", "Dark"),
 )
+
+
+def _language_choices() -> list[tuple[str, str]]:
+    """(code, label) for every catalogue that ships, plus "follow the system"."""
+    from pitradio import languages as languages_mod
+
+    choices = [("system", t("Match the system"))]
+    for code in i18n.available():
+        choices.append((code, languages_mod.language_name(code)))
+    return choices
+
+
+def _language_label(code: str) -> str:
+    return dict(_language_choices()).get(code, _language_choices()[0][1])
+
+
+def _language_code(label: str) -> str:
+    for code, text in _language_choices():
+        if text == label:
+            return code
+    return "system"
 
 
 def _theme_label(mode: str) -> str:
@@ -409,7 +440,7 @@ class KeyCapture:
     def start(self) -> None:
         if self.app.hook is None:
             messagebox.showinfo(
-                "PitRadio",
+                t("PitRadio"),
                 "Key capture needs the keyboard hook, which isn't running in "
                 "this mode.")
             return
@@ -522,7 +553,7 @@ def _tick_button_capture(app, slot) -> None:
         slot["var"].set(_joystick_label(app, slot["binding"]))
         if not app.joystick.list_devices():
             messagebox.showinfo(
-                "PitRadio",
+                t("PitRadio"),
                 "No controller was detected, so no button could be captured.\n\n"
                 "See the controller list under the Trigger section for what "
                 "PitRadio can currently see.",
@@ -566,7 +597,7 @@ def _binding_row(app, parent, slot, key_var=None, key_label="Press a key…"):
     slot["button"] = ttk.Button(
         row, text="Press a button…", command=lambda: _capture_button(app, slot))
     slot["button"].pack(side="left", padx=6)
-    ttk.Button(row, text="Clear",
+    ttk.Button(row, text=t("Clear"),
                command=lambda: _clear_joystick(app, slot)).pack(side="left")
     return row
 
@@ -598,28 +629,28 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     # bottom of the window for the sake of fields four characters wide.
     _field_grid(
         parent, 3,
-        ("Chat open delay (ms)", _entry(parent, v["pre_delay_ms"], 8),
-         "raise this if the first characters go missing"),
-        ("Send delay (ms)", _entry(parent, v["post_delay_ms"], 8), ""),
-        ("Key hold (ms)", _entry(parent, v["key_hold_ms"], 8),
-         "below ~20ms games miss the press entirely"),
-        ("Gap between keys (ms)", _entry(parent, v["key_gap_ms"], 8), ""),
-        ("Per character (ms)", _entry(parent, v["type_delay_ms"], 8), ""),
-        ("Max characters", _entry(parent, v["max_chars"], 8), ""),
+        (t("Chat open delay (ms)"), _entry(parent, v["pre_delay_ms"], 8),
+         t("raise this if the first characters go missing")),
+        (t("Send delay (ms)"), _entry(parent, v["post_delay_ms"], 8), ""),
+        (t("Key hold (ms)"), _entry(parent, v["key_hold_ms"], 8),
+         t("below ~20ms games miss the press entirely")),
+        (t("Gap between keys (ms)"), _entry(parent, v["key_gap_ms"], 8), ""),
+        (t("Per character (ms)"), _entry(parent, v["type_delay_ms"], 8), ""),
+        (t("Max characters"), _entry(parent, v["max_chars"], 8), ""),
     )
 
     mode = ttk.Combobox(parent, textvariable=v["text_mode"], width=12,
                         values=("unicode", "scancode"), state="readonly")
-    _row(parent, 10, "Text injection", mode,
-         "switch to scancode if the game ignores typed text")
+    _row(parent, 10, t("Text injection"), mode,
+         t("switch to scancode if the game ignores typed text"))
 
     # Off leaves the message in the chat box to be read before it goes out.
     # Whisper does mishear things, and in a public session a mistake is
     # everyone's problem.
     ttk.Checkbutton(
-        parent, text="Send automatically", variable=v["auto_send"],
+        parent, text=t("Send automatically"), variable=v["auto_send"],
     ).grid(row=11, column=1, sticky="w", pady=3, padx=(8, 0))
-    ttk.Label(parent, text="off types the message and leaves it for you to send",
+    ttk.Label(parent, text=t("off types the message and leaves it for you to send"),
               style="Muted.TLabel").grid(row=11, column=2, sticky="w", padx=(8, 0))
 
     # Hidden on the default profile. A session plugin reads one specific game,
@@ -640,8 +671,8 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
                           values=[name for _id, name in choices], state="readonly")
-    _row(parent, 12, "Session plugin", picker,
-         "reads who is in the session; automatic picks by executable name")
+    _row(parent, 12, t("Session plugin"), picker,
+         t("reads who is in the session; automatic picks by executable name"))
 
     # The assigned plugin's own options, rebuilt whenever the choice changes so
     # only the relevant ones are ever on screen.
@@ -717,7 +748,7 @@ def _key_list_row(app, parent, v, field: str):
     # one would leave its countdown running against a dead button.
     v["_captures"].append(capture)
 
-    ttk.Button(frame, text="Clear", width=6,
+    ttk.Button(frame, text=t("Clear"), width=6,
                command=lambda var=v[field]: var.set("")).pack(side="left")
     return frame
 
@@ -772,6 +803,7 @@ def _save_settings(app) -> None:
     cfg.review.send_key = app.v_send_key.get().strip()
     cfg.review.clear_key = app.v_clear_key.get().strip()
     cfg.gui.theme = _theme_mode(app.v_theme.get())
+    cfg.gui.language = _language_code(app.v_language.get())
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 
@@ -847,7 +879,7 @@ def _apply_run_at_logon(app) -> None:
     except (subprocess.CalledProcessError, OSError) as exc:
         app.v_run_logon.set(not want)
         messagebox.showerror(
-            "PitRadio",
+            t("PitRadio"),
             f"Could not change the startup task:\n{exc.stderr or exc}",
         )
 
@@ -857,7 +889,7 @@ def _apply_run_at_logon(app) -> None:
 
 def build_profiles_tab(app) -> None:
     frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Profiles")
+    app.notebook.add(frame, text=t("Profiles"))
 
     ttk.Label(
         frame,
@@ -878,18 +910,18 @@ def build_profiles_tab(app) -> None:
 
     buttons = ttk.Frame(left)
     buttons.pack(fill="x", pady=6)
-    ttk.Button(buttons, text="Add", command=lambda: _add_profile(app)).pack(side="left")
-    ttk.Button(buttons, text="Remove", command=lambda: _remove_profile(app)).pack(
+    ttk.Button(buttons, text=t("Add"), command=lambda: _add_profile(app)).pack(side="left")
+    ttk.Button(buttons, text=t("Remove"), command=lambda: _remove_profile(app)).pack(
         side="left", padx=4)
 
-    right = ttk.LabelFrame(body, text="Profile settings", padding=0)
+    right = ttk.LabelFrame(body, text=t("Profile settings"), padding=0)
     right.pack(side="left", fill="both", expand=True, padx=(10, 0))
     fields, profile_footer = scrolling_pane(right, padding=10)
 
     from pitradio import config as config_mod
 
     app.v_profile = _profile_vars(app, fields, config_mod.Profile())
-    ttk.Button(profile_footer, text="Save profile",
+    ttk.Button(profile_footer, text=t("Save profile"),
                command=lambda: _save_profile(app)).pack(anchor="e")
 
     _refresh_profile_list(app)
@@ -961,7 +993,7 @@ def _remove_profile(app) -> None:
     name = _selected_profile(app)
     if name is None:
         return
-    if not messagebox.askyesno("PitRadio", f"Remove the profile for {name}?"):
+    if not messagebox.askyesno(t("PitRadio"), f"Remove the profile for {name}?"):
         return
     app.store.config.profiles.pop(name, None)
     app.save_config()
@@ -971,7 +1003,7 @@ def _remove_profile(app) -> None:
 def _save_profile(app) -> None:
     name = _selected_profile(app)
     if name is None:
-        messagebox.showinfo("PitRadio", "Select a profile first, or add one.")
+        messagebox.showinfo(t("PitRadio"), t("Select a profile first, or add one."))
         return
     _read_profile_vars(app.v_profile, app.store.config.profiles[name])
     app.save_config()
@@ -981,7 +1013,7 @@ def _save_profile(app) -> None:
 
 
 def build_vocabulary_tab(app) -> None:
-    frame, footer = scrolling_tab(app, "Vocabulary")
+    frame, footer = scrolling_tab(app, t("Vocabulary"))
 
     ttk.Label(
         frame,
@@ -996,9 +1028,9 @@ def build_vocabulary_tab(app) -> None:
     app.vocab_text.insert("1.0", app.store.config.whisper.initial_prompt)
     app.vocab_text.pack(fill="both", expand=True)
 
-    ttk.Button(footer, text="Save", command=lambda: _save_vocab(app)).pack(anchor="e")
+    ttk.Button(footer, text=t("Save"), command=lambda: _save_vocab(app)).pack(anchor="e")
 
-    session = ttk.LabelFrame(frame, text="From the session (read-only)", padding=8)
+    session = ttk.LabelFrame(frame, text=t("From the session (read-only)"), padding=8)
     session.pack(fill="both", expand=True, pady=(12, 0))
 
     ttk.Label(
@@ -1016,7 +1048,7 @@ def build_vocabulary_tab(app) -> None:
                                      state="disabled", font=("Consolas", 9))
     app.runtime_vocab_text.pack(fill="both", expand=True)
 
-    ttk.Button(session, text="Refresh",
+    ttk.Button(session, text=t("Refresh"),
                command=lambda: refresh_runtime_vocabulary(app)).pack(
         anchor="w", pady=(6, 0))
 
@@ -1066,17 +1098,17 @@ def _save_vocab(app) -> None:
 
 
 def build_audio_tab(app) -> None:
-    frame, footer = scrolling_tab(app, "Audio")
+    frame, footer = scrolling_tab(app, t("Audio"))
     cfg = app.store.config
 
-    inputs = ttk.LabelFrame(frame, text="Microphone", padding=10)
+    inputs = ttk.LabelFrame(frame, text=t("Microphone"), padding=10)
     inputs.pack(fill="x")
 
     app.input_devices = speech.list_devices("input")
     app.v_input = tk.StringVar(value=_device_label(app.input_devices, cfg.audio.input_device))
     combo = ttk.Combobox(inputs, textvariable=app.v_input, state="readonly",
                          values=["(system default)"] + [label for _i, label in app.input_devices])
-    _row(inputs, 0, "Input device", combo)
+    _row(inputs, 0, t("Input device"), combo)
 
     app.v_gain = tk.DoubleVar(value=cfg.audio.gain)
     app.v_gain_label = tk.StringVar(value=_gain_text(cfg.audio.gain))
@@ -1086,13 +1118,13 @@ def build_audio_tab(app) -> None:
               command=lambda _v: app.v_gain_label.set(_gain_text(app.v_gain.get()))
               ).pack(side="left")
     ttk.Label(gain_row, textvariable=app.v_gain_label, width=8).pack(side="left", padx=6)
-    ttk.Button(gain_row, text="Reset",
+    ttk.Button(gain_row, text=t("Reset"),
                command=lambda: _reset_gain(app)).pack(side="left")
-    _row(inputs, 1, "Microphone gain", gain_row,
-         "raise if the level bar barely moves when you speak")
+    _row(inputs, 1, t("Microphone gain"), gain_row,
+         t("raise if the level bar barely moves when you speak"))
 
     app.level = ttk.Progressbar(inputs, maximum=100)
-    _row(inputs, 2, "Level", app.level)
+    _row(inputs, 2, t("Level"), app.level)
     ttk.Label(inputs,
               text="The level bar shows the signal after gain — what Whisper "
                    "actually receives. Aim for it to peak around three quarters.",
@@ -1102,31 +1134,31 @@ def build_audio_tab(app) -> None:
     app.v_test_result = tk.StringVar(value="")
     test_row = ttk.Frame(inputs)
     test_row.grid(row=4, column=0, columnspan=3, sticky="we", pady=(8, 0))
-    app.test_button = ttk.Button(test_row, text="Record 4s and transcribe",
+    app.test_button = ttk.Button(test_row, text=t("Record 4s and transcribe"),
                                  command=lambda: _run_mic_test(app))
     app.test_button.pack(side="left")
     ttk.Label(test_row, textvariable=app.v_test_result, foreground="#333",
               wraplength=560).pack(side="left", padx=10)
-    ttk.Label(inputs, text="Nothing is typed anywhere during a test.",
+    ttk.Label(inputs, text=t("Nothing is typed anywhere during a test."),
               foreground="#777").grid(row=5, column=0, columnspan=3, sticky="w")
 
-    outputs = ttk.LabelFrame(frame, text="Cue output", padding=10)
+    outputs = ttk.LabelFrame(frame, text=t("Cue output"), padding=10)
     outputs.pack(fill="x", pady=(10, 0))
     app.output_devices = speech.list_devices("output")
     app.v_output = tk.StringVar(
         value=_device_label(app.output_devices, cfg.cues.output_device))
-    _row(outputs, 0, "Output device",
+    _row(outputs, 0, t("Output device"),
          ttk.Combobox(outputs, textvariable=app.v_output, state="readonly",
                       values=["(system default)"] + [label for _i, label in app.output_devices]))
     ttk.Label(outputs,
               text="Pick something other than your sim's output so the beep doesn't "
                    "end up in the recording.",
               foreground="#777").grid(row=1, column=0, columnspan=3, sticky="w")
-    ttk.Button(outputs, text="Play test cue",
+    ttk.Button(outputs, text=t("Play test cue"),
                command=lambda: _play_test_cue(app)).grid(
         row=2, column=1, sticky="w", pady=(8, 0))
 
-    ttk.Button(footer, text="Save", command=lambda: _save_audio(app)).pack(anchor="e")
+    ttk.Button(footer, text=t("Save"), command=lambda: _save_audio(app)).pack(anchor="e")
 
 
 def _device_label(devices, spec) -> str:
@@ -1196,10 +1228,10 @@ def set_level(app, rms: float) -> None:
 def _run_mic_test(app) -> None:
     if app.recorder is None or app.transcriber is None:
         messagebox.showinfo(
-            "PitRadio", "Audio isn't available in this run (GUI preview mode).")
+            t("PitRadio"), t("Audio isn't available in this run (GUI preview mode)."))
         return
     if app.state.status not in (state_mod.STATUS_IDLE, state_mod.STATUS_DISABLED):
-        messagebox.showinfo("PitRadio", "Busy — try again in a moment.")
+        messagebox.showinfo(t("PitRadio"), "Busy — try again in a moment.")
         return
 
     app.test_button.state(["disabled"])
@@ -1235,7 +1267,7 @@ def _run_mic_test(app) -> None:
 
 def build_history_tab(app) -> None:
     frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="History")
+    app.notebook.add(frame, text=t("History"))
 
     columns = ("time", "app", "sent", "text")
     app.history_tree = ttk.Treeview(frame, columns=columns, show="headings", height=16)
@@ -1261,11 +1293,11 @@ def build_history_tab(app) -> None:
 
     buttons = ttk.Frame(frame)
     buttons.pack(fill="x", pady=(8, 0))
-    ttk.Button(buttons, text="Copy", command=lambda: _copy_history(app)).pack(side="left")
-    ttk.Button(buttons, text="Re-send", command=lambda: _resend_history(app)).pack(
+    ttk.Button(buttons, text=t("Copy"), command=lambda: _copy_history(app)).pack(side="left")
+    ttk.Button(buttons, text=t("Re-send"), command=lambda: _resend_history(app)).pack(
         side="left", padx=6)
     ttk.Label(buttons,
-              text="Re-send waits 3 seconds so you can focus the game first.",
+              text=t("Re-send waits 3 seconds so you can focus the game first."),
               foreground="#777").pack(side="left", padx=6)
 
     for entry in reversed(app.state.history):
@@ -1309,7 +1341,7 @@ def _resend_history(app) -> None:
     if not text or text == "(nothing said)":
         return
     if app.worker is None:
-        messagebox.showinfo("PitRadio", "Re-send isn't available in this run.")
+        messagebox.showinfo(t("PitRadio"), t("Re-send isn't available in this run."))
         return
     log.info("re-sending in 3 seconds — focus the game now")
     app.worker.request_resend(text)
@@ -1320,7 +1352,7 @@ def _resend_history(app) -> None:
 
 def build_updates_tab(app) -> None:
     frame = ttk.Frame(app.notebook, padding=12)
-    app.notebook.add(frame, text="Updates")
+    app.notebook.add(frame, text=t("Updates"))
 
     ttk.Label(frame, text=f"Installed version: {app.version}").pack(anchor="w")
 
@@ -1329,10 +1361,10 @@ def build_updates_tab(app) -> None:
 
     row = ttk.Frame(frame)
     row.pack(fill="x", pady=(8, 0))
-    ttk.Button(row, text="Check now", command=app.check_for_updates).pack(side="left")
+    ttk.Button(row, text=t("Check now"), command=app.check_for_updates).pack(side="left")
 
     app.v_auto_update = tk.BooleanVar(value=app.store.config.updates.auto_install)
-    ttk.Checkbutton(row, text="Install updates automatically",
+    ttk.Checkbutton(row, text=t("Install updates automatically"),
                     variable=app.v_auto_update,
                     command=lambda: _save_auto_update(app)).pack(side="left", padx=12)
 
@@ -1346,7 +1378,7 @@ def build_updates_tab(app) -> None:
         foreground="#666", wraplength=880, justify="left",
     ).pack(fill="x", pady=(12, 6))
 
-    notes = ttk.LabelFrame(frame, text="Release notes", padding=6)
+    notes = ttk.LabelFrame(frame, text=t("Release notes"), padding=6)
     notes.pack(fill="both", expand=True)
     app.notes_text = tk.Text(notes, wrap="word", height=12, state="disabled",
                              **theme.text_options(app.palette))

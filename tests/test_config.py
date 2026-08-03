@@ -291,10 +291,15 @@ def test_the_shipped_prompt_matches_the_constant():
     assert _base()["whisper"]["initial_prompt"] == config.RACING_VOCABULARY
 
 
-def test_the_app_knows_its_own_name():
-    """Whisper hears "PitRadio" as "pit radio" or "big radio" without help."""
-    assert "PitRadio" in config.RACING_VOCABULARY
-    assert "PitRadio" in _base()["whisper"]["initial_prompt"]
+@pytest.mark.parametrize("word", ["PitRadio", "GitHub", "kidunot89"])
+def test_the_app_can_say_where_to_get_itself(word):
+    """The words a driver says when someone in the session asks about it.
+
+    Without them Whisper produces "pit radio", "get hub" and "kid unit 89",
+    which is not something you can act on.
+    """
+    assert word in config.RACING_VOCABULARY
+    assert word in _base()["whisper"]["initial_prompt"]
 
 
 def test_the_prompt_fits_whispers_window():

@@ -199,6 +199,38 @@ press it.
 
 ---
 
+## Recipe: add a user-facing string
+
+Wrap it in `t()` and regenerate the template. That is the whole recipe.
+
+```python
+from pitradio.i18n import t
+
+ttk.Label(parent, text=t("Rescan controllers"))
+```
+
+```bash
+python packaging/extract_strings.py    # adds it to locale/template.json
+pytest -q tests/test_i18n.py           # green
+```
+
+The English text is the key, so an untranslated string renders as itself and a
+language that lacks it is not broken by it.
+
+`t()` needs a **literal** — the extractor reads the source, so a computed
+string can never be translated. It refuses rather than skipping quietly. For
+values, use fields:
+
+```python
+t("{count} drivers in session", count=len(drivers))
+```
+
+Forgetting to regenerate is caught by `test_the_template_is_up_to_date`,
+because a translator's only clue would otherwise be one label mysteriously in
+English.
+
+---
+
 ## Recipe: change what happens on a trigger
 
 `worker.py` is testable end to end, and the tests need no Windows.
