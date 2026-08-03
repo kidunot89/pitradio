@@ -1,8 +1,14 @@
 """ctypes bindings for the Win32 calls this app needs.
 
-Importing this module fails anywhere but Windows, which is intentional — it
-keeps the Windows-only surface in one place and lets the config layer and the
-GUI stay importable on a development Mac.
+Off Windows the DLL handles are stand-ins: attribute assignment works, so the
+prototypes below still declare cleanly at import time, and *calling* one raises.
+That makes `inject`, `hook` and `worker` importable on a development Mac, so
+their logic can be tested for real rather than reimplemented behind a mock —
+while any code path that actually reaches Win32 still fails loudly.
+
+This does not license the config layer or the GUI to import it. That rule is
+about architecture, not import mechanics, and `test_portable_modules_do_not_reach_winapi`
+still enforces it.
 
 Everything here declares argtypes and restype. Without them ctypes truncates
 64-bit handles to int, which produces failures that look like "the API just
@@ -12,15 +18,57 @@ didn't work" rather than anything diagnosable.
 from __future__ import annotations
 
 import ctypes
+import sys
 from ctypes import wintypes
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+
+class _AbsentCall:
+    """One Win32 entry point, off Windows.
+
+    Accepts the argtypes/restype this module assigns at import time, and
+    raises if anything ever calls it.
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+        self.argtypes = ()
+        self.restype = None
+
+    def __call__(self, *args, **kwargs):
+        raise OSError(f"{self._name} is only available on Windows")
+
+
+class _AbsentLibrary:
+    """Stands in for a DLL so the prototypes below can still be declared."""
+
+    def __init__(self, name: str):
+        self._name = name
+
+    def __getattr__(self, attr: str) -> _AbsentCall:
+        stub = _AbsentCall(f"{self._name}.{attr}")
+        # Cached so `user32.Foo.argtypes = ...` sticks to one object.
+        setattr(self, attr, stub)
+        return stub
+
+
+# stdcall exists only on Windows; the calling convention is irrelevant to a
+# stand-in, and CFUNCTYPE keeps the type objects constructible off Windows.
+WINFUNCTYPE = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)
+
+
+def _library(name: str):
+    if sys.platform == "win32":
+        return ctypes.WinDLL(name, use_last_error=True)
+    return _AbsentLibrary(name)
+
+
+user32 = _library("user32")
+kernel32 = _library("kernel32")
+advapi32 = _library("advapi32")
 # Legacy multimedia joystick API. Chosen over SDL because it needs no extra
 # dependency, and every native dependency this app has added has cost a release
 # to get bundled correctly. It caps out at 32 buttons per device.
-winmm = ctypes.WinDLL("winmm", use_last_error=True)
+winmm = _library("winmm")
 
 # Pointer-sized unsigned int. wintypes has no ULONG_PTR.
 ULONG_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
@@ -162,7 +210,7 @@ class JOYCAPSW(ctypes.Structure):
     ]
 
 
-HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+HOOKPROC = WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 
 user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
 user32.SendInput.restype = wintypes.UINT

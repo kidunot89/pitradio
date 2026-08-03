@@ -12,8 +12,6 @@ otherwise be unimportable off Windows. Nothing belonging to the app is faked.
 from __future__ import annotations
 
 import ctypes
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -24,32 +22,22 @@ ROOT = Path(__file__).parent.parent
 
 
 @pytest.fixture
-def stub_winapi(monkeypatch):
-    """The Win32 boundary, for modules that import it at module scope.
+def foreground(monkeypatch):
+    """Control which executable the worker thinks is focused.
 
-    Only the handful of functions the tests can reach; anything else missing
-    would raise rather than quietly returning a wrong answer.
+    The one Win32 call the trigger cycle makes that a test has to answer.
+    Everything else in `winapi` imports off Windows now and raises if called,
+    so nothing else needs standing in for.
     """
-    if sys.platform == "win32":
-        return None
+    from pitradio.input import winapi
 
-    stub = types.ModuleType("winapi")
-    stub.joystick_count = lambda: 0
-    stub.joystick_name = lambda index: None
-    stub.joystick_buttons = lambda index: 0
-    stub.joystick_button_mask = lambda index: None
-    stub.INJECT_TAG = 0x50545244
-    stub.foreground_exe = lambda: None
-    stub.is_key_down = lambda vk: False
+    holder = {"exe": None}
+    monkeypatch.setattr(winapi, "foreground_exe", lambda: holder["exe"])
 
-    # Both the module entry and the attribute on the parent package: a
-    # `from pitradio.input import winapi` resolves the attribute first, so
-    # setting only sys.modules would still import the real thing.
-    import pitradio.input as input_package
+    def set_exe(name):
+        holder["exe"] = name
 
-    monkeypatch.setitem(sys.modules, "pitradio.input.winapi", stub)
-    monkeypatch.setattr(input_package, "winapi", stub, raising=False)
-    return stub
+    return set_exe
 
 
 @pytest.fixture(scope="module")

@@ -6,11 +6,10 @@ capture, polling the trigger — runs against real enumeration and real button
 state, so these cover the seam between the app and the library as well as the
 app itself.
 
-`winapi` is stubbed, and only because `joystick.py` imports it at module scope
-and could not otherwise be imported off Windows. Fake backends appear in
-exactly three tests, for the cases a single real backend cannot produce: two
-backends seeing the same device, two backends seeing different ones, and a
-backend that throws.
+Nothing is stubbed. `winapi` imports off Windows and raises only if something
+calls into Win32, which none of this does. Stand-in backends appear in exactly
+three tests, for the cases a single real backend cannot produce: two backends
+seeing the same device, two seeing different ones, and one that throws.
 
 Every failure here is silent in production. A binding that resolves to the
 wrong device, a capture that grabs a latched switch, and a trigger that never
@@ -20,15 +19,13 @@ fires all look identical from the driver's seat: nothing happens.
 from __future__ import annotations
 
 import queue
-import sys
 
 import pytest
 
 
 @pytest.fixture
-def joystick(monkeypatch, stub_winapi, sdl):
+def joystick(monkeypatch, sdl):
     """`joystick` with the real SDL3 backend as its only backend."""
-    monkeypatch.delitem(sys.modules, "pitradio.input.joystick", raising=False)
     from pitradio.input import joystick as module
 
     # Bypass _ensure_started so the developer's own controllers, and SDL2,
