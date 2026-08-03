@@ -1,9 +1,17 @@
 # Contributing to PitRadio
 
-Thanks for looking. The most valuable contributions to this project are
-**profiles for sims other than Le Mans Ultimate** and **session plugins** —
-both are small, self-contained, and neither needs you to understand the Win32
-plumbing.
+Thanks for looking. Three kinds of contribution are worth more than anything
+else here, and none of them needs you to understand the Win32 plumbing:
+
+| | |
+| --- | --- |
+| [A profile for a sim](#the-quickest-useful-contribution-a-profile) | no code — an issue with an executable name and two keys |
+| [A translation](#adding-a-language) | one JSON file, no tooling; partial is fine |
+| [A session plugin](#adding-a-sim-plugin) | one module and one line, ~30 lines of code |
+
+The interface ships in English only. It is fully extracted and ready to
+translate, so a language really is a file — see
+[Adding a language](#adding-a-language).
 
 ## The quickest useful contribution: a profile
 

@@ -442,9 +442,16 @@ Turn the check off entirely with `--no-update-check`, or in
 
 ## Contributing
 
-Profiles for sims other than Le Mans Ultimate are the most useful thing anyone
-can send — the Status tab shows the executable name, and an issue with that and
-your sim's chat keys is a complete contribution.
+Three things are worth more than anything else, and none needs any knowledge of
+the Windows internals:
+
+- **A profile for a sim.** The Status tab shows the executable name; an issue
+  with that and your sim's chat keys is a complete contribution. No code.
+- **A translation.** The interface ships in English, but every string is
+  extracted — a language is one JSON file, and a partial one is fine.
+- **A session plugin**, so another sim can supply its driver list.
+
+Where to start:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to get set up and what review asks
 - [DEVELOPING.md](DEVELOPING.md) — task-shaped recipes: add a sim plugin, a
