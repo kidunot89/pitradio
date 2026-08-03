@@ -29,6 +29,7 @@ ruff check .                          # lint (config in pyproject.toml)
 python packaging/build.py             # Nuitka build
 python packaging/build.py --version   # print __version__
 python packaging/make_icon.py         # regenerate packaging/icon.ico
+python packaging/checksums.py DIR     # write SHA256SUMS for release artifacts
 ```
 
 `pytest` covers everything with no Windows or audio dependency: config
@@ -125,13 +126,32 @@ part of why packed Python apps get quarantined) → Inno Setup installer. Builds
 are **unsigned**, so SmartScreen warns on every release and some AV will flag
 the binary — the README says so up front rather than letting users discover it.
 
-The fragile part is native dependencies: `ctranslate2`, `onnxruntime` and
+The fragile part is native dependencies: `ctranslate2`, `onnxruntime`, PyAV and
 PortAudio ship shared libraries that standalone mode doesn't always collect.
 They're named explicitly in [packaging/build.py](packaging/build.py), and CI
 runs the built exe specifically to catch it when that stops being enough.
 
-`--windows-console-mode=attach`, not `disable`, so `--check-config` still
-produces output when run from a terminal.
+Things established the hard way, so nobody has to rediscover them at ~30
+minutes per attempt:
+
+- **`sounddevice` is a module, not a package.** `--include-package` on it is a
+  fatal Nuitka error. Its PortAudio DLL comes from `_sounddevice_data`.
+- **`av` (PyAV, with FFmpeg) is imported eagerly by `faster_whisper`** and
+  cannot be excluded, even though we hand Whisper a numpy array and never use
+  its file-decoding path. It's most of the build time and the dist size.
+- **`onnxruntime` is imported lazily** by the VAD, which `vad_filter: true`
+  enables by default. Nuitka can't discover it by following code, which is why
+  the explicit `--include-package` is load-bearing.
+- **`--windows-console-mode=attach`, not `disable`**, so `--check-config` still
+  produces output from a terminal. The consequence is a GUI-subsystem binary:
+  PowerShell neither waits for it nor sets `$LASTEXITCODE` from it, so CI must
+  use `Start-Process -Wait -PassThru` or it tests a stale exit code.
+- **Nuitka's cache is persisted by CI.** Cold builds are ~47 minutes, warm ~26.
+
+`packaging/checksums.py` writes `SHA256SUMS`, in Python rather than a shell
+pipeline because its format must match `updater._expected_hash` — a seam that
+otherwise only gets exercised during a real release. `tests/test_checksums.py`
+pins the two together.
 
 ## Config
 
