@@ -99,6 +99,21 @@ jobs:
                  -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
 
+      # The condition that actually broke every shortcut launch through 0.1.2.
+      # Dropping -NoNewWindow means the GUI-subsystem binary gets no console, so
+      # its standard handles are invalid — exactly what happens from the Start
+      # Menu, and nothing like running it from a terminal. Any subprocess call
+      # that fails to redirect all three streams dies here and nowhere else.
+      - name: Load every component with NO console attached
+        run: |
+          $p = Start-Process -FilePath .\build\pitradio.dist\pitradio.exe `
+                 -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Write-Host "--- app log ---"
+            Get-Content "$env:LOCALAPPDATA\pitradio\logs\pitradio.log" -Tail 40 -ErrorAction SilentlyContinue
+            throw "self-test failed with no console (exit $($p.ExitCode)); this is the shortcut-launch path"
+          }
+
       # Everything above ran out of build\pitradio.dist. That is not what users
       # receive, and until v0.1.1 nothing had ever executed the installer or the
       # files it lays down — which is how a broken post-install launch shipped.
@@ -135,6 +150,14 @@ jobs:
           # directory, and one the app must never try to write into.
           $p = Start-Process -FilePath $exe -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installed binary failed --self-test" }
+
+          # Again with no console, which is how a Start Menu shortcut runs it.
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Write-Host "--- app log ---"
+            Get-Content "$env:LOCALAPPDATA\pitradio\logs\pitradio.log" -Tail 40 -ErrorAction SilentlyContinue
+            throw "installed binary failed --self-test with no console; shortcut launches would die"
+          }
 
           $p = Start-Process -FilePath $exe -ArgumentList '--check-config' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installed binary failed --check-config" }

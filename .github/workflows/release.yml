@@ -109,6 +109,14 @@ jobs:
           $p = Start-Process -FilePath "$dir\pitradio.exe" -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "refusing to publish: installed binary failed --self-test" }
 
+          # With no console, as a Start Menu shortcut launches it. Every release
+          # through 0.1.2 shipped a build that died instantly this way.
+          $p = Start-Process -FilePath "$dir\pitradio.exe" -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA\pitradio\logs\pitradio.log" -Tail 40 -ErrorAction SilentlyContinue
+            throw "refusing to publish: self-test failed with no console; shortcut launches would die"
+          }
+
           # Uninstall again so the runner doesn't carry state into later steps.
           $unins = (Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1).FullName
           Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/NORESTART' -Wait

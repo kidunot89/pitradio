@@ -178,6 +178,14 @@ def launch_installer(installer: Path) -> None:
         ],
         creationflags=creation_flags,
         close_fds=True,
+        # All three streams, explicitly. This runs from the GUI, which when
+        # launched from a shortcut has no console and invalid standard handles —
+        # inheriting them fails process creation with [WinError 6]. Leaving this
+        # out would break self-update precisely for the users who install
+        # normally, and work for anyone testing from a terminal.
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     log.info("installer launched; exiting so it can replace this build")
 

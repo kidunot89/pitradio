@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 log = logging.getLogger("pitradio")
 
@@ -75,6 +75,32 @@ def setup_logging(app_state: AppState | None, verbose: bool) -> None:
     # timings this log exists to surface.
     for noisy in ("urllib3", "huggingface_hub", "filelock"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    _install_crash_logging()
+
+
+def _install_crash_logging() -> None:
+    """Make unhandled exceptions land in the log.
+
+    A GUI-subsystem build launched from a shortcut has no console, so Python's
+    default handler writes a traceback to a stderr that does not exist and the
+    process simply disappears. Every startup crash through 0.1.2 was invisible
+    for exactly that reason — the log stopped mid-startup with no indication
+    why.
+    """
+
+    def on_exception(exc_type, exc_value, tb) -> None:
+        log.critical("unhandled exception", exc_info=(exc_type, exc_value, tb))
+
+    def on_thread_exception(args) -> None:
+        name = args.thread.name if args.thread is not None else "?"
+        log.critical(
+            "unhandled exception in thread %s", name,
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    sys.excepthook = on_exception
+    threading.excepthook = on_thread_exception
 
 
 def seed_config() -> None:
@@ -179,19 +205,26 @@ def cmd_self_test() -> int:
             failures.append((name, f"{type(exc).__name__}: {exc}"))
             out(f"  FAILED  {name}: {type(exc).__name__}: {exc}")
 
-    # Tk initialising is a separate risk from tkinter importing: the Tcl runtime
-    # data has to be bundled too, and its absence only shows at window creation.
+    # Build the real window, not just a bare Tk root. Importing tkinter proves
+    # nothing about construction: App shells out to schtasks and enumerates
+    # audio devices while building its tabs, and it was that shell-out — not any
+    # import — which killed every shortcut launch through 0.1.2.
     try:
         import tkinter
 
+        import gui
+
         root = tkinter.Tk()
         root.withdraw()
+        store = config_mod.ConfigStore(paths.config_path())
+        store.load()
+        gui.App(root, store, AppState(), __version__, use_tray=False)
         root.update()
         root.destroy()
-        out("  ok      tkinter window creation")
+        out("  ok      GUI construction")
     except Exception as exc:
-        failures.append(("tkinter window", f"{type(exc).__name__}: {exc}"))
-        out(f"  FAILED  tkinter window: {exc}")
+        failures.append(("GUI construction", f"{type(exc).__name__}: {exc}"))
+        out(f"  FAILED  GUI construction: {type(exc).__name__}: {exc}")
 
     if failures:
         out(f"\n{len(failures)} component(s) failed:")

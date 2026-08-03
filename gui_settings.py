@@ -70,9 +70,9 @@ def open_folder(path: Path) -> None:
         if sys.platform == "win32":
             os.startfile(path)
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
+            subprocess.Popen(["open", str(path)], stdin=subprocess.DEVNULL)
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            subprocess.Popen(["xdg-open", str(path)], stdin=subprocess.DEVNULL)
     except Exception as exc:
         log.error("could not open %s: %s", path, exc)
 
@@ -203,13 +203,34 @@ def _save_settings(app) -> None:
 # -- run at logon --------------------------------------------------------
 
 
+# Launched from a shortcut, this app has no console, and its std handles are
+# invalid. subprocess must then be told to redirect *all three* streams:
+# capture_output covers stdout and stderr but leaves stdin alone, and Windows
+# fails process creation with [WinError 6] The handle is invalid. That killed
+# the app during GUI construction in every release up to 0.1.2 — silently,
+# because there was no console for the traceback to reach.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+_SUBPROCESS_KWARGS = {
+    "stdin": subprocess.DEVNULL,
+    "capture_output": True,
+    "text": True,
+    "creationflags": _NO_WINDOW,
+}
+
+
 def _task_exists() -> bool:
     if sys.platform != "win32":
         return False
-    result = subprocess.run(
-        ["schtasks", "/query", "/tn", TASK_NAME],
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["schtasks", "/query", "/tn", TASK_NAME], **_SUBPROCESS_KWARGS
+        )
+    except OSError as exc:
+        # Whether a scheduled task exists is a checkbox's initial state. It is
+        # never worth taking the window down for.
+        log.warning("could not query the scheduled task: %s", exc)
+        return False
     return result.returncode == 0
 
 
@@ -229,16 +250,16 @@ def _apply_run_at_logon(app) -> None:
             subprocess.run(
                 ["schtasks", "/create", "/f", "/tn", TASK_NAME,
                  "/tr", f'"{sys.executable}"', "/sc", "ONLOGON", "/rl", "HIGHEST"],
-                capture_output=True, text=True, check=True,
+                check=True, **_SUBPROCESS_KWARGS,
             )
             log.info("registered scheduled task %s", TASK_NAME)
         else:
             subprocess.run(
                 ["schtasks", "/delete", "/f", "/tn", TASK_NAME],
-                capture_output=True, text=True, check=True,
+                check=True, **_SUBPROCESS_KWARGS,
             )
             log.info("removed scheduled task %s", TASK_NAME)
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, OSError) as exc:
         app.v_run_logon.set(not want)
         messagebox.showerror(
             "PitRadio",
