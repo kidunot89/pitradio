@@ -275,12 +275,28 @@ minutes per attempt:
   produces output from a terminal. The consequence is a GUI-subsystem binary:
   PowerShell neither waits for it nor sets `$LASTEXITCODE` from it, so CI must
   use `Start-Process -Wait -PassThru` or it tests a stale exit code.
-- **Nuitka's cache is persisted by CI, via `cache/restore` + `cache/save` with
-  `if: always()`.** The combined `actions/cache` action only writes on job
-  success, so every failed or cancelled build was discarding its compilation
-  work and leaving the next run cold — which is why builds sat near 40 minutes
-  rather than the ~13 a warm cache gives. A failed build has still compiled most
-  of the dependency tree and that is exactly what is worth keeping.
+- **Nuitka's cache is persisted by CI, via `cache/restore` + `cache/save`.** The
+  combined `actions/cache` action only writes on job success, so every failed
+  build was discarding its compilation work and leaving the next run cold — and
+  a failed build has still compiled most of the dependency tree, which is
+  exactly what is worth keeping.
+
+  **The save condition is `success() || failure()`, deliberately not
+  `always()`.** `always()` also fires on *cancellation*, and a run cancelled
+  early has compiled almost nothing. Because the restore step falls back to the
+  newest entry matching its prefix, that stunted cache then becomes what every
+  later build inherits. The numbers are unambiguous: caches saved by successful
+  runs were 80MB and the next build got **1272 clcache hits out of 1277**;
+  caches saved by cancelled runs were 44–46MB and the next build got **0 hits
+  out of 1278**, turning a ~13-minute build into ~57. Superseding a tag cancels
+  its release run, which happens constantly here, so `always()` was poisoning
+  the cache more often than not.
+
+  When a build is inexplicably slow, the line to look at is
+  `Nuitka-Scons: Compiled N C files using clcache with H cache hits` — the C
+  compile and link is ~52 minutes of a 57-minute cold build and essentially
+  free when warm. A low hit count means the restored cache was bad, not that
+  caching is not working.
 
 `packaging/checksums.py` writes `SHA256SUMS`, in Python rather than a shell
 pipeline because its format must match `updater._expected_hash` — a seam that

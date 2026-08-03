@@ -84,10 +84,19 @@ jobs:
       - name: Build with Nuitka
         run: python packaging/build.py
 
-      # always(): the point of the split. A cancelled or failed build has done
-      # real compilation work and the next run should inherit it.
+      # success() || failure(), NOT always(): a *failed* build has still
+      # compiled most of the dependency tree and is worth keeping, but a
+      # *cancelled* one may have compiled almost nothing — and always() saves
+      # that stunted cache too. Since the restore step falls back to the
+      # newest entry matching the prefix, one cancelled run then becomes what
+      # every later build inherits. That is measurable: successful runs saved
+      # 80MB and the next build got 1272 clcache hits out of 1277; cancelled
+      # runs saved 44-46MB and the next build got 0.
+      #
+      # Superseding a tag cancels its release run, which happens constantly
+      # here, so this was poisoning the cache more often than not.
       - name: Save the Nuitka compilation cache
-        if: always()
+        if: success() || failure()
         uses: actions/cache/save@v4
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
