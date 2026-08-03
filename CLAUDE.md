@@ -149,6 +149,12 @@ produces a bug with no error message.
   logs and the model cache to `%LOCALAPPDATA%` — see [paths.py](paths.py). Under
   Program Files, writes land in UAC's VirtualStore and hot-reload silently stops
   working.
+- **The self-updater exits before the installer runs.** Inno's
+  `/CLOSEAPPLICATIONS` uses the Windows Restart Manager, which needs the target
+  to register and answer shutdown requests; a tkinter app does neither, so Setup
+  stalls on "Closing applications" with a dialog. v0.1.13 shipped that. The
+  handoff is now a PowerShell shim that waits on our PID, installs silently, and
+  relaunches — see `updater.shim_command`.
 - **Frozen GUI builds may have `sys.stdout is None`.** `pitradio.out()` and the
   console log handler both guard for it.
 - **A GUI build launched from a shortcut has invalid std handles.** Every

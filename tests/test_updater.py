@@ -160,3 +160,56 @@ def test_checksum_line_with_binary_marker_is_accepted(monkeypatch, tmp_path):
     monkeypatch.setattr(updater, "_get", _fake_get(payload, f"{digest} *setup.exe\n"))
 
     assert updater.download(_info(), tmp_path).read_bytes() == payload
+
+
+# -- the installer handoff -----------------------------------------------
+
+
+def test_the_shim_waits_for_this_process_before_installing():
+    """Inno's /CLOSEAPPLICATIONS cannot close a tkinter app.
+
+    That uses the Windows Restart Manager, which needs the target to register
+    and answer shutdown requests. PitRadio does neither, so v0.1.13's first
+    real self-update stalled on "Closing applications" with a dialog. Exiting
+    first removes the problem entirely.
+    """
+    from pathlib import Path
+
+    command = updater.shim_command(Path("C:/tmp/setup.exe"), 4321, Path("C:/app/pitradio.exe"))
+
+    assert "Wait-Process -Id 4321" in command
+    assert command.index("Wait-Process") < command.index("setup.exe"), (
+        "the installer must not start until this process has exited")
+
+
+def test_the_shim_does_not_ask_setup_to_close_anything():
+    """Setup closes nothing now, so those flags would only reintroduce the stall."""
+    from pathlib import Path
+
+    command = updater.shim_command(Path("setup.exe"), 1, Path("app.exe"))
+    assert "/CLOSEAPPLICATIONS" not in command
+    assert "/RESTARTAPPLICATIONS" not in command
+
+
+def test_the_shim_relaunches_only_on_success():
+    """A failed install should leave the old build in place, not start it."""
+    from pathlib import Path
+
+    command = updater.shim_command(Path("setup.exe"), 1, Path("C:/app/pitradio.exe"))
+    assert "$p.ExitCode -eq 0" in command
+    assert command.index("ExitCode") < command.index("C:/app/pitradio.exe")
+
+
+def test_the_shim_suppresses_dialogs():
+    """Nothing is watching: the app has exited by the time Setup runs."""
+    from pathlib import Path
+
+    assert "/SUPPRESSMSGBOXES" in updater.shim_command(
+        Path("setup.exe"), 1, Path("app.exe"))
+
+
+def test_the_shim_waits_for_the_installer_to_finish():
+    """Without -Wait the relaunch would race the file copy."""
+    from pathlib import Path
+
+    assert "-Wait" in updater.shim_command(Path("setup.exe"), 1, Path("app.exe"))

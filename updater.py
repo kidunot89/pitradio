@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -156,25 +157,51 @@ def _expected_hash(info: UpdateInfo) -> str | None:
     return None
 
 
-def launch_installer(installer: Path) -> None:
+def shim_command(installer: Path, pid: int, app: Path) -> str:
+    """PowerShell that waits for us to exit, installs, then relaunches.
+
+    The obvious approach — start the installer with /CLOSEAPPLICATIONS and let
+    it shut us down — does not work. That uses the Windows Restart Manager,
+    which needs the target application to register with it and answer shutdown
+    requests. A tkinter app does neither, so Setup stalls on "Closing
+    applications" and asks the user what to do. That is exactly what v0.1.13
+    did on the first real self-update.
+
+    Inverting it removes the problem: PitRadio exits first, and by the time the
+    installer touches a file there is nothing holding one. Waiting on the PID
+    rather than sleeping a fixed interval matters — shutdown has a model to
+    unload and four threads to join, and a guessed delay would be a race.
+
+    /RESTARTAPPLICATIONS is gone with it: it only restarts what Setup itself
+    closed, and Setup no longer closes anything. The shim relaunches instead,
+    and only if the install succeeded.
+    """
+    return (
+        f"Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue; "
+        f"$p = Start-Process -FilePath '{installer}' "
+        f"-ArgumentList '/SILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru; "
+        f"if ($p.ExitCode -eq 0) {{ Start-Process -FilePath '{app}' }}"
+    )
+
+
+def launch_installer(installer: Path, app: Path | None = None) -> None:
     """Hand off to the installer and expect the caller to exit immediately.
 
-    /CLOSEAPPLICATIONS lets Inno shut this process down cleanly through the
-    restart manager, and /RESTARTAPPLICATIONS brings it back on the new build.
-    We already run elevated, so the installer inherits that and no second UAC
-    prompt appears.
+    We already run elevated, so the shim and the installer inherit that and no
+    second UAC prompt appears.
     """
+    if app is None:
+        app = Path(sys.executable)
+
     creation_flags = 0
     if sys.platform == "win32":
         creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
     subprocess.Popen(
         [
-            str(installer),
-            "/SILENT",
-            "/CLOSEAPPLICATIONS",
-            "/RESTARTAPPLICATIONS",
-            "/NORESTART",
+            "powershell", "-NoProfile", "-NonInteractive",
+            "-WindowStyle", "Hidden",
+            "-Command", shim_command(installer, os.getpid(), app),
         ],
         creationflags=creation_flags,
         close_fds=True,
@@ -187,7 +214,7 @@ def launch_installer(installer: Path) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    log.info("installer launched; exiting so it can replace this build")
+    log.info("update handed off; exiting so the installer can replace this build")
 
 
 class UpdateChecker(threading.Thread):

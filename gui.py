@@ -405,10 +405,20 @@ class App:
         threading.Thread(target=work, name="update-download", daemon=True).start()
 
     def _launch_installer(self, installer) -> None:
+        import logging as logging_mod
+        import os
+
+        import paths
         import updater
 
-        updater.launch_installer(installer)
+        # The shim waits on this process id before touching a file, so exiting
+        # promptly is part of the contract. Normal shutdown does the work —
+        # saving config, stopping threads — and the hard exit afterwards is a
+        # backstop against a lingering thread stalling the update indefinitely.
+        updater.launch_installer(installer, paths.install_dir() / "pitradio.exe")
         self.quit()
+        logging_mod.shutdown()
+        os._exit(0)
 
     # -- window lifecycle ------------------------------------------------
 

@@ -227,6 +227,10 @@ would install whatever was there, with administrator rights. That is why
 auto-install is opt-in. Code signing would fix this properly and is the obvious
 next step for the project.
 
+Updating closes PitRadio, installs, and reopens it. Your config, logs and the
+cached speech model live outside the install directory, so none of them are
+touched — an update never re-downloads the model.
+
 Turn the check off entirely with `--no-update-check`, or in
 `config.json` under `updates`.
 
