@@ -3,3 +3,4 @@ sounddevice>=0.4.6
 numpy>=1.26
 pystray>=0.19.5
 Pillow>=10.0
+pysdl2-dll>=2.28

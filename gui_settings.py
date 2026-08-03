@@ -25,6 +25,11 @@ log = logging.getLogger(__name__)
 
 TASK_NAME = "PitRadio"
 
+# Capture arms a global hook and a joystick poll. Leaving either armed
+# indefinitely because someone clicked the button and wandered off is worse
+# than making them click again.
+CAPTURE_TIMEOUT_MS = 5000
+
 
 # -- small helpers -------------------------------------------------------
 
@@ -212,7 +217,9 @@ def _capture_key(app) -> None:
         return
 
     app.capture_key_button.state(["disabled"])
-    app.capture_key_button.configure(text="Press any key…")
+    app.capture_key_button.configure(text="Press any key… 5")
+    app._key_capture_deadline = CAPTURE_TIMEOUT_MS
+    _tick_key_capture(app)
 
     def done(modifiers, vk) -> None:
         import keys
@@ -220,14 +227,37 @@ def _capture_key(app) -> None:
         spec = keys.format_combo(modifiers, vk)
 
         def apply() -> None:
+            _end_key_capture(app)
             app.v_trigger.set(spec)
-            app.capture_key_button.state(["!disabled"])
-            app.capture_key_button.configure(text="Press a key…")
             log.info("captured trigger key: %s (save to apply)", spec)
 
         app.root.after(0, apply)
 
     app.hook.start_capture(done)
+
+
+def _tick_key_capture(app) -> None:
+    """Count down visibly, so a capture that is about to lapse says so."""
+    remaining = getattr(app, "_key_capture_deadline", 0)
+    if remaining <= 0:
+        log.info("key capture timed out; nothing was pressed")
+        _end_key_capture(app)
+        return
+    app.capture_key_button.configure(text=f"Press any key… {remaining // 1000}")
+    app._key_capture_deadline = remaining - 1000
+    app._key_capture_timer = app.root.after(1000, lambda: _tick_key_capture(app))
+
+
+def _end_key_capture(app) -> None:
+    timer = getattr(app, "_key_capture_timer", None)
+    if timer is not None:
+        app.root.after_cancel(timer)
+        app._key_capture_timer = None
+    app._key_capture_deadline = 0
+    if app.hook is not None:
+        app.hook.cancel_capture()
+    app.capture_key_button.state(["!disabled"])
+    app.capture_key_button.configure(text="Press a key…")
 
 
 def _capture_button(app) -> None:
@@ -236,21 +266,54 @@ def _capture_button(app) -> None:
         return
 
     app.capture_button_button.state(["disabled"])
-    app.capture_button_button.configure(text="Press a button…")
     app.v_joystick.set("waiting for a button…")
+    app._button_capture_deadline = CAPTURE_TIMEOUT_MS
+    _tick_button_capture(app)
 
     def done(device, button) -> None:
         def apply() -> None:
+            _end_button_capture(app)
             app.captured_joystick = (device, button)
             app.v_joystick.set(app.joystick.describe(device, button))
-            app.capture_button_button.state(["!disabled"])
-            app.capture_button_button.configure(text="Press a button…")
             log.info("captured joystick device %d button %d (save to apply)",
                      device, button)
 
         app.root.after(0, apply)
 
     app.joystick.start_capture(done)
+
+
+def _tick_button_capture(app) -> None:
+    remaining = getattr(app, "_button_capture_deadline", 0)
+    if remaining <= 0:
+        log.info("button capture timed out; no button was pressed")
+        _end_button_capture(app)
+        # Say why, rather than silently reverting: with no detected controller
+        # this is the expected outcome and the user needs to know that.
+        app.v_joystick.set(_joystick_label(app, app.store.config.joystick))
+        if not app.joystick.list_devices():
+            messagebox.showinfo(
+                "PitRadio",
+                "No controller was detected, so no button could be captured.\n\n"
+                "See the controller list under the Trigger section for what "
+                "PitRadio can currently see.",
+            )
+        return
+    app.capture_button_button.configure(text=f"Press a button… {remaining // 1000}")
+    app._button_capture_deadline = remaining - 1000
+    app._button_capture_timer = app.root.after(1000, lambda: _tick_button_capture(app))
+
+
+def _end_button_capture(app) -> None:
+    timer = getattr(app, "_button_capture_timer", None)
+    if timer is not None:
+        app.root.after_cancel(timer)
+        app._button_capture_timer = None
+    app._button_capture_deadline = 0
+    if app.joystick is not None:
+        app.joystick.cancel_capture()
+    app.capture_button_button.state(["!disabled"])
+    app.capture_button_button.configure(text="Press a button…")
 
 
 def _clear_joystick(app) -> None:

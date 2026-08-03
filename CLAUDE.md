@@ -96,6 +96,17 @@ Four threads, and mixing them up is how this breaks:
 | tray | pystray's blocking `run()` |
 | joystick | polls wheel/gamepad buttons; feeds the same queue as the hook |
 
+Joystick input has two backends. **SDL2 is preferred** ([sdlinput.py](sdlinput.py),
+a hand-written ctypes binding over a bundled `SDL2.dll`), because the legacy
+Windows joystick API cannot see Steam Input devices at all. The legacy path in
+`winapi.py` remains as a fallback, and `joystick.backend()` picks. SDL failing
+to load must degrade to the fallback, never crash — `--self-test` reports which
+backend is live and fails if SDL2 doesn't load, so a bundle that drops the DLL
+is caught rather than silently losing devices.
+
+`SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS` is not optional: without it SDL drops
+joystick input whenever PitRadio isn't focused, which is always, while racing.
+
 Worker and hook never call into Tk. They publish onto `AppState.events`, which
 the GUI drains on a `root.after(100, …)` tick. Log lines reach the GUI through
 the same queue via `state.QueueLogHandler` — one mechanism, not two. pystray

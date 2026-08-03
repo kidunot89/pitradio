@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 log = logging.getLogger("pitradio")
 
@@ -190,7 +190,7 @@ def cmd_self_test() -> int:
         # The heavy native stack. faster_whisper pulls av in eagerly, and av's
         # extension modules import av.utils from inside compiled code.
         "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
-        "winapi", "hook", "inject", "worker", "joystick",
+        "winapi", "hook", "inject", "worker", "joystick", "sdlinput",
         "speech", "updater", "gui", "gui_settings", "tray",
     ]
 
@@ -205,6 +205,24 @@ def cmd_self_test() -> int:
         except Exception as exc:
             failures.append((name, f"{type(exc).__name__}: {exc}"))
             out(f"  FAILED  {name}: {type(exc).__name__}: {exc}")
+
+    # Importing sdlinput proves nothing about SDL2 itself: the DLL is bundled
+    # data, loaded by path at runtime. A bundle that drops it would import fine
+    # and then silently fall back to the legacy interface, losing exactly the
+    # devices SDL was added for. Same shape as the av.utils failure.
+    try:
+        import sdlinput
+
+        probe = sdlinput.SdlJoysticks()
+        if probe.start():
+            out(f"  ok      SDL2 loaded ({len(probe.list_devices())} controllers)")
+            probe.stop()
+        else:
+            failures.append(("SDL2", probe.failure or "did not initialise"))
+            out(f"  FAILED  SDL2: {probe.failure}")
+    except Exception as exc:
+        failures.append(("SDL2", f"{type(exc).__name__}: {exc}"))
+        out(f"  FAILED  SDL2: {type(exc).__name__}: {exc}")
 
     # Build the real window, not just a bare Tk root. Importing tkinter proves
     # nothing about construction: App shells out to schtasks and enumerates

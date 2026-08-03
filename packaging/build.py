@@ -123,6 +123,10 @@ def nuitka_args(version: str) -> list[str]:
         "--include-module=sounddevice",
         "--include-package=pystray",
         "--include-package=PIL",
+        # SDL2 ships as a DLL inside sdl2dll. sdlinput loads it by path at
+        # runtime, so it is data rather than an import Nuitka can follow.
+        "--include-package=sdl2dll",
+        "--include-package-data=sdl2dll",
         "--product-name=PitRadio",
         f"--product-version={_four_part(version)}",
         f"--file-version={_four_part(version)}",

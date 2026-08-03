@@ -19,9 +19,45 @@ import threading
 import time
 from collections.abc import Callable
 
+import sdlinput
 import winapi
 
 log = logging.getLogger(__name__)
+
+# SDL is preferred and the legacy interface is the fallback. SDL's HIDAPI
+# drivers see devices the legacy API cannot -- a Steam Controller is invisible
+# to it entirely -- but SDL is a bundled DLL that can fail to load, and this app
+# must not lose its trigger because of that.
+_sdl = sdlinput.SdlJoysticks()
+_use_sdl: bool | None = None
+
+
+def backend():
+    """The SDL backend, or None when the legacy interface is in use."""
+    global _use_sdl
+    if _use_sdl is None:
+        _use_sdl = _sdl.start()
+        if not _use_sdl:
+            log.info(
+                "SDL2 unavailable (%s); falling back to the legacy joystick "
+                "interface, which cannot see Steam Input devices",
+                _sdl.failure,
+            )
+    return _sdl if _use_sdl else None
+
+
+def backend_name() -> str:
+    return "SDL2" if backend() is not None else "Windows legacy joystick API"
+
+
+def _mask(device: int) -> int | None:
+    sdl = backend()
+    return sdl.button_mask(device) if sdl else winapi.joystick_button_mask(device)
+
+
+def _name(device: int) -> str | None:
+    sdl = backend()
+    return sdl.name(device) if sdl else winapi.joystick_name(device)
 
 TRIGGER_DOWN = "down"
 TRIGGER_UP = "up"
@@ -32,6 +68,10 @@ MAX_DEVICES = 16
 
 def list_devices() -> list[tuple[int, str, int]]:
     """(device id, name, button count) for every attached joystick."""
+    sdl = backend()
+    if sdl is not None:
+        return sdl.list_devices()
+
     devices = []
     for device in range(min(winapi.joystick_count(), MAX_DEVICES)):
         name = winapi.joystick_name(device)
@@ -55,34 +95,26 @@ def diagnose() -> list[str]:
     question is whether Windows sees it here at all — so report what was found
     rather than leaving the user to guess.
     """
-    lines = [f"joyGetNumDevs reports {winapi.joystick_count()} supported device slots"]
+    lines = [f"backend: {backend_name()}"]
+    if backend() is None and _sdl.failure:
+        lines.append(f"  SDL2 did not load: {_sdl.failure}")
 
-    found = 0
-    for device in range(min(winapi.joystick_count(), MAX_DEVICES)):
-        name = winapi.joystick_name(device)
-        if name is None:
-            continue
-        mask = winapi.joystick_button_mask(device)
-        buttons = winapi.joystick_buttons(device)
-        if mask is None:
-            lines.append(f"  slot {device}: {name!r} — known to the driver but not connected")
-        else:
-            found += 1
-            lines.append(f"  slot {device}: {name!r} — {buttons} buttons, state readable")
+    devices = list_devices()
+    for device, name, buttons in devices:
+        lines.append(f"  device {device}: {name!r} — {buttons} buttons")
 
-    if not found:
+    if not devices:
         lines.append(
-            "  no usable devices. If a controller is plugged in, it is most likely "
-            "held by Steam Input, which hides it from this interface — try "
-            "disabling Steam Input for the device, or use a keyboard trigger."
+            "  no controllers detected. If one is plugged in and this is the "
+            "legacy backend, Steam Input is the usual cause — it hides the "
+            "device from that interface."
         )
     return lines
 
 
 def describe(device: int, button: int) -> str:
     """Human-readable binding, e.g. 'Fanatec CSL Elite - button 13'."""
-    name = winapi.joystick_name(device) or f"joystick {device}"
-    return f"{name} - button {button}"
+    return f"{_name(device) or f'joystick {device}'} - button {button}"
 
 
 class JoystickWatcher(threading.Thread):
@@ -137,6 +169,8 @@ class JoystickWatcher(threading.Thread):
 
     def stop(self) -> None:
         self._stop.set()
+        if backend() is not None:
+            _sdl.stop()
 
     # -- thread body -----------------------------------------------------
 
@@ -154,7 +188,7 @@ class JoystickWatcher(threading.Thread):
             self._stop.wait(POLL_SECONDS)
 
     def _poll_binding(self) -> None:
-        mask = winapi.joystick_button_mask(self._device)
+        mask = _mask(self._device)
         if mask is None:
             if not self._missing_logged:
                 self._missing_logged = True
@@ -176,8 +210,8 @@ class JoystickWatcher(threading.Thread):
                 self._post(TRIGGER_UP)
 
     def _poll_capture(self) -> None:
-        for device, _name, _count in list_devices():
-            mask = winapi.joystick_button_mask(device)
+        for device, _label, _count in list_devices():
+            mask = _mask(device)
             if not mask:
                 continue
             # Lowest set bit wins if several are held, so the result is stable.
