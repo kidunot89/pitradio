@@ -114,3 +114,41 @@ def test_name_for_round_trips():
     assert keys.name_for(0x0D) in ("enter", "return")
     assert keys.name_for(0x7C) == "f13"
     assert keys.name_for(0x9999).startswith("vk_")
+
+
+# -- capture rendering ---------------------------------------------------
+
+
+def test_format_combo_accepts_generic_modifier_codes():
+    """The hook tracks generic codes; the config names side-specific ones.
+
+    format_combo has to accept either, because the capture path feeds it what
+    the hook tracked (VK_CONTROL) while the parser produces VK_LCONTROL.
+    """
+    generic_ctrl = 0x11
+    assert keys.format_combo([generic_ctrl], keys.VK["f12"]) == "ctrl+f12"
+    assert keys.format_combo([keys.VK["ctrl"]], keys.VK["f12"]) == "ctrl+f12"
+
+
+def test_format_combo_handles_all_three_generic_modifiers():
+    assert keys.format_combo([0x11, 0x12, 0x10], keys.VK["enter"]) == (
+        "ctrl+alt+shift+enter"
+    )
+
+
+def test_modifier_codes_are_the_generic_ones():
+    """These are what GetAsyncKeyState answers for, and what the hook tracks."""
+    assert frozenset({0x10, 0x11, 0x12}) == keys.MODIFIER_CODES
+    for side_specific in (0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5):
+        assert keys.generic_modifier(side_specific) in keys.MODIFIER_CODES
+
+
+def test_a_captured_combo_parses_back_to_a_valid_trigger():
+    """End to end: what capture renders must be loadable as a trigger."""
+    import config
+
+    rendered = keys.format_combo([0x11], keys.VK["f12"])
+    cfg = config.Config()
+    cfg.trigger_key = rendered
+    assert cfg.validate() == []
+    assert keys.parse_trigger(rendered) == ([keys.VK["ctrl"]], keys.VK["f12"])

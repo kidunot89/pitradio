@@ -45,6 +45,40 @@ def list_devices() -> list[tuple[int, str, int]]:
     return devices
 
 
+def diagnose() -> list[str]:
+    """Why a controller might not be showing up.
+
+    This API cannot see everything. Steam Input in particular can capture a
+    controller and re-present it in a form the legacy interface never
+    enumerates, and a Steam Controller in desktop mode acts as a keyboard and
+    mouse rather than a joystick at all. When a device is missing, the useful
+    question is whether Windows sees it here at all — so report what was found
+    rather than leaving the user to guess.
+    """
+    lines = [f"joyGetNumDevs reports {winapi.joystick_count()} supported device slots"]
+
+    found = 0
+    for device in range(min(winapi.joystick_count(), MAX_DEVICES)):
+        name = winapi.joystick_name(device)
+        if name is None:
+            continue
+        mask = winapi.joystick_button_mask(device)
+        buttons = winapi.joystick_buttons(device)
+        if mask is None:
+            lines.append(f"  slot {device}: {name!r} — known to the driver but not connected")
+        else:
+            found += 1
+            lines.append(f"  slot {device}: {name!r} — {buttons} buttons, state readable")
+
+    if not found:
+        lines.append(
+            "  no usable devices. If a controller is plugged in, it is most likely "
+            "held by Steam Input, which hides it from this interface — try "
+            "disabling Steam Input for the device, or use a keyboard trigger."
+        )
+    return lines
+
+
 def describe(device: int, button: int) -> str:
     """Human-readable binding, e.g. 'Fanatec CSL Elite - button 13'."""
     name = winapi.joystick_name(device) or f"joystick {device}"
@@ -85,6 +119,9 @@ class JoystickWatcher(threading.Thread):
 
     def describe(self, device: int, button: int) -> str:
         return describe(device, button)
+
+    def diagnose(self) -> list[str]:
+        return diagnose()
 
     def set_binding(self, device: int | None, button: int | None) -> None:
         self._device, self._button = device, button

@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 log = logging.getLogger("pitradio")
 
@@ -389,6 +389,9 @@ def run(args) -> int:
         checker.on_ready = lambda installer: root.after(
             0, lambda: app._launch_installer(installer)
         )
+
+    for line in joystick_mod.diagnose():
+        log.info("joystick: %s", line)
 
     worker.start()
     hook.start()

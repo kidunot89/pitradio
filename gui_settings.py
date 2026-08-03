@@ -122,14 +122,14 @@ def build_settings_tab(app) -> None:
             foreground="#777",
         ).grid(row=2, column=0, columnspan=3, sticky="w")
     else:
-        found = app.joystick.list_devices()
-        summary = (
-            ", ".join(f"{name} ({count} buttons)" for _i, name, count in found)
-            if found else "no joysticks detected"
-        )
-        ttk.Label(trigger, text=f"Detected: {summary}", foreground="#777",
+        app.v_joystick_devices = tk.StringVar(value="")
+        ttk.Label(trigger, textvariable=app.v_joystick_devices, foreground="#777",
                   wraplength=640, justify="left").grid(
             row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Button(trigger, text="Rescan controllers",
+                   command=lambda: _refresh_joystick_devices(app)).grid(
+            row=3, column=1, sticky="w", pady=(4, 0))
+        _refresh_joystick_devices(app)
 
     defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
     defaults.pack(fill="x", pady=(10, 0))
@@ -178,6 +178,23 @@ def _joystick_label(app, joystick_cfg) -> str:
     if app.joystick is None:
         return f"device {joystick_cfg.device}, button {joystick_cfg.button}"
     return app.joystick.describe(joystick_cfg.device, joystick_cfg.button)
+
+
+def _refresh_joystick_devices(app) -> None:
+    """Report what the joystick interface can actually see.
+
+    Steam Input can capture a controller and re-present it in a form this
+    interface never enumerates, and a Steam Controller in desktop mode is a
+    keyboard and mouse rather than a joystick at all. Without this the user
+    cannot tell "your controller is invisible to Windows here" from "capture is
+    broken", which are entirely different problems.
+    """
+    if app.joystick is None:
+        return
+    lines = app.joystick.diagnose()
+    app.v_joystick_devices.set("\n".join(lines))
+    for line in lines:
+        log.info("joystick: %s", line)
 
 
 def _capture_key(app) -> None:

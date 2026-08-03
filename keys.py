@@ -145,11 +145,14 @@ def parse_trigger(spec: str) -> tuple[list[int], int]:
 def format_combo(modifiers: list[int], vk: int) -> str:
     """Render a captured key back into a spec string.
 
-    Modifiers come out in a fixed order so the same physical press always
-    produces the same text, whatever order they were pressed in.
+    Accepts side-specific (VK_LCONTROL) or generic (VK_CONTROL) codes, since
+    the hook tracks one and the config names the other. Modifiers come out in a
+    fixed order so the same physical press always produces the same text,
+    whatever order they were pressed in.
     """
-    order = [("ctrl", VK["ctrl"]), ("alt", VK["alt"]), ("shift", VK["shift"])]
-    held = [name for name, code in order if code in modifiers]
+    held_generic = {generic_modifier(m) for m in modifiers}
+    order = [("ctrl", 0x11), ("alt", 0x12), ("shift", 0x10)]
+    held = [name for name, code in order if code in held_generic]
     return "+".join([*held, name_for(vk)])
 
 
@@ -167,8 +170,12 @@ def generic_modifier(vk: int) -> int:
     return GENERIC_MODIFIER.get(vk, vk)
 
 
+# Side-agnostic modifier codes, which is what GetAsyncKeyState answers for.
+MODIFIER_CODES = frozenset({0x10, 0x11, 0x12})
+
+
 def is_modifier(vk: int) -> bool:
-    return vk in GENERIC_MODIFIER or vk in (0x10, 0x11, 0x12)
+    return vk in GENERIC_MODIFIER or vk in MODIFIER_CODES
 
 
 def name_for(vk: int) -> str:

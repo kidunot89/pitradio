@@ -65,6 +65,7 @@ class KeyboardHook(threading.Thread):
         # reports what was pressed and swallows it, so binding Enter or Escape
         # doesn't also actuate whatever is behind the dialog.
         self._capture: Callable[[list[int], int], None] | None = None
+        self._held_modifiers: set[int] = set()
         self._hook = None
         self._thread_id: int | None = None
         self._ready = threading.Event()
@@ -149,15 +150,28 @@ class KeyboardHook(threading.Thread):
         if info.dwExtraInfo == winapi.INJECT_TAG:
             return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
+        # Track modifier state ourselves, before any decision to swallow.
+        # Returning 1 from a low-level hook discards the event, and a discarded
+        # keypress never updates the state GetAsyncKeyState reports — so during
+        # capture, where everything is swallowed, Ctrl always read as "up" and
+        # ctrl+f12 could never be captured.
+        generic = keys.generic_modifier(info.vkCode)
+        if generic in keys.MODIFIER_CODES:
+            if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                self._held_modifiers.add(generic)
+            elif w_param in (WM_KEYUP, WM_SYSKEYUP):
+                self._held_modifiers.discard(generic)
+
         if self._capture is not None:
             return self._handle_capture(info, n_code, w_param, l_param)
 
         if info.vkCode != self._trigger_vk or not self._is_enabled():
             return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
-        # Modifiers are checked here rather than tracked, because a low-level
-        # hook reports one key at a time and never a combination. Only the main
-        # key is ever swallowed — swallowing Ctrl would break it everywhere.
+        # A low-level hook reports one key at a time and never a combination,
+        # so a combo is recognised by checking modifier state when the main key
+        # arrives. Only the main key is ever swallowed — swallowing Ctrl would
+        # break it system-wide.
         if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN) and not self._pressed:
             if not self._modifiers_held():
                 return user32.CallNextHookEx(None, n_code, w_param, l_param)
@@ -176,22 +190,29 @@ class KeyboardHook(threading.Thread):
         # repeats into a single event.
         return 1  # the game must never see the trigger key
 
+    def _is_modifier_down(self, generic: int) -> bool:
+        """Either source of truth will do.
+
+        Our own tracking covers events we swallowed, which GetAsyncKeyState
+        would miss; GetAsyncKeyState covers a modifier already held when the
+        hook was installed, which our tracking would miss.
+        """
+        return generic in self._held_modifiers or winapi.is_key_down(generic)
+
     def _modifiers_held(self) -> bool:
-        return all(winapi.is_key_down(mod) for mod in self._modifiers)
+        return all(self._is_modifier_down(mod) for mod in self._modifiers)
 
     def _handle_capture(self, info, n_code, w_param, l_param):
         """Report the pressed key to the GUI and swallow it."""
+        if keys.is_modifier(info.vkCode):
+            # Wait for the real key; a modifier alone is not a binding. Passed
+            # through rather than swallowed so the system's own key state stays
+            # accurate — and Ctrl on its own does nothing to the window behind.
+            return user32.CallNextHookEx(None, n_code, w_param, l_param)
         if w_param not in (WM_KEYDOWN, WM_SYSKEYDOWN):
             return 1
-        if keys.is_modifier(info.vkCode):
-            # Wait for the real key; a modifier alone is not a binding.
-            return 1
 
-        held = [
-            code
-            for code in (keys.VK["ctrl"], keys.VK["alt"], keys.VK["shift"])
-            if winapi.is_key_down(keys.generic_modifier(code))
-        ]
+        held = [code for code in keys.MODIFIER_CODES if self._is_modifier_down(code)]
         callback, self._capture = self._capture, None
         try:
             callback(held, info.vkCode)
