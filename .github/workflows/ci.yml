@@ -99,8 +99,71 @@ jobs:
                  -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
 
+      # Everything above ran out of build\pitradio.dist. That is not what users
+      # receive, and until v0.1.1 nothing had ever executed the installer or the
+      # files it lays down — which is how a broken post-install launch shipped.
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile the installer
+        run: |
+          $v = python packaging/build.py --version
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$v packaging\pitradio.iss
+          if ($LASTEXITCODE -ne 0) { throw "installer failed to compile" }
+
+      - name: Install it for real
+        run: |
+          $setup = Get-ChildItem packaging\Output\pitradio-setup-*.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName `
+                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' `
+                 -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "install failed (exit $($p.ExitCode))" }
+
+      - name: Verify the installed application
+        run: |
+          $dir = "C:\Program Files\PitRadio"
+          $exe = "$dir\pitradio.exe"
+          if (-not (Test-Path $exe)) { throw "$exe missing after install" }
+
+          # updater.installed_via_installer() keys off this file. Without it the
+          # self-updater silently refuses to update anyone.
+          if (-not (Get-ChildItem "$dir\unins*.exe" -ErrorAction SilentlyContinue)) {
+            throw "no uninstaller present; the self-updater would refuse to run"
+          }
+
+          # Running from Program Files is the case that matters: a different
+          # directory, and one the app must never try to write into.
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installed binary failed --self-test" }
+
+          $p = Start-Process -FilePath $exe -ArgumentList '--check-config' -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installed binary failed --check-config" }
+
+          if (-not (Test-Path "$env:APPDATA\pitradio\config.json")) {
+            throw "config was not seeded into %APPDATA%; hot-reload would be broken"
+          }
+
+      - name: Uninstall and verify it leaves user data alone
+        run: |
+          $dir = "C:\Program Files\PitRadio"
+          $unins = (Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1).FullName
+          Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/NORESTART' -Wait
+
+          # Inno's uninstaller copies itself to temp and relaunches, so -Wait can
+          # return before the removal has actually finished.
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\pitradio.exe"); $i++) {
+            Start-Sleep -Seconds 2
+          }
+          if (Test-Path "$dir\pitradio.exe") { throw "uninstall left the executable behind" }
+
+          # Config, logs and a 250MB cached model are the user's. An
+          # uninstall/reinstall cycle must not cost them any of it.
+          if (-not (Test-Path "$env:APPDATA\pitradio\config.json")) {
+            throw "uninstall deleted the user's config"
+          }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: pitradio-dist
-          path: build/pitradio.dist/
+          name: pitradio-installer
+          path: packaging/Output/pitradio-setup-*.exe
           retention-days: 7

@@ -61,7 +61,11 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
+; shellexec is required, not cosmetic. Inno runs postinstall entries as the
+; originating (non-elevated) user via CreateProcess, which refuses to launch a
+; requireAdministrator binary and fails with code 740, ERROR_ELEVATION_REQUIRED.
+; ShellExecuteEx honours the manifest and raises the UAC prompt instead.
+Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallDelete]
 ; Leave %APPDATA%\pitradio alone: config, logs and the cached model are the

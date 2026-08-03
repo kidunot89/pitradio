@@ -51,6 +51,19 @@ exactly that way, missing `av.utils`. When you add a runtime dependency, add it
 to the list in `cmd_self_test` or packaging will not notice when it goes
 missing.
 
+CI then **compiles the installer, silently installs it, runs the installed exe
+from `C:\Program Files\PitRadio`, and uninstalls again**, asserting that the
+uninstaller exists (the self-updater refuses to run without it) and that
+uninstalling leaves `%APPDATA%\pitradio` intact. The release workflow does the
+same and refuses to publish if any of it fails. Before v0.1.2 nothing had ever
+executed the installer or the files it lays down — every check ran out of
+`build\pitradio.dist`, which is not what users receive.
+
+Note the limit: a `/VERYSILENT` install **skips `[Run]` entries** (they are
+`skipifsilent`), so it cannot catch a broken post-install launch. That is what
+[tests/test_installer.py](tests/test_installer.py) is for — it asserts the flags
+statically instead.
+
 When adding tests, keep them importable without `winapi` — a test that needs
 Windows can't run in the place most of this gets developed.
 
