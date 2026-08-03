@@ -30,6 +30,7 @@ COLLABORATORS = {
     "recorder": ("speech.py", "Recorder"),
     "transcriber": ("speech.py", "Transcriber"),
     "checker": ("updater.py", "UpdateChecker"),
+    "plugins": ("plugins/__init__.py", "PluginRegistry"),
 }
 
 

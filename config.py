@@ -49,6 +49,10 @@ class Profile:
     type_delay_ms: int = 8
     max_chars: int = 200
     text_mode: str = "unicode"
+    # Which sim plugin supplies session data for this game. Empty means
+    # none. Held on the profile rather than the plugin so one plugin can
+    # serve several games.
+    plugin: str = ""
 
 
 @dataclass
@@ -61,6 +65,26 @@ class JoystickConfig:
 
     device: Any = None      # joystick id, or null for "not bound"
     button: Any = None      # 1-based button number
+
+
+@dataclass
+class MentionConfig:
+    """Turning spoken driver names into mentions.
+
+    No styling option, because neither LMU nor rFactor 2 chat supports markup:
+    injection sends literal characters, so a prefix is all that can be done.
+    """
+
+    enabled: bool = True
+    prefix: str = "@"
+    # Off by default: a false match rewrites a word the driver actually said
+    # into someone else's name, which is worse than leaving it alone.
+    fuzzy: bool = False
+    threshold: float = 0.85
+    # The part that actually improves accuracy — telling Whisper who is in the
+    # session so it hears the name correctly to begin with.
+    add_names_to_vocabulary: bool = True
+    max_names: int = 40
 
 
 @dataclass
@@ -123,6 +147,7 @@ class Config:
     enabled: bool = True
     trigger_key: str = "f13"
     joystick: JoystickConfig = field(default_factory=JoystickConfig)
+    mentions: MentionConfig = field(default_factory=MentionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     cues: CueConfig = field(default_factory=CueConfig)
@@ -141,6 +166,7 @@ class Config:
         cfg.trigger_key = str(data.get("trigger_key", cfg.trigger_key))
 
         cfg.joystick = _section(JoystickConfig, data.get("joystick"))
+        cfg.mentions = _section(MentionConfig, data.get("mentions"))
         cfg.audio = _section(AudioConfig, data.get("audio"))
         cfg.whisper = _section(WhisperConfig, data.get("whisper"))
         cfg.cues = _section(CueConfig, data.get("cues"))
@@ -165,6 +191,7 @@ class Config:
             "enabled": self.enabled,
             "trigger_key": self.trigger_key,
             "joystick": asdict(self.joystick),
+            "mentions": asdict(self.mentions),
             "audio": asdict(self.audio),
             "whisper": asdict(self.whisper),
             "cues": asdict(self.cues),
@@ -207,6 +234,13 @@ class Config:
             # this uses exposes at most 32.
             if not isinstance(self.joystick.button, int) or not 1 <= self.joystick.button <= 32:
                 problems.append("joystick.button must be between 1 and 32, or null")
+
+        if not self.mentions.prefix:
+            problems.append("mentions.prefix cannot be empty")
+        if not 0.5 <= self.mentions.threshold <= 1.0:
+            problems.append("mentions.threshold must be between 0.5 and 1.0")
+        if not 1 <= self.mentions.max_names <= 200:
+            problems.append("mentions.max_names must be between 1 and 200")
 
         if self.audio.samplerate != 16000:
             problems.append(

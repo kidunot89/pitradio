@@ -76,7 +76,16 @@
         "escape"
       ],
       "pre_delay_ms": 350,
-      "max_chars": 200
+      "max_chars": 200,
+      "plugin": "lmu"
     }
+  },
+  "mentions": {
+    "enabled": true,
+    "prefix": "@",
+    "fuzzy": false,
+    "threshold": 0.85,
+    "add_names_to_vocabulary": true,
+    "max_names": 40
   }
 }

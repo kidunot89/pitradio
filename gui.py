@@ -42,6 +42,7 @@ class App:
         transcriber=None,
         hook=None,
         joystick=None,
+        plugins=None,
         use_tray: bool = True,
     ):
         self.root = root
@@ -54,6 +55,7 @@ class App:
         self.transcriber = transcriber
         self.hook = hook
         self.joystick = joystick
+        self.plugins = plugins
         self.tray = None
         self._quitting = False
         self._log_lines = 0
@@ -434,7 +436,8 @@ class App:
         except Exception:
             log.debug("could not persist window geometry", exc_info=True)
 
-        for component in (self.tray, self.checker, self.worker, self.hook, self.joystick):
+        for component in (self.tray, self.checker, self.worker, self.hook, self.joystick,
+                          self.plugins):
             if component is None:
                 continue
             try:

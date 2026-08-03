@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 log = logging.getLogger("pitradio")
 
@@ -191,6 +191,7 @@ def cmd_self_test() -> int:
         # extension modules import av.utils from inside compiled code.
         "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
         "winapi", "hook", "inject", "worker", "joystick", "sdlinput",
+        "plugins", "plugins.lmu", "mentions",
         "speech", "updater", "gui", "gui_settings", "tray",
     ]
 
@@ -223,6 +224,23 @@ def cmd_self_test() -> int:
     except Exception as exc:
         failures.append(("SDL2", f"{type(exc).__name__}: {exc}"))
         out(f"  FAILED  SDL2: {type(exc).__name__}: {exc}")
+
+    # Constructing the registry is what proves plugins were bundled: they are
+    # registered statically, so a build that dropped the package would import
+    # `plugins` fine and simply have none.
+    try:
+        import plugins as plugins_mod
+
+        registry = plugins_mod.PluginRegistry()
+        if not registry.plugins:
+            failures.append(("plugins", "no plugins registered"))
+            out("  FAILED  plugins: none registered")
+        else:
+            names = ", ".join(p.name for p in registry.plugins)
+            out(f"  ok      plugins ({names})")
+    except Exception as exc:
+        failures.append(("plugins", f"{type(exc).__name__}: {exc}"))
+        out(f"  FAILED  plugins: {type(exc).__name__}: {exc}")
 
     # Build the real window, not just a bare Tk root. Importing tkinter proves
     # nothing about construction: App shells out to schtasks and enumerates
@@ -327,6 +345,7 @@ def run(args) -> int:
     import hook as hook_mod
     import joystick as joystick_mod
     import keys
+    import plugins as plugins_mod
     import speech
     import updater
     import winapi
@@ -380,8 +399,14 @@ def run(args) -> int:
     # input fired -- and does not need to.
     joystick = joystick_mod.JoystickWatcher(
         events, lambda: app_state.enabled, cfg.joystick.device, cfg.joystick.button)
+    registry = plugins_mod.PluginRegistry()
+    registry.start_all()
+    for name, status in registry.describe():
+        log.info("plugin %s: %s", name, status)
+
     worker = worker_mod.Worker(store, app_state, events, recorder, transcriber)
     worker.hook = hook
+    worker.plugins = registry
 
     def is_busy() -> bool:
         """True when a sim is focused, so updates can wait."""
@@ -399,7 +424,7 @@ def run(args) -> int:
     app = gui.App(
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
-        transcriber=transcriber, hook=hook, joystick=joystick,
+        transcriber=transcriber, hook=hook, joystick=joystick, plugins=registry,
         use_tray=not args.no_tray,
     )
 

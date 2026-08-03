@@ -138,7 +138,7 @@ def build_settings_tab(app) -> None:
 
     defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
     defaults.pack(fill="x", pady=(10, 0))
-    app.v_default = _profile_vars(defaults, cfg.default_profile)
+    app.v_default = _profile_vars(app, defaults, cfg.default_profile)
 
     cues = ttk.LabelFrame(frame, text="Audio cues", padding=10)
     cues.pack(fill="x", pady=(10, 0))
@@ -325,7 +325,7 @@ def _clear_joystick(app) -> None:
     app.capture_button_button.configure(text="Press a button…")
 
 
-def _profile_vars(parent, profile) -> dict:
+def _profile_vars(app, parent, profile) -> dict:
     """Build the editors for one profile and return the vars keyed by field."""
     v = {
         "pre_keys": tk.StringVar(value=_keys_to_text(profile.pre_keys)),
@@ -358,7 +358,33 @@ def _profile_vars(parent, profile) -> dict:
                         values=("unicode", "scancode"), state="readonly")
     _row(parent, 9, "Text injection", mode,
          "switch to scancode if the game ignores typed text")
+
+    # The plugin lives on the profile rather than the plugin declaring which
+    # games it serves, so one plugin can be assigned to several games.
+    choices = app.plugins.choices() if app.plugins is not None else [("", "(none)")]
+    v["_plugin_choices"] = choices
+    v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
+    picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
+                          values=[name for _id, name in choices], state="readonly")
+    _row(parent, 10, "Session plugin", picker,
+         "reads who is in the session, for name accuracy and mentions")
     return v
+
+
+def _plugin_label(choices, plugin_id: str) -> str:
+    for identifier, name in choices:
+        if identifier == (plugin_id or ""):
+            return name
+    # An id from a plugin that no longer ships. Show it rather than silently
+    # resetting to none, so the config isn't quietly rewritten on save.
+    return plugin_id or "(none)"
+
+
+def _plugin_id(choices, label: str) -> str:
+    for identifier, name in choices:
+        if name == label:
+            return identifier
+    return ""
 
 
 def _read_profile_vars(v: dict, profile) -> None:
@@ -372,6 +398,7 @@ def _read_profile_vars(v: dict, profile) -> None:
     profile.type_delay_ms = _as_int(v["type_delay_ms"], profile.type_delay_ms)
     profile.max_chars = _as_int(v["max_chars"], profile.max_chars)
     profile.text_mode = v["text_mode"].get() or "unicode"
+    profile.plugin = _plugin_id(v["_plugin_choices"], v["plugin"].get())
 
 
 def _save_settings(app) -> None:
@@ -494,7 +521,7 @@ def build_profiles_tab(app) -> None:
 
     import config as config_mod
 
-    app.v_profile = _profile_vars(right, config_mod.Profile())
+    app.v_profile = _profile_vars(app, right, config_mod.Profile())
     ttk.Button(right, text="Save profile", command=lambda: _save_profile(app)).grid(
         row=10, column=1, sticky="e", pady=(10, 0))
 
@@ -535,6 +562,7 @@ def _load_profile(app) -> None:
     v["type_delay_ms"].set(str(profile.type_delay_ms))
     v["max_chars"].set(str(profile.max_chars))
     v["text_mode"].set(profile.text_mode)
+    v["plugin"].set(_plugin_label(v["_plugin_choices"], profile.plugin))
 
 
 def _add_profile(app) -> None:

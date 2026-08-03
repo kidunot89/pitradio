@@ -19,6 +19,7 @@ import time
 
 import hook as hook_mod
 import inject
+import mentions as mentions_mod
 import speech
 import state as state_mod
 import winapi
@@ -47,6 +48,7 @@ class Worker(threading.Thread):
         self.recorder = recorder
         self.transcriber = transcriber
         self.hook: hook_mod.KeyboardHook | None = None
+        self.plugins = None
 
         self._active: dict | None = None
         # Anything queued before this instant belongs to a cycle we already
@@ -105,11 +107,21 @@ class Worker(threading.Thread):
         log.info("pre-keys sent (+%.0fms)", (time.perf_counter() - started) * 1000)
         _sleep_ms(profile.pre_delay_ms)
 
+        # Read the driver list now rather than after transcription: the
+        # session can change while someone is talking, and the names that
+        # matter are the ones from when they started.
+        drivers: list[str] = []
+        if self.plugins is not None and cfg.mentions.enabled:
+            drivers = self.plugins.drivers_for(profile.plugin)
+            if drivers:
+                log.info("session has %d driver(s)", len(drivers))
+
         self._active = {
             "started": started,
             "profile": profile,
             "exe": exe or "<unknown>",
             "matched": matched,
+            "drivers": drivers,
         }
 
     def _on_up(self, released_at: float) -> None:
@@ -132,13 +144,31 @@ class Worker(threading.Thread):
 
         self.state.set_status(state_mod.STATUS_TRANSCRIBING)
         transcribe_started = time.perf_counter()
-        raw = self.transcriber.transcribe(audio, cfg.whisper)
+        drivers = active.get("drivers") or []
+        hint = (
+            mentions_mod.vocabulary_hint(drivers, cfg.mentions.max_names)
+            if drivers and cfg.mentions.add_names_to_vocabulary else ""
+        )
+        raw = self.transcriber.transcribe(audio, cfg.whisper, hint)
         transcribe_seconds = time.perf_counter() - transcribe_started
         log.info(
             "transcribed %.2fs of audio in %.2fs: %r", clip_seconds, transcribe_seconds, raw
         )
 
         text = speech.sanitize(raw, profile.max_chars)
+        if text and drivers and cfg.mentions.enabled:
+            marked = mentions_mod.apply_mentions(
+                text, drivers,
+                prefix=cfg.mentions.prefix,
+                fuzzy=cfg.mentions.fuzzy,
+                threshold=cfg.mentions.threshold,
+            )
+            if marked != text:
+                log.info("marked up driver names: %r", marked)
+                # Re-truncate: the prefixes made it longer, and max_chars is
+                # the game's limit, not a suggestion.
+                text = speech.sanitize(marked, profile.max_chars)
+
         if not text:
             log.info("nothing was said; firing abort keys instead of sending")
             self._abort(active, profile, "", transcribe_seconds)

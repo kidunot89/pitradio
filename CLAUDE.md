@@ -204,6 +204,26 @@ pipeline because its format must match `updater._expected_hash` — a seam that
 otherwise only gets exercised during a real release. `tests/test_checksums.py`
 pins the two together.
 
+## Sim plugins
+
+`plugins/` supplies per-sim session data; today just the driver list.
+**Registration is static** (`BUILTIN` in `plugins/__init__.py`) because Nuitka
+cannot follow a runtime-discovered import — a build that scanned a directory
+would ship with no plugins and no error. Adding a sim is one module plus one
+line; see [plugins/README.md](plugins/README.md).
+
+Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
+can serve several games. `executables` on the plugin only pre-fills the picker.
+
+`PluginRegistry.drivers_for` swallows every exception: it runs inside the
+trigger cycle, and a plugin fault must cost session data, never the message.
+
+`vendor/pylmusharedmemory` is TinyPedal's MIT-licensed LMU struct layout,
+vendored rather than depended on. A wrong field offset produces plausible
+garbage instead of an error, so the layout is worth taking from a maintained
+source — and it is pure Python, so vendoring costs no bundling risk. Pinned at
+commit `3968c15`.
+
 ## Languages and models
 
 Whisper has no per-language models: English-only builds (`tiny.en` …

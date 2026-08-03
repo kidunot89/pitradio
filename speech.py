@@ -206,6 +206,16 @@ def download_model(model: str, model_dir, compute_type: str = "int8") -> str | N
     return None
 
 
+def _join_prompt(base: str, extra: str) -> str | None:
+    """Combine the configured vocabulary with session-specific names.
+
+    Names go first: initial_prompt is truncated around 224 tokens, and a driver
+    list is worth more than the tail of a generic racing glossary.
+    """
+    parts = [p.strip() for p in (extra, base) if p and p.strip()]
+    return ". ".join(parts) if parts else None
+
+
 class Transcriber:
     """Wraps faster-whisper, holding one loaded model for the session."""
 
@@ -252,7 +262,7 @@ class Transcriber:
             time.perf_counter() - started,
         )
 
-    def transcribe(self, audio: np.ndarray, whisper_cfg) -> str:
+    def transcribe(self, audio: np.ndarray, whisper_cfg, extra_prompt: str = "") -> str:
         if self._model is None:
             self.load(whisper_cfg)
 
@@ -262,7 +272,7 @@ class Transcriber:
                 language=whisper_cfg.language or None,
                 beam_size=whisper_cfg.beam_size,
                 vad_filter=whisper_cfg.vad_filter,
-                initial_prompt=whisper_cfg.initial_prompt or None,
+                initial_prompt=_join_prompt(whisper_cfg.initial_prompt, extra_prompt),
             )
             # segments is a generator; consuming it is where the work happens.
             return " ".join(segment.text.strip() for segment in segments)

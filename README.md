@@ -144,6 +144,32 @@ sent. That turns "it felt wrong" into something you can actually read.
 
 ---
 
+## Session plugins
+
+A plugin reads live data from a sim. Today that means the driver list, which
+PitRadio uses two ways: it feeds the names to Whisper so they're transcribed
+correctly, and it can prefix them in the message — say "tell Tandy to box" and
+send `tell @Tandy to box`.
+
+**Le Mans Ultimate ships with one**, reading LMU's shared memory with no
+game-side plugin required. Assign it in **Profiles → Session plugin**; the
+bundled LMU profile already has it. The choice lives on the profile, so a plugin
+that suits two games can be assigned to both.
+
+Note on the `@`: it's plain text. Neither LMU nor rFactor 2 chat supports
+markup, so there's no bold and the game attaches no meaning to it — it's a human
+convention, like writing someone's name in caps.
+
+The accuracy half is the more valuable one. Whisper mangles proper nouns it has
+no reason to expect; telling it who's in the session beats any amount of
+matching after the fact.
+
+Plugins are compiled into the app — there's no way to add one after installing.
+Adding a sim means a pull request, and it's two small steps: see
+[plugins/README.md](plugins/README.md).
+
+---
+
 ## Accuracy
 
 The **Vocabulary** tab feeds Whisper a list of words to expect. It ships with

@@ -30,6 +30,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT / "build"
 
+# Vendored third-party modules live here rather than in site-packages.
+if str(ROOT / "vendor") not in sys.path:
+    sys.path.insert(0, str(ROOT / "vendor"))
+
 
 def read_version() -> str:
     """Parse __version__ out of the entry point without importing it.
@@ -127,6 +131,14 @@ def nuitka_args(version: str) -> list[str]:
         # runtime, so it is data rather than an import Nuitka can follow.
         "--include-package=sdl2dll",
         "--include-package-data=sdl2dll",
+        # Plugins are registered statically in plugins/__init__.py, so
+        # Nuitka can follow them -- but naming the package guarantees a
+        # new sim module is bundled even before anything imports it.
+        "--include-package=plugins",
+        # The vendored LMU struct definitions are loaded via a sys.path
+        # entry at runtime, which Nuitka cannot see.
+        "--include-package=pylmusharedmemory",
+        f"--include-data-dir={ROOT / 'vendor'}=vendor",
         "--product-name=PitRadio",
         f"--product-version={_four_part(version)}",
         f"--file-version={_four_part(version)}",
