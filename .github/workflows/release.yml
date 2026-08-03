@@ -9,6 +9,12 @@ on:
         description: "Tag to build (must already exist)"
         required: true
 
+# Tagging a newer version supersedes an in-flight release; without this the
+# older one keeps building and publishes something we would only delete.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 permissions:
   contents: write
 

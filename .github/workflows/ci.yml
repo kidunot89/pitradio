@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A 40-minute Windows build for a commit that has already been superseded is
+# pure waste. Newer pushes to the same ref cancel older runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Lint and test
