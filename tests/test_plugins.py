@@ -95,9 +95,10 @@ def test_executable_matching_only_supplies_a_default():
     assert registry.default_id_for("something-else.exe") == ""
 
 
-def test_choices_offer_none_first():
+def test_choices_offer_automatic_first():
+    """Unset means "work it out", not "none" — see resolve()."""
     choices = plugins.PluginRegistry((Working,)).choices()
-    assert choices[0] == ("", "(none)")
+    assert choices[0] == ("", "(automatic)")
     assert ("fake", "Fake Sim") in choices
 
 
@@ -391,3 +392,40 @@ def test_lmu_skips_unclassified_entries(lmu_with_data):
     lmu_with_data._data.scoring.vehScoringInfo[0].mPlace = 0
 
     assert lmu_with_data.positions() == {}
+
+
+# -- resolving an unset choice -------------------------------------------
+
+
+def test_an_unset_plugin_resolves_by_executable():
+    """Config files are never overwritten on update.
+
+    A profile written before plugins existed has no choice recorded, and
+    treating that as "no plugin" left the whole feature silently doing nothing
+    for everyone upgrading — which is exactly what happened.
+    """
+    registry = plugins.PluginRegistry((Working,))
+    assert registry.resolve("", "fake.exe") == "fake"
+    assert registry.resolve(None, "fake.exe") == "fake"
+
+
+def test_an_explicit_choice_wins_over_the_executable():
+    registry = plugins.PluginRegistry((Working, Announcer))
+    assert registry.resolve("announcer", "fake.exe") == "announcer"
+
+
+def test_an_unrecognised_executable_resolves_to_nothing():
+    registry = plugins.PluginRegistry((Working,))
+    assert registry.resolve("", "notepad.exe") == ""
+
+
+def test_an_old_lmu_profile_still_gets_the_plugin():
+    """The concrete upgrade case: a config predating the feature."""
+    cfg = config.Config.from_dict({"profiles": {"le mans ultimate.exe": {
+        "pre_keys": ["enter"], "post_keys": ["enter"],
+    }}})
+    profile, _ = cfg.profile_for("le mans ultimate.exe")
+    assert profile.plugin == ""
+
+    registry = plugins.PluginRegistry()
+    assert registry.resolve(profile.plugin, "le mans ultimate.exe") == "lmu"

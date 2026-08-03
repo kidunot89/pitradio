@@ -80,7 +80,7 @@ class PluginRegistry:
 
     def choices(self) -> list[tuple[str, str]]:
         """(id, name) for the profile editor's plugin picker."""
-        return [("", "(none)")] + [(p.id, p.name) for p in self.plugins]
+        return [("", "(automatic)")] + [(p.id, p.name) for p in self.plugins]
 
     def drivers_for(self, plugin_id: str | None) -> list[str]:
         """Driver names from the profile's plugin, or an empty list.
@@ -118,6 +118,18 @@ class PluginRegistry:
         except Exception:
             log.exception("plugin %s failed while reading positions", plugin.name)
             return {}
+
+    def resolve(self, plugin_id: str | None, executable: str | None) -> str:
+        """The plugin to use, falling back to whatever suits the executable.
+
+        An unset choice means "work it out", not "none". Config files are never
+        overwritten on update, so a profile written before plugins existed has
+        no choice recorded — and defaulting that to "no plugin" left the whole
+        feature silently doing nothing for anyone upgrading.
+        """
+        if plugin_id:
+            return plugin_id
+        return self.default_id_for(executable)
 
     def settings_for(self, plugin_id: str | None, stored: dict | None = None) -> dict:
         """A plugin's settings with the profile's overrides applied.

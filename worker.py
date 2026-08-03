@@ -111,8 +111,10 @@ class Worker(threading.Thread):
         # session can change while someone is talking, and the names that
         # matter are the ones from when they started.
         drivers: list[str] = []
+        plugin_id = ""
         if self.plugins is not None and cfg.mentions.enabled:
-            drivers = self.plugins.drivers_for(profile.plugin)
+            plugin_id = self.plugins.resolve(profile.plugin, exe)
+            drivers = self.plugins.drivers_for(plugin_id)
             if drivers:
                 # Named, not just counted: whether a mention works comes down to
                 # what the sim actually calls someone, and "session has 1
@@ -129,13 +131,13 @@ class Worker(threading.Thread):
             "drivers": drivers,
             # Read alongside the drivers, from the same moment in the session.
             "vocabulary": (
-                self.plugins.vocabulary_for(profile.plugin)
+                self.plugins.vocabulary_for(plugin_id)
                 if drivers and cfg.mentions.add_names_to_vocabulary else []
             ),
             "positions": (
-                self.plugins.positions_for(profile.plugin)
+                self.plugins.positions_for(plugin_id)
                 if drivers and self.plugins.settings_for(
-                    profile.plugin, profile.plugin_settings).get("positions")
+                    plugin_id, profile.plugin_settings).get("positions")
                 else {}
             ),
         }

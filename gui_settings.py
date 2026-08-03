@@ -396,7 +396,7 @@ def _profile_vars(app, parent, profile) -> dict:
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
                           values=[name for _id, name in choices], state="readonly")
     _row(parent, 10, "Session plugin", picker,
-         "reads who is in the session, for name accuracy and mentions")
+         "reads who is in the session; automatic picks by executable name")
 
     # The assigned plugin's own options, rebuilt whenever the choice changes so
     # only the relevant ones are ever on screen.
