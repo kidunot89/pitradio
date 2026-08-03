@@ -21,9 +21,9 @@ import ctypes
 import logging
 import time
 
-import keys
-import winapi
-from winapi import (
+from pitradio import keys
+from pitradio.input import winapi
+from pitradio.input.winapi import (
     INPUT,
     INPUT_KEYBOARD,
     INPUTUNION,

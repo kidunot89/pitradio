@@ -17,9 +17,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-import paths
-import speech
-import state as state_mod
+from pitradio import paths, speech
+from pitradio import state as state_mod
 
 log = logging.getLogger(__name__)
 
@@ -379,7 +378,7 @@ class KeyCapture:
 
     def _captured(self, modifiers, vk) -> None:
         """Called on the hook thread; marshals back to Tk before touching it."""
-        import keys
+        from pitradio import keys
 
         spec = keys.format_combo(modifiers, vk)
         self.app.root.after(0, lambda: self._apply(spec))
@@ -813,7 +812,7 @@ def build_profiles_tab(app) -> None:
     right.pack(side="left", fill="both", expand=True, padx=(10, 0))
     fields, profile_footer = scrolling_pane(right, padding=10)
 
-    import config as config_mod
+    from pitradio import config as config_mod
 
     app.v_profile = _profile_vars(app, fields, config_mod.Profile())
     ttk.Button(profile_footer, text="Save profile",
@@ -950,7 +949,7 @@ def build_vocabulary_tab(app) -> None:
 
 def refresh_runtime_vocabulary(app) -> None:
     """Show what plugins currently supply, and the prompt Whisper would get."""
-    import mentions as mentions_mod
+    from pitradio import mentions as mentions_mod
 
     lines: list[str] = []
     if app.plugins is None:
@@ -970,7 +969,7 @@ def refresh_runtime_vocabulary(app) -> None:
         active = next(
             (terms for _n, terms, _s in app.plugins.vocabularies() if terms), [])
         hint = mentions_mod.vocabulary_hint(active, cfg.mentions.max_names)
-        import speech as speech_mod
+        from pitradio import speech as speech_mod
 
         effective = speech_mod._join_prompt(cfg.whisper.initial_prompt, hint) or ""
         lines.append("-- prompt Whisper receives --")
@@ -1095,7 +1094,7 @@ def _play_test_cue(app) -> None:
     object via store.load(), so after the first save the test would play on
     whatever device was configured at startup, forever.
     """
-    import config as config_mod
+    from pitradio import config as config_mod
 
     saved = app.store.config.cues
     cue = config_mod.CueConfig(

@@ -28,8 +28,8 @@ import pytest
 @pytest.fixture
 def joystick(monkeypatch, stub_winapi, sdl):
     """`joystick` with the real SDL3 backend as its only backend."""
-    monkeypatch.delitem(sys.modules, "joystick", raising=False)
-    import joystick as module
+    monkeypatch.delitem(sys.modules, "pitradio.input.joystick", raising=False)
+    from pitradio.input import joystick as module
 
     # Bypass _ensure_started so the developer's own controllers, and SDL2,
     # stay out of it. The backend itself is real.
@@ -172,7 +172,7 @@ def test_capture_takes_a_press_on_any_device(joystick, pad):
 
 def test_a_hat_can_be_captured(joystick, pad):
     """A rim's D-pad is a hat, and was invisible to capture before."""
-    import sdl3input
+    from pitradio.input import sdl3input
 
     device = pad(name="Rim", buttons=10, hats=1)
 
@@ -242,7 +242,7 @@ def test_pressing_and_releasing_posts_one_cycle(joystick, pad):
 
 
 def test_a_hat_direction_works_as_a_trigger(joystick, pad):
-    import sdl3input
+    from pitradio.input import sdl3input
 
     device = pad(name="Rim", buttons=10, hats=1)
     rim = guid_of(joystick, "Rim")

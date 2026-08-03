@@ -8,10 +8,11 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 # ctypes requires _fields_/_anonymous_ to be real mutable sequences on the class.
-"winapi.py" = ["RUF012"]
+"src/pitradio/input/winapi.py" = ["RUF012"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# The app is flat modules at the repo root, not an installed package, so the
-# root has to be importable however pytest is invoked.
-pythonpath = ["."]
+# The app lives in src/ as a package; `vendor/` holds third-party modules that
+# are deliberately not dependencies. Both have to be importable however pytest
+# is invoked, without installing anything.
+pythonpath = ["src", "vendor", "."]

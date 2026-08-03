@@ -18,15 +18,16 @@ an Inno Setup installer built by CI, with a self-updater.
 ## Commands
 
 ```bash
-python pitradio.py                   # run the app (Windows, as administrator)
-python pitradio.py --check-config    # validate config, resolve every key name
-python pitradio.py --list-devices    # audio devices
-python pitradio.py --gui-only        # window with no hook/audio/model
-python pitradio.py --self-test       # import every component + open a Tk window
+python -m pitradio                   # run the app (Windows, as administrator)
+python -m pitradio --check-config    # validate config, resolve every key name
+python -m pitradio --list-devices    # audio devices
+python -m pitradio --gui-only        # window with no hook/audio/model
+python -m pitradio --self-test       # import every component + open a Tk window
 pytest -q                             # test suite (runs on any platform)
 pytest tests/test_updater.py -q       # one file
 pytest -q -k checksum                 # one case
 ruff check .                          # lint (config in pyproject.toml)
+python packaging/fetch_sdl3.py        # fetch the bundled SDL3.dll
 python packaging/build.py             # Nuitka build
 python packaging/build.py --version   # print __version__
 python packaging/make_icon.py         # regenerate packaging/icon.ico
@@ -67,6 +68,31 @@ statically instead.
 When adding tests, keep them importable without `winapi` — a test that needs
 Windows can't run in the place most of this gets developed.
 
+## Layout
+
+```
+src/pitradio/            the app, as a package
+  __init__.py            __version__, and nothing else that imports
+  __main__.py            the CLI; `python -m pitradio`
+  config paths state keys languages mentions gestures updater worker speech
+  input/                 winapi hook inject joystick sdlinput sdl3input xinput
+  ui/                    gui gui_settings gui_language tray
+  plugins/               per-sim session data
+vendor/                  third-party modules that are deliberately not deps
+packaging/               build, installer, icon, checksums, SDL3 fetch
+tests/
+```
+
+`__version__` lives in `src/pitradio/__init__.py`, not in `__main__.py`, so
+packaging and the updater can read it without importing the CLI — which drags
+in tkinter and the speech stack.
+
+`paths.install_dir()` resolves to the **repository root** from source, three
+levels up from `src/pitradio/paths.py`. Pointing it at the package directory
+puts a source run's config and logs inside the source tree and hides
+`config.default.json`, and nothing fails — it just reports "not found; using
+built-in defaults" and carries on.
+
 ## Development happens off Windows
 
 The Windows input path cannot be exercised on the development Mac. Two rules
@@ -75,7 +101,7 @@ keep as much as possible testable anyway, and both are load-bearing:
 - **`config.py`, `keys.py`, `paths.py`, `state.py`, `updater.py` must not
   import `winapi`** (nor anything that does). This is what makes
   `--check-config` work on any platform.
-- **`gui.py` and `gui_settings.py` must not import `winapi` either.** That is
+- **`ui/` must not import `winapi` either.** That is
   what makes `--gui-only` able to launch the real window locally. They reach
   Windows-only functionality through the objects passed into `App` — `hook`,
   `joystick`, `recorder`, `transcriber`, `worker` — all of which may be `None`,

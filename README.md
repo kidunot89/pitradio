@@ -345,7 +345,7 @@ Turn the check off entirely with `--no-update-check`, or in
 git clone https://github.com/kidunot89/pitradio.git
 cd pitradio
 pip install -r requirements.txt
-python pitradio.py
+python -m pitradio
 ```
 
 Run your terminal as administrator, for the reason above.
@@ -353,11 +353,11 @@ Run your terminal as administrator, for the reason above.
 Useful flags:
 
 ```bash
-python pitradio.py --check-config    # validate config.json, resolve every key name
-python pitradio.py --list-devices    # audio devices, for picking a mic
-python pitradio.py --gui-only        # open the window with no hook, audio or model
-python pitradio.py --self-test       # load every component; verifies a packaged build
-python pitradio.py --no-update-check # never contact GitHub
+python -m pitradio --check-config    # validate config.json, resolve every key name
+python -m pitradio --list-devices    # audio devices, for picking a mic
+python -m pitradio --gui-only        # open the window with no hook, audio or model
+python -m pitradio --self-test       # load every component; verifies a packaged build
+python -m pitradio --no-update-check # never contact GitHub
 ```
 
 `--check-config` and `--gui-only` also run on macOS and Linux — the config

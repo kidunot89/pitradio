@@ -104,7 +104,7 @@ def test_default_config_is_bundled(args):
 
 def test_entry_point_is_last(args):
     """Nuitka takes the script as a positional argument."""
-    assert args[-1].endswith("pitradio.py")
+    assert args[-1].endswith("src/pitradio/__main__.py")
 
 
 # -- version ------------------------------------------------------------
@@ -112,7 +112,7 @@ def test_entry_point_is_last(args):
 
 def test_version_matches_the_app():
     """A tag/__version__ mismatch makes the updater offer an endless update."""
-    app = (Path(build.__file__).parent.parent / "pitradio.py").read_text(encoding="utf-8")
+    app = (ROOT / "src" / "pitradio" / "__init__.py").read_text(encoding="utf-8")
     declared = re.search(r'^__version__\s*=\s*"([^"]+)"', app, re.MULTILINE).group(1)
     assert build.read_version() == declared
 
@@ -412,7 +412,7 @@ def test_every_sdl3_symbol_we_declare_exists():
     import re
 
     declared = set(re.findall(
-        r"lib\.(SDL_[A-Za-z0-9_]+)", (ROOT / "sdl3input.py").read_text()))
+        r"lib\.(SDL_[A-Za-z0-9_]+)", (ROOT / "src/pitradio/input/sdl3input.py").read_text()))
     assert declared, "no SDL3 symbols found in sdl3input.py"
 
     missing = sorted(declared - _pe_exports(SDL3_DLL))

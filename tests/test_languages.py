@@ -8,8 +8,7 @@ is the only place that distinction lives, so it's worth pinning.
 
 import pytest
 
-import config
-import languages
+from pitradio import config, languages
 
 # -- model resolution ----------------------------------------------------
 

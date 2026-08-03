@@ -23,17 +23,17 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parent.parent
-GUI_SOURCES = ["gui.py", "gui_settings.py"]
+GUI_SOURCES = ["src/pitradio/ui/gui.py", "src/pitradio/ui/gui_settings.py"]
 
 # Attribute on App -> module providing the object, and the class inside it.
 COLLABORATORS = {
-    "joystick": ("joystick.py", "JoystickWatcher"),
-    "hook": ("hook.py", "KeyboardHook"),
-    "worker": ("worker.py", "Worker"),
-    "recorder": ("speech.py", "Recorder"),
-    "transcriber": ("speech.py", "Transcriber"),
-    "checker": ("updater.py", "UpdateChecker"),
-    "plugins": ("plugins/__init__.py", "PluginRegistry"),
+    "joystick": ("src/pitradio/input/joystick.py", "JoystickWatcher"),
+    "hook": ("src/pitradio/input/hook.py", "KeyboardHook"),
+    "worker": ("src/pitradio/worker.py", "Worker"),
+    "recorder": ("src/pitradio/speech.py", "Recorder"),
+    "transcriber": ("src/pitradio/speech.py", "Transcriber"),
+    "checker": ("src/pitradio/updater.py", "UpdateChecker"),
+    "plugins": ("src/pitradio/plugins/__init__.py", "PluginRegistry"),
 }
 
 
@@ -99,14 +99,14 @@ def test_the_joystick_watcher_exposes_enumeration():
     Pinned separately because this is the exact regression that shipped: the
     functions existed at module level and the GUI could not reach them.
     """
-    available = _class_attributes("joystick.py", "JoystickWatcher")
+    available = _class_attributes("src/pitradio/input/joystick.py", "JoystickWatcher")
     assert {"list_devices", "describe"} <= available
 
 
 def test_every_collaborator_is_covered():
     """A new optional collaborator must be added here, or it goes unchecked."""
     init = None
-    for node in ast.walk(_tree("gui.py")):
+    for node in ast.walk(_tree("src/pitradio/ui/gui.py")):
         if isinstance(node, ast.ClassDef) and node.name == "App":
             for item in node.body:
                 if isinstance(item, ast.FunctionDef) and item.name == "__init__":
@@ -126,7 +126,7 @@ def test_every_collaborator_is_covered():
 # -- editing tabs must scroll, with Save pinned --------------------------
 
 
-TAB_SOURCES = ["gui_settings.py", "gui_language.py"]
+TAB_SOURCES = ["src/pitradio/ui/gui_settings.py", "src/pitradio/ui/gui_language.py"]
 
 
 def _tab_builders():
@@ -186,8 +186,16 @@ def test_a_tab_with_a_save_button_scrolls(source, builder):
 # Everything with a thread body, where an AttributeError surfaces as the
 # thread dying quietly rather than as a traceback anyone sees.
 SELF_CALL_SOURCES = [
-    "worker.py", "hook.py", "joystick.py", "sdlinput.py", "updater.py",
-    "speech.py", "state.py", "tray.py",
+    "src/pitradio/worker.py",
+    "src/pitradio/input/hook.py",
+    "src/pitradio/input/joystick.py",
+    "src/pitradio/input/sdlinput.py",
+    "src/pitradio/input/sdl3input.py",
+    "src/pitradio/input/xinput.py",
+    "src/pitradio/updater.py",
+    "src/pitradio/speech.py",
+    "src/pitradio/state.py",
+    "src/pitradio/ui/tray.py",
 ]
 
 
@@ -287,9 +295,17 @@ def test_every_self_call_resolves(source):
 # The modules that make --check-config and --gui-only work anywhere. Each must
 # stay importable on a machine with no Win32 at all.
 PORTABLE = [
-    "config.py", "keys.py", "paths.py", "state.py", "updater.py",
-    "languages.py", "mentions.py", "gestures.py",
-    "gui.py", "gui_settings.py", "gui_language.py",
+    "src/pitradio/config.py",
+    "src/pitradio/keys.py",
+    "src/pitradio/paths.py",
+    "src/pitradio/state.py",
+    "src/pitradio/updater.py",
+    "src/pitradio/languages.py",
+    "src/pitradio/mentions.py",
+    "src/pitradio/gestures.py",
+    "src/pitradio/ui/gui.py",
+    "src/pitradio/ui/gui_settings.py",
+    "src/pitradio/ui/gui_language.py",
 ]
 
 

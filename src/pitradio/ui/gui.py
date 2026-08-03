@@ -18,10 +18,9 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-import gui_language
-import gui_settings
-import state as state_mod
-from state import AppState
+from pitradio import state as state_mod
+from pitradio.state import AppState
+from pitradio.ui import gui_language, gui_settings
 
 log = logging.getLogger(__name__)
 
@@ -174,7 +173,7 @@ class App:
 
     def _start_tray(self) -> None:
         try:
-            import tray as tray_mod
+            from pitradio.ui import tray as tray_mod
 
             self.tray = tray_mod.Tray(self)
             self.tray.start()
@@ -287,7 +286,7 @@ class App:
 
     def save_config(self) -> None:
         """Write the config out. The worker picks it up on its next trigger."""
-        import config as config_mod
+        from pitradio import config as config_mod
 
         problems = self.store.config.validate()
         self.state.config_problems = problems
@@ -319,7 +318,7 @@ class App:
         """
         if self.hook is None:
             return
-        import keys
+        from pitradio import keys
 
         try:
             mods, vk = keys.parse_trigger(self.store.config.trigger_key)
@@ -348,7 +347,7 @@ class App:
         Event kinds come from `state`, never from `hook` — importing hook here
         would drag winapi in and break `--gui-only` off Windows.
         """
-        import keys
+        from pitradio import keys
 
         cfg = self.store.config
         if self.hook is not None:
@@ -412,7 +411,7 @@ class App:
         info = self.state.pending_update
         if info is None:
             return
-        import updater
+        from pitradio import updater
 
         if not updater.installed_via_installer():
             messagebox.showinfo(
@@ -430,7 +429,7 @@ class App:
             return
 
         def work():
-            import paths
+            from pitradio import paths
 
             try:
                 installer = updater.download(info, paths.log_dir().parent / "updates")
@@ -453,8 +452,7 @@ class App:
         import logging as logging_mod
         import os
 
-        import paths
-        import updater
+        from pitradio import paths, updater
 
         # The shim waits on this process id before touching a file, so exiting
         # promptly is part of the contract. Normal shutdown does the work —

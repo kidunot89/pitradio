@@ -12,10 +12,10 @@ give no indication why. Contributing a sim means a pull request.
 
 Two steps.
 
-**1. Write the module.** `plugins/yoursim.py`:
+**1. Write the module.** `src/pitradio/plugins/yoursim.py`:
 
 ```python
-from plugins.base import SessionPlugin
+from pitradio.plugins.base import SessionPlugin
 
 
 class YourSimPlugin(SessionPlugin):
@@ -45,7 +45,7 @@ debugs a term that keeps coming out wrong.
 A plugin can expose options, shown in the profile editor when it is assigned:
 
 ```python
-from plugins.base import PluginSetting, SessionPlugin
+from pitradio.plugins.base import PluginSetting, SessionPlugin
 
 
 class YourSimPlugin(SessionPlugin):
@@ -68,7 +68,7 @@ Override `positions()` to return `{place: driver name}` and people can say "P3"
 instead of a name. Place numbering is 1-based; skip anything unclassified rather
 than reporting it as position zero.
 
-**2. Register it.** Add the class to `BUILTIN` in `plugins/__init__.py`.
+**2. Register it.** Add the class to `BUILTIN` in `src/pitradio/plugins/__init__.py`.
 
 That's all. The profile editor picks it up automatically.
 

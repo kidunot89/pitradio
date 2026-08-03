@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import config
+from pitradio import config
 
 
 def _base() -> dict:

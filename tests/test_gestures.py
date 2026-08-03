@@ -7,7 +7,7 @@ watching the wrong thing happen.
 
 import pytest
 
-import gestures
+from pitradio import gestures
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ def test_zero_double_tap_window_sends_immediately():
 
 
 def test_gesture_timings_are_configurable():
-    import config
+    from pitradio import config
 
     cfg = config.Config.from_dict({"review": {"tap_ms": 200, "double_tap_ms": 250}})
     assert (cfg.review.tap_ms, cfg.review.double_tap_ms) == (200, 250)
@@ -146,7 +146,7 @@ def test_gesture_timings_are_configurable():
 @pytest.mark.parametrize("value", [-1, 5000, "fast", None])
 def test_absurd_gesture_timings_are_rejected(field, value):
     """A tap window of an hour makes the trigger look broken, not configurable."""
-    import config
+    from pitradio import config
 
     cfg = config.Config.from_dict({"review": {field: value}})
     assert any(f"review.{field}" in p for p in cfg.validate())

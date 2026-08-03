@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-import updater
-from state import UpdateInfo
+from pitradio import updater
+from pitradio.state import UpdateInfo
 
 # -- version comparison --------------------------------------------------
 

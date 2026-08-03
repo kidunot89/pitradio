@@ -8,8 +8,7 @@ matter more than it looks.
 
 import pytest
 
-import config
-import keys
+from pitradio import config, keys
 
 # Keys that exist on a normal keyboard and that sims rarely bind, so they work
 # as a stand-in when there is no way to send F13.
@@ -55,7 +54,7 @@ def test_changing_the_trigger_key_reaches_the_hook():
             self.config = config.Config()
 
     # Exercised without constructing a window: bind the real method to a stub.
-    import gui
+    from pitradio.ui import gui
 
     app = object.__new__(gui.App)
     app.hook = FakeHook()
@@ -82,7 +81,7 @@ def test_an_invalid_trigger_key_leaves_the_hook_alone():
         def __init__(self):
             self.config = config.Config()
 
-    import gui
+    from pitradio.ui import gui
 
     app = object.__new__(gui.App)
     app.hook = FakeHook()
@@ -95,7 +94,7 @@ def test_an_invalid_trigger_key_leaves_the_hook_alone():
 
 def test_no_hook_is_harmless():
     """--gui-only has no hook behind it."""
-    import gui
+    from pitradio.ui import gui
 
     app = object.__new__(gui.App)
     app.hook = None
@@ -118,7 +117,7 @@ def test_a_combo_trigger_reaches_the_hook_with_its_modifiers():
         def __init__(self):
             self.config = config.Config()
 
-    import gui
+    from pitradio.ui import gui
 
     app = object.__new__(gui.App)
     app.hook = FakeHook()
@@ -171,7 +170,7 @@ class _FakeApp:
 
 
 def _capture(var, *, append):
-    import gui_settings
+    from pitradio.ui import gui_settings
 
     return gui_settings.KeyCapture(_FakeApp(), var, _FakeButton(), append=append)
 
@@ -208,7 +207,7 @@ def test_a_captured_combo_is_a_valid_profile_key():
 
 
 def test_capture_restores_the_button_when_it_finishes():
-    import gui_settings
+    from pitradio.ui import gui_settings
 
     button = _FakeButton()
     capture = gui_settings.KeyCapture(

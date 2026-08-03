@@ -6,7 +6,7 @@ be tested properly rather than only in a race.
 
 import pytest
 
-import mentions
+from pitradio import mentions
 
 FIELD = ["Geoff Taylor", "Max Verstappen", "José María López", "Pato O'Ward",
          "Kamui Kobayashi", "Nick Tandy"]
@@ -151,7 +151,7 @@ def test_vocabulary_hint_of_nothing_is_empty():
 
 def test_names_precede_the_generic_vocabulary():
     """initial_prompt is truncated, so the session-specific part must come first."""
-    import speech
+    from pitradio import speech
 
     joined = speech._join_prompt("racing terms here", "Nick Tandy, Geoff Taylor")
     assert joined.index("Tandy") < joined.index("racing terms")
@@ -162,7 +162,7 @@ def test_names_precede_the_generic_vocabulary():
     [("a", "", "a"), ("", "b", "b"), ("", "", None), ("a", "b", "b. a")],
 )
 def test_prompt_joining_handles_missing_parts(base, extra, expected):
-    import speech
+    from pitradio import speech
 
     assert speech._join_prompt(base, extra) == expected
 

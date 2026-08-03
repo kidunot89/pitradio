@@ -10,9 +10,8 @@ message. These tests mostly check that misbehaving plugins are contained.
 
 import pytest
 
-import config
-import plugins
-from plugins.base import SessionPlugin
+from pitradio import config, plugins
+from pitradio.plugins.base import SessionPlugin
 
 
 class Working(SessionPlugin):
@@ -245,7 +244,7 @@ def test_the_lmu_plugin_never_creates_the_mapping():
     import ast
     from pathlib import Path
 
-    source = (Path(__file__).parent.parent / "plugins" / "lmu.py").read_text(
+    source = (Path(__file__).parent.parent / "src" / "pitradio" / "plugins" / "lmu.py").read_text(
         encoding="utf-8")
 
     # The AST, not the text: the docstring explaining this trap mentions

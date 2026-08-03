@@ -1,6 +1,6 @@
 import pytest
 
-import keys
+from pitradio import keys
 
 
 def test_plain_key():
@@ -145,7 +145,7 @@ def test_modifier_codes_are_the_generic_ones():
 
 def test_a_captured_combo_parses_back_to_a_valid_trigger():
     """End to end: what capture renders must be loadable as a trigger."""
-    import config
+    from pitradio import config
 
     rendered = keys.format_combo([0x11], keys.VK["f12"])
     cfg = config.Config()

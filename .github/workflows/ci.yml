@@ -37,7 +37,9 @@ jobs:
       - run: pytest -q
 
       - name: Validate the shipped config
-        run: python pitradio.py --check-config
+        run: python -m pitradio --check-config
+        env:
+          PYTHONPATH: src${{ runner.os == 'Windows' && ';' || ':' }}vendor
 
   build:
     name: Windows build smoke test
@@ -58,6 +60,12 @@ jobs:
           pip install nuitka
 
       # Same suite as the Linux job, on the platform that actually ships.
+      # Before pytest, not after: the SDL3 tests need the DLL and this is
+      # the only runner that has it. Fetching later would let them skip
+      # on every platform, which is how untested code ships.
+      - name: Fetch SDL3
+        run: python packaging/fetch_sdl3.py
+
       - run: pytest -q
 
       # restore + save as separate steps, deliberately. actions/cache only
@@ -71,13 +79,6 @@ jobs:
       # in it, but it changes constantly and Nuitka's cache is content-addressed
       # internally, so a coarse key hits far more often and stale entries are
       # harmless.
-      # SDL3 has no Python package that ships a Windows binary, so the DLL
-      # comes from the official libsdl-org release, verified against a
-      # pinned hash. Without it the build falls back to SDL2 and loses the
-      # devices SDL3 was added for.
-      - name: Fetch SDL3
-        run: python packaging/fetch_sdl3.py
-
       - name: Restore the Nuitka compilation cache
         uses: actions/cache/restore@v4
         with:

@@ -30,24 +30,27 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
 BUILD_DIR = ROOT / "build"
 
 # Vendored third-party modules live here rather than in site-packages. This is
 # for av_extension_modules() and the tests; Nuitka gets it via nuitka_env().
-if str(ROOT / "vendor") not in sys.path:
-    sys.path.insert(0, str(ROOT / "vendor"))
+for extra in (ROOT / "vendor", SRC):
+    if str(extra) not in sys.path:
+        sys.path.insert(0, str(extra))
 
 
 def read_version() -> str:
     """Parse __version__ out of the entry point without importing it.
 
     Importing would pull in tkinter and the rest, which the build host may not
-    have configured, and would make the build depend on the app running.
+    have configured, and would make the build depend on the app running. It
+    lives in the package __init__ rather than the CLI for the same reason.
     """
-    text = (ROOT / "pitradio.py").read_text(encoding="utf-8")
+    text = (SRC / "pitradio" / "__init__.py").read_text(encoding="utf-8")
     match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if not match:
-        raise SystemExit("could not find __version__ in pitradio.py")
+        raise SystemExit("could not find __version__ in src/pitradio/__init__.py")
     return match.group(1)
 
 
@@ -164,7 +167,7 @@ def nuitka_args(version: str) -> list[str]:
         # Plugins are registered statically in plugins/__init__.py, so
         # Nuitka can follow them -- but naming the package guarantees a
         # new sim module is bundled even before anything imports it.
-        "--include-package=plugins",
+        "--include-package=pitradio.plugins",
         # The vendored LMU struct definitions are loaded via a sys.path
         # entry at runtime, which Nuitka cannot see.
         "--include-package=pylmusharedmemory",
@@ -175,7 +178,7 @@ def nuitka_args(version: str) -> list[str]:
         "--copyright=MIT licensed",
         f"--output-dir={BUILD_DIR}",
         "--output-filename=pitradio.exe",
-        str(ROOT / "pitradio.py"),
+        str(SRC / "pitradio" / "__main__.py"),
     ]
 
     for name in av_extension_modules():
@@ -210,14 +213,15 @@ def nuitka_args(version: str) -> list[str]:
 def nuitka_env() -> dict:
     """Environment for the Nuitka subprocess.
 
-    Nuitka runs as a separate process, so adding `vendor/` to this script's
-    sys.path does nothing for it — it resolves --include-package against its
-    own import path. PYTHONPATH is how the vendored modules become findable.
+    Nuitka runs as a separate process, so adding `src/` and `vendor/` to this
+    script's sys.path does nothing for it — it resolves --include-package
+    against its own import path. PYTHONPATH is how the app package and the
+    vendored modules become findable.
     """
     env = dict(os.environ)
-    vendor = str(ROOT / "vendor")
+    extra = os.pathsep.join((str(SRC), str(ROOT / "vendor")))
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{vendor}{os.pathsep}{existing}" if existing else vendor
+    env["PYTHONPATH"] = f"{extra}{os.pathsep}{existing}" if existing else extra
     return env
 
 
@@ -318,7 +322,7 @@ def build() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the Windows binary with Nuitka.")
     parser.add_argument("--version", action="store_true",
-                        help="print the version from pitradio.py and exit")
+                        help="print the version from the package and exit")
     args = parser.parse_args()
 
     if args.version:

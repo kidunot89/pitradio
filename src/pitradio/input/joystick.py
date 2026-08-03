@@ -34,13 +34,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import sdl3input
-import sdlinput
-import winapi
+from pitradio.input import sdl3input, sdlinput, winapi
 
 # Re-exported from state so every producer of these events agrees on the
 # strings. Actions are momentary: one event on press, none on release.
-from state import (  # noqa: F401  (re-exported for callers)
+from pitradio.state import (  # noqa: F401  (re-exported for callers)
     TRIGGER_CLEAR,
     TRIGGER_DOWN,
     TRIGGER_SEND,
@@ -80,7 +78,7 @@ def _ensure_started() -> list:
     if sys.platform == "win32":
         # Imported here, not at module scope: ctypes.wintypes raises off
         # Windows, and this module has to stay importable for the tests.
-        import xinput
+        from pitradio.input import xinput
 
         candidates.append(xinput.XInputPads())
     candidates.append(LegacyPads())

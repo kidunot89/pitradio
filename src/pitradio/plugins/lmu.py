@@ -21,7 +21,7 @@ import sys
 import threading
 from pathlib import Path
 
-from plugins.base import PluginSetting, SessionPlugin
+from pitradio.plugins.base import PluginSetting, SessionPlugin
 
 log = logging.getLogger(__name__)
 

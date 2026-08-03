@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import logging
 
-from plugins.base import PluginSetting, SessionPlugin
-from plugins.lmu import LeMansUltimatePlugin
+from pitradio.plugins.base import PluginSetting, SessionPlugin
+from pitradio.plugins.lmu import LeMansUltimatePlugin
 
 log = logging.getLogger(__name__)
 

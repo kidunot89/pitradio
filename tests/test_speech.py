@@ -1,6 +1,6 @@
 import pytest
 
-import speech
+from pitradio import speech
 
 
 @pytest.mark.parametrize(

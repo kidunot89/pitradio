@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packaging"))
 
 import checksums
 
-import updater
-from state import UpdateInfo
+from pitradio import updater
+from pitradio.state import UpdateInfo
 
 
 def _artifacts(tmp_path: Path) -> dict[str, bytes]:

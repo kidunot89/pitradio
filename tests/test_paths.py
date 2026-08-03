@@ -6,7 +6,9 @@ own mtime check never sees the file it just wrote and hot-reload silently
 stops working.
 """
 
-import paths
+from pathlib import Path
+
+from pitradio import paths
 
 
 def test_source_mode_keeps_everything_beside_the_checkout(monkeypatch):
@@ -49,3 +51,22 @@ def test_falls_back_when_the_environment_is_stripped(monkeypatch):
     # Must still produce a usable absolute path rather than raising.
     assert paths.config_path().is_absolute()
     assert "pitradio" in str(paths.config_path())
+
+
+def test_a_source_run_uses_the_repository_root_not_the_package():
+    """The package moved to src/pitradio/ and this silently followed it.
+
+    Config, logs and the model cache all hang off install_dir(), and
+    config.default.json sits at the repository root — so resolving to the
+    package directory meant a source run looked for its config inside the
+    source tree and found no seed to copy. Nothing failed; it just reported
+    "not found; using built-in defaults" and carried on.
+    """
+    root = Path(__file__).parent.parent
+
+    assert paths.install_dir() == root
+    assert paths.config_path() == root / "config.json"
+    assert paths.default_config_path() == root / "config.default.json"
+    assert paths.default_config_path().exists(), (
+        "the shipped seed must be where install_dir() looks for it"
+    )

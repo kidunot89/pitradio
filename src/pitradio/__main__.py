@@ -26,12 +26,10 @@ import sys
 import threading
 import time
 
-import config as config_mod
-import paths
-import state as state_mod
-from state import AppState
-
-__version__ = "0.1.22"
+from pitradio import __version__, paths
+from pitradio import config as config_mod
+from pitradio import state as state_mod
+from pitradio.state import AppState
 
 log = logging.getLogger("pitradio")
 
@@ -135,7 +133,7 @@ def out(line: str = "") -> None:
 
 def cmd_check_config() -> int:
     """Validate the config without needing Windows, audio or a model."""
-    import keys
+    from pitradio import keys
 
     store = config_mod.ConfigStore(paths.config_path())
     cfg = store.load()
@@ -240,7 +238,7 @@ def cmd_self_test() -> int:
     # registered statically, so a build that dropped the package would import
     # `plugins` fine and simply have none.
     try:
-        import plugins as plugins_mod
+        from pitradio import plugins as plugins_mod
 
         registry = plugins_mod.PluginRegistry()
         if not registry.plugins:
@@ -260,7 +258,7 @@ def cmd_self_test() -> int:
     try:
         import tkinter
 
-        import gui
+        from pitradio.ui import gui
 
         root = tkinter.Tk()
         root.withdraw()
@@ -274,9 +272,9 @@ def cmd_self_test() -> int:
         # passed anyway because it had handed App a None.
         wiring = {}
         if sys.platform == "win32":
-            import hook as hook_mod
-            import joystick as joystick_mod
-            import keys as keys_mod
+            from pitradio import keys as keys_mod
+            from pitradio.input import hook as hook_mod
+            from pitradio.input import joystick as joystick_mod
 
             events: queue.Queue = queue.Queue()
             # Constructing these does not install the hook or start polling;
@@ -304,7 +302,7 @@ def cmd_self_test() -> int:
 
 
 def cmd_list_devices() -> int:
-    import speech
+    from pitradio import speech
 
     for kind in ("input", "output"):
         out(f"{kind} devices:")
@@ -328,7 +326,7 @@ def run_gui_only() -> int:
     """
     import tkinter as tk
 
-    import gui
+    from pitradio.ui import gui
 
     app_state = AppState()
     setup_logging(app_state, verbose=False)
@@ -356,7 +354,7 @@ def _action_keys(cfg) -> dict:
     been hand-edited, and refusing to launch over an optional key would be a
     poor trade.
     """
-    import keys
+    from pitradio import keys
 
     actions = {}
     for kind, spec in (
@@ -392,15 +390,13 @@ def _action_buttons(cfg) -> dict:
 def run(args) -> int:
     import tkinter as tk
 
-    import gui
-    import hook as hook_mod
-    import joystick as joystick_mod
-    import keys
-    import plugins as plugins_mod
-    import speech
-    import updater
-    import winapi
-    import worker as worker_mod
+    from pitradio import keys, speech, updater
+    from pitradio import plugins as plugins_mod
+    from pitradio import worker as worker_mod
+    from pitradio.input import hook as hook_mod
+    from pitradio.input import joystick as joystick_mod
+    from pitradio.input import winapi
+    from pitradio.ui import gui
 
     app_state = AppState()
     setup_logging(app_state, args.verbose)

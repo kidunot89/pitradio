@@ -26,8 +26,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-import paths
-from state import AppState, UpdateInfo
+from pitradio import paths
+from pitradio.state import AppState, UpdateInfo
 
 log = logging.getLogger(__name__)
 

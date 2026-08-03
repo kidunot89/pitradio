@@ -73,11 +73,13 @@ def _candidate_paths() -> list[Path]:
     """Where SDL3 might be, most specific first."""
     candidates: list[Path] = []
     if sys.platform == "win32":
-        # Beside the executable, where packaging/build.py places it.
+        # Beside the executable, where packaging/build.py places it in a
+        # frozen build. Checked first because a compiled module's __file__
+        # does not reliably point at a real directory.
         candidates.append(Path(sys.executable).parent / "SDL3.dll")
-        candidates.append(Path(__file__).resolve().parent / "SDL3.dll")
-        candidates.append(
-            Path(__file__).resolve().parent / "packaging" / "runtime" / "SDL3.dll")
+        # Running from source: src/pitradio/input/ -> repository root.
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        candidates.append(root / "packaging" / "runtime" / "SDL3.dll")
     elif sys.platform == "darwin":
         # Only so the binding can be exercised off Windows.
         candidates.append(Path("/opt/homebrew/lib/libSDL3.dylib"))

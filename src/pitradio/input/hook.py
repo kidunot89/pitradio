@@ -23,9 +23,9 @@ import time
 from collections.abc import Callable
 from ctypes import wintypes
 
-import keys
-import winapi
-from winapi import (
+from pitradio import keys
+from pitradio.input import winapi
+from pitradio.input.winapi import (
     HC_ACTION,
     HOOKPROC,
     KBDLLHOOKSTRUCT,
@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 # Re-exported from state so the GUI can name them without importing winapi.
 # Actions are momentary: one event on press, none on release, so the worker
 # never has to pair them up.
-from state import (  # noqa: E402,F401  (re-exported for callers)
+from pitradio.state import (  # noqa: E402,F401  (re-exported for callers)
     TRIGGER_CLEAR,
     TRIGGER_DOWN,
     TRIGGER_SEND,

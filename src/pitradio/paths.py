@@ -25,10 +25,17 @@ def is_frozen() -> bool:
 
 
 def install_dir() -> Path:
-    """Directory holding the executable (frozen) or the source checkout."""
+    """Directory holding the executable (frozen) or the source checkout.
+
+    From source this is the repository root, not the package directory. The
+    package lives at `src/pitradio/`, and resolving to it would put a source
+    run's config and logs inside the source tree — and `config.default.json`,
+    which sits at the root, would never be found to seed from.
+    """
     if is_frozen():
         return Path(sys.executable).parent
-    return Path(__file__).resolve().parent
+    # src/pitradio/paths.py -> src/pitradio -> src -> repository root
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def _windows_dir(env_var: str, fallback: str) -> Path:

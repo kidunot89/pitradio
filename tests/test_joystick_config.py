@@ -8,8 +8,7 @@ would silently mean "no trigger" rather than an error.
 import numpy as np
 import pytest
 
-import config
-import speech
+from pitradio import config, speech
 
 # -- joystick binding ----------------------------------------------------
 

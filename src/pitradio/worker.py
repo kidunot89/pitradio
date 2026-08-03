@@ -17,15 +17,14 @@ import queue
 import threading
 import time
 
-import gestures as gestures_mod
-import hook as hook_mod
-import inject
-import mentions as mentions_mod
-import speech
-import state as state_mod
-import winapi
-from config import ConfigStore, Profile
-from state import AppState, HistoryEntry
+from pitradio import gestures as gestures_mod
+from pitradio import mentions as mentions_mod
+from pitradio import speech
+from pitradio import state as state_mod
+from pitradio.config import ConfigStore, Profile
+from pitradio.input import hook as hook_mod
+from pitradio.input import inject, winapi
+from pitradio.state import AppState, HistoryEntry
 
 log = logging.getLogger(__name__)
 
@@ -446,7 +445,7 @@ class Worker(threading.Thread):
 
         if self.hook is not None:
             try:
-                import keys
+                from pitradio import keys
 
                 self.hook.set_trigger(keys.parse_key(cfg.trigger_key))
             except Exception as exc:

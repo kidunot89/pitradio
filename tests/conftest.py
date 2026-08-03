@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import sdl3input
+from pitradio.input import sdl3input
 
 ROOT = Path(__file__).parent.parent
 
@@ -41,7 +41,14 @@ def stub_winapi(monkeypatch):
     stub.INJECT_TAG = 0x50545244
     stub.foreground_exe = lambda: None
     stub.is_key_down = lambda vk: False
-    monkeypatch.setitem(sys.modules, "winapi", stub)
+
+    # Both the module entry and the attribute on the parent package: a
+    # `from pitradio.input import winapi` resolves the attribute first, so
+    # setting only sys.modules would still import the real thing.
+    import pitradio.input as input_package
+
+    monkeypatch.setitem(sys.modules, "pitradio.input.winapi", stub)
+    monkeypatch.setattr(input_package, "winapi", stub, raising=False)
     return stub
 
 

@@ -18,10 +18,9 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-import gui_settings
-import languages as languages_mod
-import paths
-import speech
+from pitradio import languages as languages_mod
+from pitradio import paths, speech
+from pitradio.ui import gui_settings
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +187,7 @@ def _remove_language(app) -> None:
 
 
 def _open_models(app) -> None:
-    import gui_settings
+    from pitradio.ui import gui_settings
 
     gui_settings.open_folder(paths.model_dir())
 

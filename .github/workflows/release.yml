@@ -40,6 +40,11 @@ jobs:
           pip install -r requirements-dev.txt
           pip install nuitka
 
+      # Before the suite: the SDL3 tests need the DLL, and a release that
+      # skipped them would be the one shipping the untested backend.
+      - name: Fetch SDL3
+        run: python packaging/fetch_sdl3.py
+
       # This workflow built and installed but never ran the suite, so a release
       # could publish with failing tests. It nearly did.
       - name: Run the test suite
@@ -56,13 +61,6 @@ jobs:
       # in it, but it changes constantly and Nuitka's cache is content-addressed
       # internally, so a coarse key hits far more often and stale entries are
       # harmless.
-      # SDL3 has no Python package that ships a Windows binary, so the DLL
-      # comes from the official libsdl-org release, verified against a
-      # pinned hash. Without it the build falls back to SDL2 and loses the
-      # devices SDL3 was added for.
-      - name: Fetch SDL3
-        run: python packaging/fetch_sdl3.py
-
       - name: Restore the Nuitka compilation cache
         uses: actions/cache/restore@v4
         with:
@@ -85,7 +83,7 @@ jobs:
           $tag = "${{ github.ref_name }}".TrimStart("v")
           $ver = "${{ steps.version.outputs.value }}"
           if ($tag -ne $ver) {
-            throw "tag $tag does not match __version__ $ver in pitradio.py"
+            throw "tag $tag does not match __version__ $ver in src/pitradio/__init__.py"
           }
 
       - name: Build with Nuitka

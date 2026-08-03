@@ -17,7 +17,7 @@ Windows; `brew install sdl3` or `apt install libsdl3-0` elsewhere.
 
 from __future__ import annotations
 
-import sdl3input
+from pitradio.input import sdl3input
 
 # -- the library actually loads ------------------------------------------
 

@@ -20,7 +20,13 @@ ROOT = Path(__file__).parent.parent
 # launch_installer fires from the window, so a missing redirect would break
 # self-update for exactly the people who installed normally.
 GUI_MODULES = [
-    "gui.py", "gui_settings.py", "tray.py", "pitradio.py", "worker.py", "updater.py",
+    "src/pitradio/ui/gui.py",
+    "src/pitradio/ui/gui_settings.py",
+    "src/pitradio/ui/gui_language.py",
+    "src/pitradio/ui/tray.py",
+    "src/pitradio/__main__.py",
+    "src/pitradio/worker.py",
+    "src/pitradio/updater.py",
 ]
 
 
@@ -64,7 +70,7 @@ def test_subprocess_calls_redirect_stdin(module):
 
 def test_shared_subprocess_kwargs_redirect_stdin():
     """The dict the GUI's schtasks calls unpack must itself redirect stdin."""
-    import gui_settings
+    from pitradio.ui import gui_settings
 
     assert gui_settings._SUBPROCESS_KWARGS["stdin"] is not None
     assert "stdin" in gui_settings._SUBPROCESS_KWARGS
@@ -75,7 +81,7 @@ def test_task_query_survives_a_broken_environment(monkeypatch):
     """A failing schtasks decides a checkbox's state. It must not be fatal."""
     import subprocess
 
-    import gui_settings
+    from pitradio.ui import gui_settings
 
     def boom(*args, **kwargs):
         raise OSError(6, "The handle is invalid")
@@ -91,7 +97,7 @@ def test_crash_logging_is_installed():
     import sys
     import threading
 
-    import pitradio
+    from pitradio import __main__ as pitradio
 
     original_hook, original_thread_hook = sys.excepthook, threading.excepthook
     try:
@@ -106,7 +112,7 @@ def test_crash_logging_is_installed():
 def test_crash_logging_records_the_traceback(caplog):
     import sys
 
-    import pitradio
+    from pitradio import __main__ as pitradio
 
     original = sys.excepthook
     try:

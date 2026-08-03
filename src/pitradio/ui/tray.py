@@ -16,7 +16,7 @@ import threading
 
 from PIL import Image, ImageDraw
 
-import state as state_mod
+from pitradio import state as state_mod
 
 log = logging.getLogger(__name__)
 
