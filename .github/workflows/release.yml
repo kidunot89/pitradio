@@ -88,14 +88,11 @@ jobs:
 
       # The self-updater refuses to run anything whose hash is not listed here,
       # so this file is not optional — a release without it cannot be installed
-      # automatically.
+      # automatically. Python rather than a shell pipeline because the format
+      # has to match what the updater parses, and that agreement is covered by
+      # tests/test_checksums.py.
       - name: Generate SHA256SUMS
-        run: |
-          cd packaging\Output
-          Get-FileHash -Algorithm SHA256 * |
-            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
-            Out-File -Encoding ascii SHA256SUMS
-          Get-Content SHA256SUMS
+        run: python packaging/checksums.py packaging/Output
 
       # Written as a file rather than an inline body so the changelog can be
       # assembled from git history. bash rather than pwsh: the quoting for a
