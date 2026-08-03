@@ -141,7 +141,7 @@ def build_settings_tab(app) -> None:
 
     defaults = ttk.LabelFrame(frame, text="Default profile", padding=10)
     defaults.pack(fill="x", pady=(10, 0))
-    app.v_default = _profile_vars(app, defaults, cfg.default_profile)
+    app.v_default = _profile_vars(app, defaults, cfg.default_profile, show_plugin=False)
 
     cues = ttk.LabelFrame(frame, text="Audio cues", padding=10)
     cues.pack(fill="x", pady=(10, 0))
@@ -352,7 +352,7 @@ def _clear_joystick(app) -> None:
     app.capture_button_button.configure(text="Press a button…")
 
 
-def _profile_vars(app, parent, profile) -> dict:
+def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     """Build the editors for one profile and return the vars keyed by field."""
     v = {
         "pre_keys": tk.StringVar(value=_keys_to_text(profile.pre_keys)),
@@ -388,9 +388,20 @@ def _profile_vars(app, parent, profile) -> dict:
     _row(parent, 9, "Text injection", mode,
          "switch to scancode if the game ignores typed text")
 
+    # Hidden on the default profile. A session plugin reads one specific game,
+    # and the default profile is what applies to games that have none — so a
+    # choice there can never take effect. Offering it anyway meant setting it
+    # in the obvious-looking place and having nothing happen.
+    if not show_plugin:
+        v["_plugin_choices"] = []
+        v["plugin"] = tk.StringVar(value=profile.plugin)
+        v["_settings_vars"] = {}
+        v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
+        return v
+
     # The plugin lives on the profile rather than the plugin declaring which
     # games it serves, so one plugin can be assigned to several games.
-    choices = app.plugins.choices() if app.plugins is not None else [("", "(none)")]
+    choices = app.plugins.choices() if app.plugins is not None else [("", "(automatic)")]
     v["_plugin_choices"] = choices
     v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
@@ -504,8 +515,9 @@ def _read_profile_vars(v: dict, profile) -> None:
     profile.type_delay_ms = _as_int(v["type_delay_ms"], profile.type_delay_ms)
     profile.max_chars = _as_int(v["max_chars"], profile.max_chars)
     profile.text_mode = v["text_mode"].get() or "unicode"
-    profile.plugin = _plugin_id(v["_plugin_choices"], v["plugin"].get())
-    profile.plugin_settings = _read_plugin_settings(v)
+    if v.get("_plugin_choices"):
+        profile.plugin = _plugin_id(v["_plugin_choices"], v["plugin"].get())
+        profile.plugin_settings = _read_plugin_settings(v)
 
 
 def _save_settings(app) -> None:

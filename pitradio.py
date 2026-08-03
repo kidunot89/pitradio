@@ -31,7 +31,7 @@ import paths
 import state as state_mod
 from state import AppState
 
-__version__ = "0.1.20"
+__version__ = "0.1.21"
 
 log = logging.getLogger("pitradio")
 
