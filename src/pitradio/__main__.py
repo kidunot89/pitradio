@@ -214,16 +214,30 @@ def cmd_self_test() -> int:
     Deliberately does not construct a WhisperModel; that would download 250MB.
     Importing is enough to catch a missing or unloadable dependency.
     """
-    windows_only = {"winapi", "hook", "inject", "worker", "joystick"}
+    windows_only = {
+        "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
+        "pitradio.worker", "pitradio.input.joystick",
+    }
     modules = [
         "tkinter", "tkinter.ttk",
         "numpy", "sounddevice", "PIL", "pystray",
         # The heavy native stack. faster_whisper pulls av in eagerly, and av's
         # extension modules import av.utils from inside compiled code.
         "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
-        "winapi", "hook", "inject", "worker", "joystick", "sdlinput",
-        "plugins", "plugins.lmu", "mentions",
-        "speech", "updater", "gui", "gui_settings", "tray",
+        # The app itself. These were still listed under their pre-restructure
+        # names — "winapi", "gui", "plugins" — so every one of them reported
+        # ModuleNotFoundError and the real modules were never checked at all.
+        "pitradio", "pitradio.config", "pitradio.paths", "pitradio.state",
+        "pitradio.keys", "pitradio.languages", "pitradio.mentions",
+        "pitradio.gestures", "pitradio.i18n", "pitradio.speech",
+        "pitradio.updater", "pitradio.worker",
+        "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
+        "pitradio.input.joystick", "pitradio.input.sdlinput",
+        "pitradio.input.sdl3input", "pitradio.input.xinput",
+        "pitradio.ui.gui", "pitradio.ui.gui_settings", "pitradio.ui.gui_language",
+        "pitradio.ui.theme", "pitradio.ui.logo", "pitradio.ui.tray",
+        "pitradio.input", "pitradio.ui",
+        "pitradio.plugins", "pitradio.plugins.base", "pitradio.plugins.lmu",
     ]
 
     failures: list[tuple[str, str]] = []
@@ -245,11 +259,11 @@ def cmd_self_test() -> int:
     # failure. SDL3 is required in a frozen build because CI fetches it; from
     # source it is optional, since a developer may not have run fetch_sdl3.py.
     for label, module_name, class_name, required in (
-        ("SDL3", "sdl3input", "Sdl3Joysticks", paths.is_frozen()),
-        ("SDL2", "sdlinput", "SdlJoysticks", True),
+        ("SDL3", "pitradio.input.sdl3input", "Sdl3Joysticks", paths.is_frozen()),
+        ("SDL2", "pitradio.input.sdlinput", "SdlJoysticks", True),
     ):
         try:
-            module = __import__(module_name)
+            module = importlib.import_module(module_name)
             probe = getattr(module, class_name)()
             if probe.start():
                 out(f"  ok      {label} loaded ({len(probe.list_devices())} controllers)")

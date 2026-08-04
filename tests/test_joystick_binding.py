@@ -437,3 +437,53 @@ def test_a_backend_that_throws_costs_only_itself(joystick, pad):
     joystick._BACKENDS.insert(0, StubBackend("Broken", {}, explode=True))
 
     assert [d.name for d in joystick.devices()] == ["Wheel"]
+
+
+# -- the backend interface -------------------------------------------------
+
+
+BACKEND_CLASSES = [
+    ("pitradio.input.sdl3input", "Sdl3Joysticks"),
+    ("pitradio.input.sdlinput", "SdlJoysticks"),
+    ("pitradio.input.xinput", "XInputPads"),
+    ("pitradio.input.joystick", "LegacyPads"),
+]
+
+# What joystick.py calls on whatever it is handed.
+REQUIRED = ("version", "start", "stop", "failure",
+            "list_devices", "guid", "button_mask", "label", "name")
+
+
+@pytest.mark.parametrize("module_name,class_name", BACKEND_CLASSES)
+def test_every_backend_implements_the_whole_interface(module_name, class_name):
+    """`SdlJoysticks` shipped without `version` and nothing noticed.
+
+    The aggregator reads `backend.version` when it enumerates, logs and
+    diagnoses, so the SDL2 path raised AttributeError the moment it was used.
+    Every test either substituted a stand-in or drove SDL3, so the one backend
+    that runs on most users' machines was the one never exercised — it took a
+    self-test on a built binary to surface it.
+    """
+    import importlib
+
+    backend = getattr(importlib.import_module(module_name), class_name)
+    missing = [name for name in REQUIRED if not hasattr(backend, name)]
+    assert not missing, f"{class_name} is missing {missing}"
+
+
+@pytest.mark.parametrize("module_name,class_name", BACKEND_CLASSES)
+def test_every_backend_names_itself_distinctly(module_name, class_name):
+    """The name is what the detector prints per device, so it has to be real."""
+    import importlib
+
+    backend = getattr(importlib.import_module(module_name), class_name)
+    assert isinstance(backend.version, str) and backend.version.strip()
+
+
+def test_the_backend_names_are_unique():
+    """Two backends sharing a name makes the detector output ambiguous."""
+    import importlib
+
+    names = [getattr(importlib.import_module(m), c).version
+             for m, c in BACKEND_CLASSES]
+    assert len(set(names)) == len(names), names

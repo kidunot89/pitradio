@@ -447,3 +447,70 @@ def test_the_package_is_compiled_rather_than_its_main_module(args):
     assert not args[-1].endswith(".py"), (
         "hand Nuitka the package directory, or the dist directory is renamed"
     )
+
+
+def test_the_self_test_checks_modules_that_exist():
+    """`--self-test` is the check that a build actually works.
+
+    Its module list still held the pre-restructure names — "winapi", "gui",
+    "plugins" — so on the built binary every one reported ModuleNotFoundError
+    and the real modules were never imported at all. The check that exists to
+    catch a broken bundle was itself broken, and it reported failures loudly
+    enough that they read as a packaging problem rather than a stale list.
+    """
+    import ast
+    import importlib.util
+
+    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text())
+    listed = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if "modules" not in targets or not isinstance(node.value, ast.List):
+            continue
+        listed = [element.value for element in node.value.elts
+                  if isinstance(element, ast.Constant)]
+    assert listed, "no module list found in cmd_self_test"
+
+    # Third-party names may legitimately be absent from a dev environment;
+    # the app's own modules may not.
+    missing = [name for name in listed
+               if name.startswith("pitradio")
+               and importlib.util.find_spec(name) is None]
+    assert not missing, f"--self-test imports modules that do not exist: {missing}"
+
+
+def test_the_self_test_covers_every_module_in_the_package():
+    """A module nobody imports is a module packaging can silently drop.
+
+    That is how v0.1.0 shipped without av.utils. Anything added under
+    src/pitradio/ has to be named here or the built binary is never asked
+    whether it survived the bundle.
+    """
+    import ast
+
+    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text())
+    listed = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.List):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "modules" in targets:
+                listed = {e.value for e in node.value.elts
+                          if isinstance(e, ast.Constant)}
+
+    package = ROOT / "src" / "pitradio"
+    actual = set()
+    for path in package.rglob("*.py"):
+        parts = path.relative_to(package.parent).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts[-1] == "__main__":
+            continue                      # it is the entry point
+        actual.add(".".join(parts))
+
+    missing = sorted(actual - listed)
+    assert not missing, (
+        f"--self-test does not import: {missing}. Add them, or packaging will "
+        f"not notice when one goes missing from the build."
+    )

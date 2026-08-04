@@ -128,6 +128,8 @@ class SdlJoysticks:
     relying on.
     """
 
+    version = "SDL2"
+
     def __init__(self) -> None:
         self._lib: ctypes.CDLL | None = None
         self._lock = threading.Lock()
