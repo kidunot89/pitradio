@@ -634,3 +634,17 @@ def test_pinning_something_unknown_falls_back_to_automatic(joystick, monkeypatch
     """A typo in config.json must not leave the app with no input at all."""
     monkeypatch.setattr(joystick, "_preferred", "sdl9")
     assert len(joystick._candidates()) > 1
+
+
+def test_a_device_with_no_inputs_is_not_listed(joystick, monkeypatch):
+    """The Windows legacy interface reports a phantom "Microsoft PC-joystick
+    driver" with 0 inputs. It cannot be bound, so listing it only invites
+    someone to try."""
+    monkeypatch.setattr(joystick, "_BACKENDS", [
+        StubBackend("Windows legacy", {
+            0: ("Microsoft PC-joystick driver", 0, "legacy:phantom"),
+            1: ("Real Wheel", 20, "wheel-guid"),
+        })])
+    monkeypatch.setattr(joystick, "_STARTED", True)
+
+    assert [d.name for d in joystick.devices()] == ["Real Wheel"]

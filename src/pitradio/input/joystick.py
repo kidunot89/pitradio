@@ -251,6 +251,12 @@ def devices() -> list[Device]:
             identity = guid or f"{backend.version}:{native}"
             if identity in seen:
                 continue
+            # A device with nothing to press cannot be bound, and listing it
+            # only invites someone to try. The Windows legacy interface
+            # reports a phantom "Microsoft PC-joystick driver" with 0 inputs
+            # on machines that have none.
+            if not buttons:
+                continue
             seen.add(identity)
             found.append(Device(
                 index=len(found), name=name, buttons=buttons, guid=guid,
