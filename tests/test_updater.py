@@ -166,11 +166,27 @@ def test_checksum_line_with_binary_marker_is_accepted(monkeypatch, tmp_path):
 
 
 
-def _script(installer="setup.exe", pid=4321, app="C:/app/pitradio.exe",
-            log="C:/logs/update-shim.log"):
+class Shim(str):
+    """The generated script, carrying the paths as the script spells them.
+
+    Assertions compare against `str(Path(...))`, never a literal — a
+    forward-slash literal passes on Linux and macOS and fails on the one
+    platform that ships. That mistake cost three CI runs before this existed.
+    """
+
+    installer: str
+    app: str
+    log: str
+
+
+def _script(installer="C:/updates/setup.exe", pid=4321,
+            app="C:/app/pitradio.exe", log="C:/logs/update-shim.log") -> Shim:
     from pathlib import Path
 
-    return updater.shim_script(Path(installer), pid, Path(app), Path(log))
+    parts = [Path(installer), Path(app), Path(log)]
+    shim = Shim(updater.shim_script(parts[0], pid, parts[1], parts[2]))
+    shim.installer, shim.app, shim.log = (str(part) for part in parts)
+    return shim
 
 
 def test_the_shim_waits_for_this_process_before_installing():
@@ -198,8 +214,8 @@ def test_the_shim_relaunches_whatever_the_outcome():
     update failed" into "the app vanished", which is strictly worse and
     indistinguishable to whoever is looking at an empty screen.
     """
-    script = _script(app="C:/app/pitradio.exe")
-    assert "Start-Process -FilePath 'C:/app/pitradio.exe'" in script
+    script = _script()
+    assert f"Start-Process -FilePath '{script.app}'" in script
     assert "$p.ExitCode -eq 0" not in script
 
 
@@ -217,8 +233,8 @@ def test_the_shim_waits_for_the_installer_to_finish():
 def test_the_shim_records_what_it_did():
     """Its output went to DEVNULL, so a failed handoff looked exactly like the
     app closing by itself — which is precisely how it was first reported."""
-    script = _script(log="C:/logs/update-shim.log")
-    assert "Start-Transcript -Path 'C:/logs/update-shim.log'" in script
+    script = _script()
+    assert f"Start-Transcript -Path '{script.log}'" in script
     assert "Stop-Transcript" in script
     assert "installer exit code:" in script
 
@@ -226,8 +242,8 @@ def test_the_shim_records_what_it_did():
 def test_the_shim_checks_the_installer_is_still_there():
     """Downloads are cleaned up between runs; a missing one must say so
     rather than failing silently at the point of no return."""
-    script = _script(installer="C:/updates/setup.exe")
-    assert "Test-Path -LiteralPath 'C:/updates/setup.exe'" in script
+    script = _script()
+    assert f"Test-Path -LiteralPath '{script.installer}'" in script
 
 
 def test_the_shim_waits_for_the_exe_to_reappear():

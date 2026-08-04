@@ -368,3 +368,35 @@ def test_portable_modules_do_not_reach_winapi(source):
     """
     chain = _reaches_winapi(source)
     assert chain is None, "import chain reaches winapi: " + " -> ".join(chain)
+
+
+# -- the tests must not assume a path separator --------------------------
+
+
+def test_no_test_asserts_against_a_hardcoded_windows_path():
+    """`Path("C:/app/x.exe")` renders as `C:\\app\\x.exe` on Windows.
+
+    So an assertion written with forward slashes passes on Linux and macOS —
+    where the whole suite normally runs — and fails on the one platform that
+    ships. This has now cost three separate CI runs: once in test_build_flags
+    on the Nuitka entry point, and twice in test_updater on the shim's paths.
+    CLAUDE.md recorded it after the first.
+
+    Build the expected string from the same Path instead of typing it.
+    """
+    import re
+
+    offenders = []
+    for path in sorted((ROOT / "tests").glob("*.py")):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            stripped = line.strip()
+            if not stripped.startswith("assert"):
+                continue
+            # A drive letter followed by a forward slash, inside a literal.
+            if re.search(r"""['"][A-Za-z]:/""", stripped):
+                offenders.append(f"{path.name}:{number}")
+
+    assert not offenders, (
+        "these assertions hardcode a POSIX separator in a Windows path and "
+        f"will fail on Windows: {offenders}"
+    )
