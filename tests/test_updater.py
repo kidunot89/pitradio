@@ -188,8 +188,7 @@ def test_the_installer_is_started_through_shellexecute(tmp_path, monkeypatch):
     # CreateProcess must not be how this happens.
     assert not hasattr(updater, "subprocess"), "the updater must not spawn processes"
     assert started["path"] == str(installer)
-    for flag in ("/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"):
-        assert flag in started["arguments"]
+    assert "/NORESTART" in started["arguments"]
 
 
 def test_a_failure_to_start_is_raised_not_swallowed(tmp_path, monkeypatch):
@@ -205,6 +204,24 @@ def test_a_failure_to_start_is_raised_not_swallowed(tmp_path, monkeypatch):
 
     with pytest.raises(OSError):
         updater.launch_installer(installer)
+
+
+def test_the_installer_is_visible(tmp_path, monkeypatch):
+    """A silent install that fails leaves nothing on screen and no exit code
+    anyone reads: the app closes, Setup does nothing, and the version simply
+    never changes. v0.1.25 and v0.1.26 both shipped that."""
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub", encoding="utf-8")
+    started = {}
+    monkeypatch.setattr(updater.os, "startfile",
+                        lambda path, **kw: started.update(kw), raising=False)
+
+    updater.launch_installer(installer)
+
+    for hidden in ("/SILENT", "/VERYSILENT", "/SUPPRESSMSGBOXES"):
+        assert hidden not in started["arguments"], (
+            f"{hidden} makes a failed update indistinguishable from no update"
+        )
 
 
 def test_setup_is_not_asked_to_close_this_app(tmp_path, monkeypatch):

@@ -208,14 +208,15 @@ produces a bug with no error message.
   holding a sub-object of the old one — a `Profile`, a `CueConfig` — goes on
   mutating an orphan that no later save writes. The edit vanishes with no
   error, which is indistinguishable from "the setting doesn't persist".
-- **The self-updater launches the installer with `os.startfile`, not
-  `subprocess.Popen`.** Popen is CreateProcess, which refuses to start a
-  `requireAdministrator` binary and fails with ERROR_ELEVATION_REQUIRED (740).
-  The installer is `PrivilegesRequired=admin`. This repo had already recorded
-  that lesson — it is why the installer's own `[Run]` entry carries
-  `shellexec` — and the updater used Popen anyway: the app exited, nothing
-  started, and nothing was logged, because Popen had succeeded at *queuing* a
-  process Windows then refused to elevate.
+- **The self-updater runs the installer *visibly*, via `os.startfile`.** Two
+  separate mistakes, both of which shipped. `/SILENT /SUPPRESSMSGBOXES` means
+  a failed install leaves no window, no dialog and no exit code anyone reads —
+  the app closes, Setup does nothing, and the version never changes, which is
+  precisely what v0.1.25 and v0.1.26 did. And `subprocess.Popen` is
+  CreateProcess, which refuses to start a `requireAdministrator` binary from a
+  non-elevated process (ERROR_ELEVATION_REQUIRED, 740); the installer is
+  `PrivilegesRequired=admin`. This repo had already recorded the second lesson
+  — it is why the installer's own `[Run]` entry carries `shellexec`.
 
 ## Reviewing before sending
 

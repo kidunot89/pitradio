@@ -156,34 +156,40 @@ def _expected_hash(info: UpdateInfo) -> str | None:
 
 
 def launch_installer(installer: Path, app: Path | None = None) -> None:
-    """Start the installer and expect the caller to exit immediately.
+    """Start the installer **visibly** and expect the caller to exit at once.
 
-    Through **ShellExecute**, not CreateProcess. The installer is built with
-    PrivilegesRequired=admin, and CreateProcess — which is what
-    subprocess.Popen calls — refuses to start a requireAdministrator binary
-    and fails with ERROR_ELEVATION_REQUIRED (740). ShellExecuteEx honours the
-    manifest and elevates instead.
+    Two decisions here, both made after an update that did nothing.
 
-    This repository already learned that once: it is why the installer's own
-    [Run] entry carries the `shellexec` flag, with a comment explaining
-    exactly this. The self-updater then went on to use Popen anyway, and
-    failed the same way — the app exited, nothing started, and no error was
-    logged because Popen had succeeded at *queuing* a process that Windows
-    then refused to elevate.
+    **Not silent.** A `/SILENT /SUPPRESSMSGBOXES` install that fails leaves no
+    window, no dialog and no exit code anyone reads — the app closes, Setup
+    does nothing, and the user is left staring at a version that did not
+    change. That is exactly what v0.1.25 and v0.1.26 did. A visible installer
+    costs one click and turns every failure in it into something on screen.
+    An unsigned build has to earn trust anyway; hiding the one moment the user
+    could see what is being installed works against that.
 
-    Relaunching afterwards is the installer's job, through a [Run] entry gated
-    on a silent install. Exiting promptly is the caller's: by the time Setup
-    has extracted itself there is nothing holding a handle.
+    **Through ShellExecute, not CreateProcess.** The installer is
+    PrivilegesRequired=admin. CreateProcess — which is what subprocess.Popen
+    calls — refuses to start a requireAdministrator binary from a process that
+    is not already elevated, failing with ERROR_ELEVATION_REQUIRED (740).
+    ShellExecuteEx honours the manifest and raises the UAC prompt instead.
+    This repository already recorded that lesson once, in the comment on the
+    installer's own [Run] entry; the updater went on to use Popen anyway.
+
+    Relaunching afterwards is the installer's job, through its postinstall
+    [Run] entry. Exiting promptly is the caller's: Setup cannot replace files
+    this process still holds open.
     """
     if not installer.exists():
         log.error("not handing off: %s is missing", installer)
         raise FileNotFoundError(installer)
 
-    arguments = "/SILENT /NORESTART /SUPPRESSMSGBOXES"
+    # /NORESTART only. No /SILENT: see above.
+    arguments = "/NORESTART"
     log.info("starting the installer via ShellExecute: %s %s", installer, arguments)
 
-    # startfile is Windows-only. Absent anywhere else, which is a hard error
-    # here rather than a silent no-op: the caller exits the app next.
+    # startfile is Windows-only. Its absence is a hard error rather than a
+    # quiet no-op, because the caller exits the application next.
     start = getattr(os, "startfile", None)
     if start is None:
         raise OSError("ShellExecute is only available on Windows")
@@ -191,8 +197,8 @@ def launch_installer(installer: Path, app: Path | None = None) -> None:
     try:
         start(str(installer), arguments=arguments)
     except OSError as exc:
-        # Worth shouting about: the caller is about to exit the application on
-        # the assumption this worked.
+        # Worth shouting about: the caller is about to close the app on the
+        # assumption this worked.
         log.error("could not start the installer: %s", exc)
         raise
 

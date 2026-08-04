@@ -67,14 +67,14 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; ShellExecuteEx honours the manifest and raises the UAC prompt instead.
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent shellexec
 
-; The self-update path. A silent install skips every postinstall entry, which
-; is why the app used to vanish after updating — Setup replaced the files and
-; nothing started them again. This entry runs only when silent, so an
-; interactive install still offers the checkbox above and does not launch twice.
+; For anyone driving Setup silently by hand. A silent install skips every
+; postinstall entry, so without this the app is replaced and never started
+; again. Runs only when silent, so an interactive install still offers the
+; checkbox above and does not launch twice.
 ;
-; This replaces a PowerShell shim that waited on the app's process id and
-; relaunched it. That shim never once ran: its transcript, written as the first
-; statement of the script, was never created on any machine.
+; The self-updater no longer installs silently — a silent install that fails
+; leaves nothing on screen and no exit code anyone reads, which is how two
+; releases in a row appeared to do nothing at all. See updater.launch_installer.
 Filename: "{app}\{#AppExe}"; Flags: nowait shellexec; Check: LaunchAfterSilentInstall
 
 [UninstallDelete]
