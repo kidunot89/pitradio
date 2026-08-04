@@ -365,7 +365,7 @@ class App:
         if self.joystick is None:
             return
         joy = self.store.config.joystick
-        self.joystick.set_binding(joy.device, joy.button, joy.guid)
+        self.joystick.set_binding(joy.device, joy.button, joy.guid, joy.name)
         if joy.button is not None:
             log.info("joystick trigger: %s button %s",
                      joy.name or f"device {joy.device}", joy.button)

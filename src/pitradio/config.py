@@ -188,6 +188,10 @@ class GuiConfig:
     # "system" follows the desktop and falls back to English when that
     # language has no catalogue yet.
     language: str = "system"
+    # The live controller readout in Settings > Trigger. Off by default: it
+    # polls every device's button state, which is cheap but pointless while
+    # you are driving.
+    debug: bool = False
 
 
 @dataclass

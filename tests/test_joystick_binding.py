@@ -487,3 +487,86 @@ def test_the_backend_names_are_unique():
     names = [getattr(importlib.import_module(m), c).version
              for m, c in BACKEND_CLASSES]
     assert len(set(names)) == len(names), names
+
+
+# -- the live readout ------------------------------------------------------
+
+
+def test_the_monitor_reports_which_buttons_are_held(joystick, pad):
+    """The trigger can only ever say "no"; this says what it can actually see."""
+    device = pad(name="Wheel", buttons=20)
+    device.press(0)
+    device.press(4)
+
+    snapshot = joystick.snapshot()
+    assert len(snapshot) == 1
+    found, held = snapshot[0]
+    assert found.name == "Wheel"
+    assert held == [1, 5]
+
+
+def test_the_monitor_says_when_a_binding_resolves_to_nothing(joystick, pad):
+    """The failure that is otherwise completely silent.
+
+    Capture does not care about identity; the trigger resolves one on every
+    poll. A binding that captured fine and then resolves to nothing looks
+    exactly like the app ignoring you.
+    """
+    pad(name="Wheel", buttons=20)
+
+    w = watcher(joystick, device=0, button=13, guid="0" * 32)
+    status = w.binding_status()
+    assert status["bound"] is True
+    assert status["resolved"] is False
+
+
+def test_the_monitor_reports_the_bound_button_being_pressed(joystick, pad):
+    device = pad(name="Wheel", buttons=20)
+    wheel = guid_of(joystick, "Wheel")
+
+    w = watcher(joystick, device=0, button=13, guid=wheel)
+    assert w.binding_status()["pressed"] is False
+
+    device.press(12)
+    assert w.binding_status()["pressed"] is True
+
+
+def test_an_unbound_trigger_says_so(joystick):
+    assert watcher(joystick).binding_status() == {"bound": False}
+
+
+# -- recovering a binding whose identity changed ---------------------------
+
+
+def test_a_binding_falls_back_to_the_device_name(joystick, pad):
+    """Some devices report a different GUID between sessions.
+
+    Anything Steam mediates especially. The binding then captures perfectly
+    and resolves to nothing on every poll afterwards, and the only symptom is
+    that pressing the button does nothing at all.
+    """
+    pad(name="Steam Controller", buttons=18)
+
+    w = watcher(joystick, device=None, button=5,
+                guid="deadbeef" * 4, name="Steam Controller")
+    resolved = w._resolve_device()
+    assert resolved is not None
+    assert resolved.name == "Steam Controller"
+
+
+def test_the_name_fallback_does_not_grab_a_different_device(joystick, pad):
+    """Better inactive than bound to whatever else happens to be plugged in."""
+    pad(name="Fanatec CSL Elite", buttons=20)
+
+    w = watcher(joystick, device=None, button=5,
+                guid="deadbeef" * 4, name="Steam Controller")
+    assert w._resolve_device() is None
+
+
+def test_the_identity_still_wins_when_it_matches(joystick, pad):
+    """Two identical wheels are only distinguishable by identity."""
+    pad(name="Wheel", buttons=20)
+    wheel = guid_of(joystick, "Wheel")
+
+    w = watcher(joystick, device=None, button=5, guid=wheel, name="Wheel")
+    assert w._resolve_device().guid == wheel

@@ -507,7 +507,8 @@ def run(args) -> int:
     # input fired -- and does not need to.
     joystick = joystick_mod.JoystickWatcher(
         events, lambda: app_state.enabled,
-        cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid)
+        cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid,
+        cfg.joystick.name)
     # Send/clear act on a message left waiting when a profile has auto-send
     # off. Armed here as well as on save, or they would only work after
     # visiting Settings once.

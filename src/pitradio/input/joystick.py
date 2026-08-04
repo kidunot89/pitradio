@@ -285,6 +285,24 @@ def diagnose() -> list[str]:
     return lines
 
 
+def held_buttons(device: Device) -> list[int]:
+    """Which of a device's buttons are down right now, 1-based.
+
+    For the live readout. The trigger path cannot report this — it only ever
+    asks about the one bit it is bound to, so when a binding is wrong it has
+    nothing to say beyond "no".
+    """
+    mask = _mask(device)
+    if not mask:
+        return []
+    return [bit + 1 for bit in range(device.buttons or 128) if mask & (1 << bit)]
+
+
+def snapshot() -> list[tuple[Device, list[int]]]:
+    """Every attached device with the buttons currently held on it."""
+    return [(device, held_buttons(device)) for device in devices()]
+
+
 def describe(index: int, button: int) -> str:
     """Human-readable binding, e.g. 'Fanatec CSL Elite - button 13 (SDL2)'.
 
@@ -319,6 +337,7 @@ class JoystickWatcher(threading.Thread):
         device: int | None = None,
         button: int | None = None,
         guid: str | None = None,
+        name: str | None = None,
     ):
         super().__init__(name="joystick", daemon=True)
         self._events = events
@@ -326,6 +345,8 @@ class JoystickWatcher(threading.Thread):
         self._device = device
         self._button = button
         self._guid = guid or ""
+        # Remembered so a binding can still be found when its identity changes.
+        self._name = name or ""
         # binding key -> the device it resolved to. Re-enumerating every
         # backend on every poll would be wasteful with three bindings.
         self._resolved: dict[str, Device] = {}
@@ -334,6 +355,7 @@ class JoystickWatcher(threading.Thread):
         self._actions: dict[str, tuple[str, int | None, int]] = {}
         self._action_held: dict[str, bool] = {}
         self._pressed = False
+        self._named_fallback_logged = False
         self._capture: Callable[[Device, int], None] | None = None
         self._baseline: dict[str, int] | None = None
         self._stop = threading.Event()
@@ -356,14 +378,44 @@ class JoystickWatcher(threading.Thread):
     def diagnose(self) -> list[str]:
         return diagnose()
 
+    def snapshot(self) -> list[tuple[Device, list[int]]]:
+        return snapshot()
+
+    def binding_status(self) -> dict:
+        """What the *bound* trigger sees right now.
+
+        The whole reason this exists: capture and the trigger take different
+        paths. Capture watches every device for an edge and does not care about
+        identity; the trigger resolves a stored identity back to a device on
+        every poll. A binding that captured fine and resolves to nothing is
+        invisible from outside — the app simply does not react.
+        """
+        if self._button is None:
+            return {"bound": False}
+
+        device = self._resolve_device()
+        mask = None if device is None else _mask(device)
+        return {
+            "bound": True,
+            "button": self._button,
+            "guid": self._guid,
+            "device": device,
+            "resolved": device is not None,
+            "readable": mask is not None,
+            "pressed": bool(mask and mask & (1 << (self._button - 1))),
+        }
+
     def set_binding(
-        self, device: int | None, button: int | None, guid: str | None = None
+        self, device: int | None, button: int | None, guid: str | None = None,
+        name: str | None = None,
     ) -> None:
         self._device, self._button = device, button
         self._guid = guid or ""
+        self._name = name or ""
         self._resolved.clear()
         self._pressed = False
         self._missing_logged = False
+        self._named_fallback_logged = False
 
     def set_actions(self, actions: dict[str, tuple[str, int | None, int]]) -> None:
         """Bind the momentary buttons: kind -> (guid, device index, button)."""
@@ -428,7 +480,25 @@ class JoystickWatcher(threading.Thread):
         return found
 
     def _resolve_device(self) -> Device | None:
-        return self._device_for(self._guid, self._device)
+        found = self._device_for(self._guid, self._device)
+        if found is not None or not self._name:
+            return found
+
+        # The identity matched nothing attached. Before giving up, try the name
+        # it was bound under: some devices — anything Steam mediates in
+        # particular — report a different GUID from one session to the next,
+        # which makes a binding capture perfectly and then resolve to nothing
+        # on every poll, with no symptom beyond the trigger doing nothing.
+        for device in devices():
+            if device.name == self._name:
+                if not self._named_fallback_logged:
+                    self._named_fallback_logged = True
+                    log.warning(
+                        "the controller bound as %r no longer reports the same "
+                        "identity (%s); matching it by name instead",
+                        self._name, self._guid or "none")
+                return device
+        return None
 
     def _poll_actions(self) -> None:
         """Momentary bindings: one event on the press edge, none on release."""

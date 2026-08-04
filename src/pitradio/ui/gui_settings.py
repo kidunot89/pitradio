@@ -285,6 +285,9 @@ def build_settings_tab(app) -> None:
             row=5, column=1, sticky="w", pady=(4, 0))
         _refresh_joystick_devices(app)
 
+    # Built whether or not joystick input is available, so it can say which.
+    _build_input_monitor(app, trigger, row=6)
+
     defaults = ttk.LabelFrame(frame, text=t("Default profile"), padding=10)
     defaults.pack(fill="x", pady=(10, 0))
     app.v_default = _profile_vars(app, defaults, cfg.default_profile, show_plugin=False)
@@ -407,6 +410,90 @@ def _joystick_label(app, joystick_cfg) -> str:
     if joystick_cfg.device is None:
         return f"button {joystick_cfg.button} (not connected)"
     return app.joystick.describe(joystick_cfg.device, joystick_cfg.button)
+
+
+# How often the live readout polls. Fast enough that a button press is not
+# missed by a human tapping it, slow enough to be invisible in a frame time.
+MONITOR_MS = 100
+
+
+def _build_input_monitor(app, parent, row: int) -> None:
+    """A live view of what the app can actually see from your controller.
+
+    "Nothing happens when I press the button" has no visible cause: capture and
+    the trigger take different paths, so a binding can capture correctly and
+    then resolve to nothing on every poll, with the app simply not reacting.
+    This turns that into something you can look at.
+
+    Off by default and only polling while it is on — it reads every device's
+    button state, which is cheap but not free, and nobody needs it running
+    while they drive.
+    """
+    app.v_monitor_on = tk.BooleanVar(value=app.store.config.gui.debug)
+    app.v_monitor = tk.StringVar(value="")
+
+    ttk.Checkbutton(
+        parent, text=t("Show live controller input"), variable=app.v_monitor_on,
+        command=lambda: _toggle_input_monitor(app),
+    ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+    app.monitor_label = ttk.Label(
+        parent, textvariable=app.v_monitor, style="Muted.TLabel",
+        font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
+        justify="left", wraplength=680)
+    app.monitor_label.grid(row=row + 1, column=0, columnspan=3, sticky="w")
+
+    if app.v_monitor_on.get():
+        _toggle_input_monitor(app)
+
+
+def _toggle_input_monitor(app) -> None:
+    timer = getattr(app, "_monitor_timer", None)
+    if timer is not None:
+        app.root.after_cancel(timer)
+        app._monitor_timer = None
+
+    if app.v_monitor_on.get():
+        _tick_input_monitor(app)
+    else:
+        app.v_monitor.set("")
+
+
+def _tick_input_monitor(app) -> None:
+    if not app.v_monitor_on.get():
+        return
+    if app.joystick is None:
+        app.v_monitor.set(t("joystick input is unavailable in this run"))
+        return
+
+    lines = []
+    try:
+        for device, held in app.joystick.snapshot():
+            pressed = ", ".join(str(b) for b in held) if held else "—"
+            lines.append(f"[{device.api}] {device.name}: {pressed}")
+        if not lines:
+            lines.append(t("no controllers visible"))
+
+        status = app.joystick.binding_status()
+        if not status.get("bound"):
+            lines.append(t("trigger button: not bound"))
+        elif not status["resolved"]:
+            # The failure that is otherwise completely silent.
+            lines.append(t("trigger button {button}: BOUND DEVICE NOT FOUND "
+                           "(guid {guid})").format(
+                button=status["button"], guid=status["guid"] or "none"))
+        elif not status["readable"]:
+            lines.append(t("trigger button {button}: device found but not "
+                           "responding").format(button=status["button"]))
+        else:
+            state = t("PRESSED") if status["pressed"] else t("up")
+            lines.append(t("trigger button {button} on {name}: {state}").format(
+                button=status["button"], name=status["device"].name, state=state))
+    except Exception as exc:
+        lines.append(f"monitor error: {exc}")
+
+    app.v_monitor.set("\n".join(lines))
+    app._monitor_timer = app.root.after(MONITOR_MS, lambda: _tick_input_monitor(app))
 
 
 def _refresh_joystick_devices(app) -> None:
@@ -825,6 +912,7 @@ def _save_settings(app) -> None:
     cfg.review.clear_key = app.v_clear_key.get().strip()
     cfg.gui.theme = _theme_mode(app.v_theme.get())
     cfg.gui.language = _language_code(app.v_language.get())
+    cfg.gui.debug = bool(app.v_monitor_on.get())
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 

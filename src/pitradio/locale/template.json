@@ -53,6 +53,7 @@
   "Startup": "",
   "Start with Windows (as administrator)": "",
   "Match the system": "",
+  "joystick input is unavailable in this run": "",
   "Button…": "",
   "Chat open delay (ms)": "",
   "raise this if the first characters go missing": "",
@@ -74,9 +75,12 @@
   "Re-send isn't available in this run.": "",
   "Updates": "",
   "Release notes": "",
+  "no controllers visible": "",
+  "trigger button: not bound": "",
   "Beep on record start and stop": "",
   "Start minimised to tray": "",
   "Save": "",
+  "Show live controller input": "",
   "Clear": "",
   "Send automatically": "",
   "off types the message and leaves it for you to send": "",
@@ -92,5 +96,10 @@
   "Check now": "",
   "Install updates automatically": "",
   "Joystick input is unavailable in this run.": "",
-  "Rescan controllers": ""
+  "Rescan controllers": "",
+  "PRESSED": "",
+  "up": "",
+  "trigger button {button}: BOUND DEVICE NOT FOUND (guid {guid})": "",
+  "trigger button {button}: device found but not responding": "",
+  "trigger button {button} on {name}: {state}": ""
 }
