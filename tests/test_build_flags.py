@@ -413,8 +413,9 @@ def test_every_sdl3_symbol_we_declare_exists():
     """
     import re
 
+    binding = (ROOT / "src" / "pitradio" / "input" / "sdl3input.py")
     declared = set(re.findall(
-        r"lib\.(SDL_[A-Za-z0-9_]+)", (ROOT / "src/pitradio/input/sdl3input.py").read_text()))
+        r"lib\.(SDL_[A-Za-z0-9_]+)", binding.read_text(encoding="utf-8")))
     assert declared, "no SDL3 symbols found in sdl3input.py"
 
     missing = sorted(declared - _pe_exports(SDL3_DLL))
@@ -461,7 +462,7 @@ def test_the_self_test_checks_modules_that_exist():
     import ast
     import importlib.util
 
-    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text())
+    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text(encoding="utf-8"))
     listed = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
@@ -490,7 +491,7 @@ def test_the_self_test_covers_every_module_in_the_package():
     """
     import ast
 
-    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text())
+    tree = ast.parse((ROOT / "src" / "pitradio" / "__main__.py").read_text(encoding="utf-8"))
     listed = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.List):

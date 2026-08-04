@@ -388,7 +388,7 @@ def test_no_test_asserts_against_a_hardcoded_windows_path():
 
     offenders = []
     for path in sorted((ROOT / "tests").glob("*.py")):
-        for number, line in enumerate(path.read_text().splitlines(), 1):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             stripped = line.strip()
             if not stripped.startswith("assert"):
                 continue
@@ -399,4 +399,29 @@ def test_no_test_asserts_against_a_hardcoded_windows_path():
     assert not offenders, (
         "these assertions hardcode a POSIX separator in a Windows path and "
         f"will fail on Windows: {offenders}"
+    )
+
+
+def test_nothing_reads_a_file_without_saying_which_encoding():
+    """`read_text()` uses the locale codec, which is cp1252 on Windows.
+
+    Every source file here is UTF-8 and most contain an em dash, so a read
+    without an encoding works on Linux and macOS and raises UnicodeDecodeError
+    on Windows. The guard directly above this one shipped with exactly that
+    bug — a check against platform-dependent tests that was itself one.
+    """
+    import re
+
+    offenders = []
+    for folder in ("tests", "src", "packaging"):
+        for path in sorted((ROOT / folder).rglob("*.py")):
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if re.search(r"\.read_text\(\s*\)", line):
+                    offenders.append(f"{path.relative_to(ROOT)}:{number}")
+
+    assert not offenders, (
+        "these read a file with the locale codec and will raise on Windows: "
+        f"{offenders}"
     )

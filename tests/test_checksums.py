@@ -31,7 +31,7 @@ def _artifacts(tmp_path: Path) -> dict[str, bytes]:
 
 def test_writes_one_line_per_artifact(tmp_path):
     _artifacts(tmp_path)
-    text = checksums.write_checksums(tmp_path).read_text()
+    text = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
 
     assert len(text.strip().splitlines()) == 2
     assert text.endswith("\n")
@@ -42,20 +42,20 @@ def test_excludes_the_checksum_file_itself(tmp_path):
     _artifacts(tmp_path)
     (tmp_path / "SHA256SUMS").write_text("stale content\n")
 
-    text = checksums.write_checksums(tmp_path).read_text()
+    text = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
     assert "SHA256SUMS" not in text
 
 
 def test_is_stable_when_run_twice(tmp_path):
     _artifacts(tmp_path)
-    first = checksums.write_checksums(tmp_path).read_text()
-    second = checksums.write_checksums(tmp_path).read_text()
+    first = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
+    second = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
     assert first == second
 
 
 def test_hashes_are_correct(tmp_path):
     payloads = _artifacts(tmp_path)
-    text = checksums.write_checksums(tmp_path).read_text()
+    text = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
 
     for name, data in payloads.items():
         assert f"{hashlib.sha256(data).hexdigest()}  {name}" in text
@@ -69,7 +69,7 @@ def test_empty_directory_is_an_error(tmp_path):
 def test_the_updater_can_verify_what_the_release_produces(tmp_path, monkeypatch):
     """End to end across the seam: workflow writes it, the app reads it."""
     payloads = _artifacts(tmp_path)
-    sums = checksums.write_checksums(tmp_path).read_text()
+    sums = checksums.write_checksums(tmp_path).read_text(encoding="utf-8")
 
     name = "pitradio-setup-0.1.0.exe"
     info = UpdateInfo(
