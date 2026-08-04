@@ -14,9 +14,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import queue
+import sys
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
+from typing import ClassVar
 
 from pitradio import i18n
 from pitradio import state as state_mod
@@ -27,6 +29,27 @@ from pitradio.ui import gui_language, gui_settings, theme
 log = logging.getLogger(__name__)
 
 POLL_MS = 100
+
+# Windows groups taskbar buttons by Application User Model ID, and takes the
+# icon for the group from whatever it believes the application to be. A Python
+# process that never sets one is identified by its host executable, so the
+# button shows the interpreter's icon and pinning it pins the interpreter.
+# Setting it before the first window exists is the whole requirement.
+APP_USER_MODEL_ID = "AxisTaylor.PitRadio"
+
+
+def _set_app_user_model_id() -> None:
+    """Claim a taskbar identity. Windows only, and never fatal."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID)
+    except Exception as exc:
+        # Costs a wrong taskbar icon, nothing more.
+        log.debug("could not set the app user model id: %s", exc)
 
 
 class App:
@@ -70,6 +93,7 @@ class App:
         # Findable from any widget, for helpers that are handed a
         # container rather than the App.
         root._pitradio_palette = self.palette
+        _set_app_user_model_id()
         self._set_window_icon()
         if store.config.gui.geometry:
             # A saved geometry can be off-screen or malformed after a monitor
@@ -91,14 +115,38 @@ class App:
     def _set_window_icon(self) -> None:
         """The mark, in the title bar and the taskbar.
 
-        Held on the instance: Tk keeps only a weak reference to a PhotoImage,
-        and a collected one leaves the default empty icon with no error.
+        Windows takes the **`.ico`** route and everything else takes
+        `iconphoto`, because on Windows they are not equivalent.
+        `iconphoto` hands Tk a single bitmap per size and Tk sets WM_ICON from
+        it; the taskbar then rescales whichever one it picked, and the button
+        shows a soft, wrongly-sized mark next to every other pin on the bar.
+        `iconbitmap(default=...)` passes a real multi-resolution ICO to
+        Windows, which picks the exact size it wants — 16px for the title bar,
+        32px for the taskbar, 256px for Alt-Tab — and draws it crisp.
+
+        `default=` matters as much as the file does: without it the icon
+        applies to this window only, and every dialog the app opens reverts to
+        the stock Tk feather.
         """
+        try:
+            from pitradio import paths
+
+            ico = paths.icon_path()
+            if sys.platform == "win32" and ico is not None:
+                self.root.iconbitmap(default=str(ico))
+                return
+        except Exception as exc:
+            # Fall through to iconphoto rather than leaving no icon at all.
+            log.debug("could not set the window icon from %s: %s", "the .ico", exc)
+
         try:
             from PIL import ImageTk
 
             from pitradio.ui import logo
 
+            # Held on the instance: Tk keeps only a weak reference to a
+            # PhotoImage, and a collected one leaves the default empty icon
+            # with no error.
             self._icons = [ImageTk.PhotoImage(logo.draw(size))
                            for size in (16, 32, 48, 256)]
             self.root.iconphoto(True, *self._icons)
@@ -117,14 +165,7 @@ class App:
         self.armed_var = tk.StringVar(value="—")
         self.last_trigger_var = tk.StringVar(value="not yet this session")
 
-        self.header = ttk.Frame(self.root, padding=(12, 10))
-        self.header.pack(fill="x")
-
-        ttk.Label(self.header, textvariable=self.status_var,
-                  style="Status.TLabel").pack(side="left")
-        ttk.Checkbutton(self.header, text=t("Enabled"), variable=self.enabled_var,
-                        command=lambda: self.set_enabled(self.enabled_var.get())
-                        ).pack(side="right")
+        self._build_header()
 
         self.warning_var = tk.StringVar(value="")
         self.warning_label = ttk.Label(
@@ -138,8 +179,8 @@ class App:
         ttk.Button(self.update_frame, text=t("Install now"),
                    command=self.install_update).pack(side="right")
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.notebook = ttk.Notebook(self.root, padding=(0, 0))
+        self.notebook.pack(fill="both", expand=True, padx=14, pady=(10, 12))
 
         self._build_status_tab()
         gui_settings.build_settings_tab(self)
@@ -152,26 +193,108 @@ class App:
 
         self.refresh_armed()
         self._refresh_warnings()
+        self._refresh_status_colour()
+
+    def _build_header(self) -> None:
+        """The band across the top: mark, wordmark, state, and the kill switch.
+
+        A card surface rather than the window colour, with a hairline under it,
+        so the chrome reads as one bar and the tabs below start a new region.
+        The old header was the word "idle" alone on a wide empty strip, which
+        gave the window nothing to identify itself with — this is the only
+        place the logo appears at all.
+        """
+        self.header = ttk.Frame(self.root, style="Header.TFrame", padding=(14, 11))
+        self.header.pack(fill="x")
+
+        left = ttk.Frame(self.header, style="Header.TFrame")
+        left.pack(side="left")
+
+        # Held on the instance: Tk keeps only a weak reference to a PhotoImage,
+        # and a collected one leaves an empty space with no error.
+        self._brand_icon = None
+        try:
+            from PIL import ImageTk
+
+            from pitradio.ui import logo
+
+            self._brand_icon = ImageTk.PhotoImage(logo.draw(26))
+            ttk.Label(left, image=self._brand_icon,
+                      style="Card.TLabel").pack(side="left", padx=(0, 9))
+        except Exception as exc:
+            # The wordmark alone still identifies the window.
+            log.debug("could not draw the header mark: %s", exc)
+
+        ttk.Label(left, text="PitRadio", style="Brand.TLabel").pack(side="left")
+        ttk.Label(left, text=self.version, style="BrandVersion.TLabel").pack(
+            side="left", padx=(7, 0), pady=(4, 0))
+
+        right = ttk.Frame(self.header, style="Header.TFrame")
+        right.pack(side="right")
+
+        ttk.Checkbutton(right, text=t("Enabled"), variable=self.enabled_var,
+                        style="Card.TCheckbutton",
+                        command=lambda: self.set_enabled(self.enabled_var.get())
+                        ).pack(side="right", padx=(14, 0))
+
+        # A dot plus a word, coloured by state. "Recording" in red at the top
+        # of the window is readable from a driving position in a way that a
+        # lowercase word in body text is not.
+        self.status_dot = ttk.Label(right, text="●", style="Card.Muted.TLabel")
+        self.status_dot.pack(side="right", padx=(0, 5))
+        self.status_label = ttk.Label(right, textvariable=self.status_var,
+                                      style="Card.Value.TLabel")
+        self.status_label.pack(side="right")
+        # Traced rather than refreshed at each call site: the dot and the word
+        # are one piece of information, and any assignment that updated only
+        # the word would leave them contradicting each other.
+        self.status_var.trace_add("write",
+                                  lambda *_: self._refresh_status_colour())
+
+        ttk.Separator(self.root, orient="horizontal").pack(fill="x")
+
+    # Status name -> the style that colours the header dot.
+    _STATUS_STYLES: ClassVar[dict[str, str]] = {
+        state_mod.STATUS_RECORDING: "Card.Recording.TLabel",
+        state_mod.STATUS_IDLE: "Card.Ok.TLabel",
+    }
+
+    def _refresh_status_colour(self) -> None:
+        """Colour the header dot for the current state.
+
+        Only the dot. Colouring the word as well makes a glance at the window
+        read two things that say one thing, and a red word beside a red dot is
+        louder than the information deserves.
+        """
+        style = "Card.Muted.TLabel"
+        if self.state.enabled:
+            style = self._STATUS_STYLES.get(self.status_var.get(),
+                                            "Card.Warn.TLabel")
+        theme.with_suppressed(lambda: self.status_dot.configure(style=style))
 
     def _build_status_tab(self) -> None:
-        frame = ttk.Frame(self.notebook, padding=12)
+        frame = ttk.Frame(self.notebook, padding=14)
         self.notebook.add(frame, text=t("Status"))
 
-        grid = ttk.Frame(frame)
-        grid.pack(fill="x")
+        card = ttk.Frame(frame, style="Card.TFrame", padding=(14, 12))
+        card.pack(fill="x")
         # Named so packaging/screenshots.py can crop to it.
-        self.status_frame = grid
+        self.status_frame = card
+
         for row, (label, var) in enumerate(
-            (("Listening for", self.armed_var),
-             ("Last trigger", self.last_trigger_var),
-             ("Focused app", self.exe_var),
-             ("Profile in use", self.profile_var),
-             ("Last message", self.last_var)),
+            ((t("Listening for"), self.armed_var),
+             (t("Last trigger"), self.last_trigger_var),
+             (t("Focused app"), self.exe_var),
+             (t("Profile in use"), self.profile_var),
+             (t("Last message"), self.last_var)),
         ):
-            ttk.Label(grid, text=f"{label}:", width=16).grid(row=row, column=0, sticky="w")
-            ttk.Label(grid, textvariable=var, foreground="#333").grid(
-                row=row, column=1, sticky="w")
-        grid.columnconfigure(1, weight=1)
+            ttk.Label(card, text=label, style="Card.Muted.TLabel",
+                      width=15).grid(row=row, column=0, sticky="w", pady=3)
+            # Value.TLabel, not a hardcoded grey: these are answers, and they
+            # were previously dimmer than the questions beside them.
+            ttk.Label(card, textvariable=var, style="Card.Value.TLabel").grid(
+                row=row, column=1, sticky="w", pady=3)
+        card.columnconfigure(1, weight=1)
 
         ttk.Label(
             frame,
@@ -179,27 +302,34 @@ class App:
                   "what's saved. If it doesn't match Settings, the change hasn't "
                   "been applied. \"Last trigger\" updates the moment a press is "
                   "detected, so you can tell input from transcription problems."),
-            foreground="#666", wraplength=880, justify="left",
-        ).pack(fill="x", pady=(10, 6))
+            style="Hint.TLabel", wraplength=880, justify="left",
+        ).pack(fill="x", pady=(9, 12))
 
-        log_frame = ttk.LabelFrame(frame, text=t("Log"), padding=6)
+        log_frame = ttk.LabelFrame(frame, text=t("Log"), padding=(10, 8))
         log_frame.pack(fill="both", expand=True)
 
-        self.log_text = tk.Text(log_frame, height=14, wrap="none", state="disabled",
+        # height=10, not 14: with expand=True the pane takes whatever is left
+        # anyway, and the larger request forced the window taller than it
+        # needed to be at its minimum size.
+        self.log_text = tk.Text(log_frame, height=10, wrap="none", state="disabled",
                                 **theme.text_options(self.palette),
-                                font=("Consolas", 9))
-        scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+                                font=theme.MONO_FONT, padx=8, pady=6)
+        # One border, not two: the LabelFrame around this already draws one,
+        # and text_options() adds a highlight ring meant for standalone panes.
+        self.log_text.configure(highlightthickness=0)
+        scroll = ttk.Scrollbar(log_frame, orient="vertical",
+                               command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
+        scroll.pack(side="right", fill="y", padx=(4, 0))
 
         buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(6, 0))
+        buttons.pack(fill="x", pady=(12, 0))
         ttk.Button(buttons, text=t("Open log folder"),
                    command=gui_settings.open_log_folder).pack(side="left")
         ttk.Button(buttons, text=t("Open config folder"),
                    command=lambda: gui_settings.open_folder(self.store.path.parent)
-                   ).pack(side="left", padx=6)
+                   ).pack(side="left", padx=8)
         ttk.Button(buttons, text=t("Quit"), command=self.quit).pack(side="right")
 
     def _start_tray(self) -> None:
@@ -233,6 +363,7 @@ class App:
         elif kind == state_mod.EV_STATUS:
             snap = self.state.snapshot()
             self.status_var.set(snap["status"])
+            self._refresh_status_colour()
             self.exe_var.set(snap["exe"] or "—")
             self.profile_var.set(snap["profile"])
             self.refresh_armed()
@@ -307,6 +438,7 @@ class App:
     def set_enabled(self, value: bool) -> None:
         self.state.set_enabled(value)
         self.enabled_var.set(value)
+        self._refresh_status_colour()
         self.store.config.enabled = value
         self.save_config()
         log.info("trigger key %s", "enabled" if value else "disabled (passing through)")

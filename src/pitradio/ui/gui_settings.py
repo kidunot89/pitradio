@@ -560,7 +560,7 @@ def _rebuild_plugin_settings(app, v: dict) -> None:
     if plugin is None or not plugin.settings:
         return
 
-    ttk.Label(frame, text=f"{plugin.name} options", foreground="#555").grid(
+    ttk.Label(frame, text=f"{plugin.name} options", style="Heading.TLabel").grid(
         row=0, column=0, columnspan=2, sticky="w", pady=(4, 2))
 
     stored = v["_plugin_settings"]
@@ -578,7 +578,7 @@ def _rebuild_plugin_settings(app, v: dict) -> None:
         v["_settings_vars"][setting.key] = (var, setting)
 
         if setting.help:
-            ttk.Label(frame, text=setting.help, foreground="#777",
+            ttk.Label(frame, text=setting.help, style="Hint.TLabel",
                       wraplength=560, justify="left").grid(
                 row=row, column=2, sticky="w", padx=(8, 0))
 
@@ -746,7 +746,7 @@ def build_profiles_tab(app) -> None:
         frame,
         text=("One profile per sim, keyed on its executable name. The Status tab "
               "shows the name of whatever is focused — that is the key to use."),
-        foreground="#666", wraplength=880, justify="left",
+        style="Hint.TLabel", wraplength=880, justify="left",
     ).pack(fill="x", pady=(0, 8))
 
     body = ttk.Frame(frame)
@@ -871,7 +871,7 @@ def build_vocabulary_tab(app) -> None:
         text=("Words Whisper should expect. Corner names, car and series terms, "
               "team mates' names — this measurably improves proper nouns. Applies "
               "on the next trigger; no model reload."),
-        foreground="#666", wraplength=880, justify="left",
+        style="Hint.TLabel", wraplength=880, justify="left",
     ).pack(fill="x", pady=(0, 8))
 
     app.vocab_text = tk.Text(frame, wrap="word", height=10,
@@ -891,7 +891,7 @@ def build_vocabulary_tab(app) -> None:
               "plugin might contribute car names, teams or commentators. Shown "
               "here because a name Whisper keeps mangling is usually a name it "
               "was never told about."),
-        foreground="#666", wraplength=860, justify="left",
+        style="Hint.TLabel", wraplength=860, justify="left",
     ).pack(fill="x", pady=(0, 6))
 
     app.runtime_vocab_text = tk.Text(session, wrap="word", height=8,
@@ -979,7 +979,7 @@ def build_audio_tab(app) -> None:
     ttk.Label(inputs,
               text="The level bar shows the signal after gain — what Whisper "
                    "actually receives. Aim for it to peak around three quarters.",
-              foreground="#777", wraplength=640, justify="left").grid(
+              style="Hint.TLabel", wraplength=640, justify="left").grid(
         row=3, column=0, columnspan=3, sticky="w")
 
     app.v_test_result = tk.StringVar(value="")
@@ -988,10 +988,10 @@ def build_audio_tab(app) -> None:
     app.test_button = ttk.Button(test_row, text=t("Record 4s and transcribe"),
                                  command=lambda: _run_mic_test(app))
     app.test_button.pack(side="left")
-    ttk.Label(test_row, textvariable=app.v_test_result, foreground="#333",
+    ttk.Label(test_row, textvariable=app.v_test_result, style="Value.TLabel",
               wraplength=560).pack(side="left", padx=10)
     ttk.Label(inputs, text=t("Nothing is typed anywhere during a test."),
-              foreground="#777").grid(row=5, column=0, columnspan=3, sticky="w")
+              style="Hint.TLabel").grid(row=5, column=0, columnspan=3, sticky="w")
 
     outputs = ttk.LabelFrame(frame, text=t("Cue output"), padding=10)
     outputs.pack(fill="x", pady=(10, 0))
@@ -1004,7 +1004,7 @@ def build_audio_tab(app) -> None:
     ttk.Label(outputs,
               text="Pick something other than your sim's output so the beep doesn't "
                    "end up in the recording.",
-              foreground="#777").grid(row=1, column=0, columnspan=3, sticky="w")
+              style="Hint.TLabel").grid(row=1, column=0, columnspan=3, sticky="w")
     ttk.Button(outputs, text=t("Play test cue"),
                command=lambda: _play_test_cue(app)).grid(
         row=2, column=1, sticky="w", pady=(8, 0))
@@ -1139,7 +1139,7 @@ def build_history_tab(app) -> None:
               "tab against what you expect.\n\n"
               "History is kept in memory only, so it starts empty every time "
               "the app launches."),
-        foreground="#777", wraplength=680, justify="left",
+        style="Hint.TLabel", wraplength=680, justify="left",
     )
 
     buttons = ttk.Frame(frame)
@@ -1149,7 +1149,7 @@ def build_history_tab(app) -> None:
         side="left", padx=6)
     ttk.Label(buttons,
               text=t("Re-send waits 3 seconds so you can focus the game first."),
-              foreground="#777").pack(side="left", padx=6)
+              style="Hint.TLabel").pack(side="left", padx=6)
 
     for entry in reversed(app.state.history):
         add_history_row(app, entry)
@@ -1226,7 +1226,7 @@ def build_updates_tab(app) -> None:
               "checksum proves the download is intact — not who produced it. "
               "Automatic installs are off by default for that reason, and are always "
               "deferred while a sim is in focus."),
-        foreground="#666", wraplength=880, justify="left",
+        style="Hint.TLabel", wraplength=880, justify="left",
     ).pack(fill="x", pady=(12, 6))
 
     notes = ttk.LabelFrame(frame, text=t("Release notes"), padding=6)

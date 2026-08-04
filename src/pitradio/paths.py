@@ -61,6 +61,21 @@ def config_path() -> Path:
     return install_dir() / "config.json"
 
 
+def icon_path() -> Path | None:
+    """The bundled .ico, or None when it is not beside us.
+
+    Windows wants a real multi-resolution ICO for the taskbar; see
+    `gui.App._set_window_icon`. Frozen builds get it from the dist root, a
+    source run from `packaging/`. Returns None rather than a missing path so
+    the caller can fall back instead of handling an exception.
+    """
+    for candidate in (install_dir() / "icon.ico",
+                      install_dir() / "packaging" / "icon.ico"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def default_config_path() -> Path:
     """The read-only seed shipped alongside the app."""
     return install_dir() / "config.default.json"

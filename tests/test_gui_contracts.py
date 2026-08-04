@@ -17,6 +17,7 @@ all.
 import ast
 import ctypes
 import logging
+import re
 import threading
 from pathlib import Path
 
@@ -408,4 +409,45 @@ def test_nothing_reads_a_file_without_saying_which_encoding():
     assert not offenders, (
         "these read a file with the locale codec and will raise on Windows: "
         f"{offenders}"
+    )
+
+
+# -- colours belong to the palette, not to call sites ---------------------
+
+
+COLOUR_OPTION = re.compile(
+    r"\b(?:foreground|background|fg|bg|selectbackground|selectforeground|"
+    r"insertbackground|highlightbackground|troughcolor)\s*=\s*[\"']#[0-9a-fA-F]{3,8}[\"']"
+)
+
+
+@pytest.mark.parametrize("filename", [
+    "src/pitradio/ui/gui.py",
+    "src/pitradio/ui/gui_settings.py",
+    "src/pitradio/ui/gui_language.py",
+    "src/pitradio/ui/tray.py",
+])
+def test_no_widget_hardcodes_a_colour(filename):
+    """Every colour comes from the palette, so dark mode is not a guess.
+
+    Eighteen labels used to carry a literal grey — `foreground="#666"` and
+    friends. In light mode they looked deliberate. In dark mode `#333` on a
+    `#16181d` window is very nearly the same colour, so the answer to every
+    question on the Status tab was rendered almost invisible, and the whole
+    window read as washed out.
+
+    Nothing raises, nothing logs, and the tests all pass, because a colour is
+    only wrong to look at. theme.py is exempt: it *is* the palette.
+    """
+    source = (ROOT / filename).read_text(encoding="utf-8")
+    offenders = [
+        f"line {i}: {line.strip()}"
+        for i, line in enumerate(source.splitlines(), 1)
+        if COLOUR_OPTION.search(line)
+    ]
+    assert not offenders, (
+        f"{filename} hardcodes colours instead of using a ttk style:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nUse a style from theme.py (Value.TLabel, Hint.TLabel, "
+          "Muted.TLabel, Heading.TLabel), or add one there."
     )

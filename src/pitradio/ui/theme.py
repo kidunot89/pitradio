@@ -90,16 +90,28 @@ PALETTES = {LIGHT: LIGHT_PALETTE, DARK: DARK_PALETTE}
 # the font alone", because ttk rejects a font of None.
 if sys.platform == "win32":
     BODY_FONT = ("Segoe UI", 10)
+    SMALL_FONT = ("Segoe UI", 9)
+    VALUE_FONT = ("Segoe UI Semibold", 10)
     HEADING_FONT = ("Segoe UI Semibold", 11)
     STATUS_FONT = ("Segoe UI Semibold", 13)
+    BRAND_FONT = ("Segoe UI Semibold", 15)
+    MONO_FONT = ("Consolas", 9)
 elif sys.platform == "darwin":
     BODY_FONT = ()
+    SMALL_FONT = ("Helvetica Neue", 11)
+    VALUE_FONT = ("Helvetica Neue", 13, "bold")
     HEADING_FONT = ("Helvetica Neue", 13, "bold")
     STATUS_FONT = ("Helvetica Neue", 15, "bold")
+    BRAND_FONT = ("Helvetica Neue", 17, "bold")
+    MONO_FONT = ("Menlo", 11)
 else:
     BODY_FONT = ()
+    SMALL_FONT = ("TkDefaultFont", 9)
+    VALUE_FONT = ("TkDefaultFont", 10, "bold")
     HEADING_FONT = ("TkDefaultFont", 11, "bold")
     STATUS_FONT = ("TkDefaultFont", 13, "bold")
+    BRAND_FONT = ("TkDefaultFont", 15, "bold")
+    MONO_FONT = ("TkFixedFont", 9)
 
 
 def system_prefers_dark() -> bool:
@@ -184,6 +196,9 @@ def apply(root, mode: str = SYSTEM) -> Palette:
     style.configure(".", **base)
 
     style.configure("TFrame", background=palette.window)
+    style.configure("Card.TFrame", background=palette.surface)
+    style.configure("Header.TFrame", background=palette.surface)
+
     style.configure("TLabel", background=palette.window, foreground=palette.text)
     style.configure("Muted.TLabel", foreground=palette.text_muted)
     style.configure("Heading.TLabel", foreground=palette.text, font=HEADING_FONT)
@@ -193,10 +208,52 @@ def apply(root, mode: str = SYSTEM) -> Palette:
     style.configure("Danger.TLabel", foreground=palette.danger)
     style.configure("Recording.TLabel", foreground=palette.recording)
 
+    # The three roles every tab needs, and the reason eighteen labels across the
+    # UI used to carry a literal "#666". Hardcoding a grey is invisible in light
+    # mode and unreadable in dark, where #333 on a #16181d window is very nearly
+    # the same colour; test_gui_contracts now fails on any literal colour under
+    # ui/. "Value" is deliberately full-contrast — it is the answer to the
+    # question the label asks, so it should not be dimmer than the question.
+    style.configure("Value.TLabel", foreground=palette.text, font=VALUE_FONT)
+    style.configure("Hint.TLabel", foreground=palette.text_muted,
+                    font=SMALL_FONT)
+    style.configure("FieldLabel.TLabel", foreground=palette.text_muted)
+
+    # On a card, which is a different background from the window. ttk has no
+    # cascade, so a label inside a Card.TFrame keeps the window colour behind
+    # its text unless it is told otherwise, and shows as a rectangle of the
+    # wrong shade.
+    for suffix in ("", "Muted.", "Heading.", "Status.", "Value.", "Hint."):
+        style.configure(f"Card.{suffix}TLabel", background=palette.surface)
+    style.configure("Card.Muted.TLabel", foreground=palette.text_muted)
+    style.configure("Card.Hint.TLabel", foreground=palette.text_muted,
+                    font=SMALL_FONT)
+    style.configure("Card.Value.TLabel", foreground=palette.text, font=VALUE_FONT)
+    style.configure("Card.Heading.TLabel", foreground=palette.text, font=HEADING_FONT)
+    style.configure("Card.Status.TLabel", foreground=palette.text, font=STATUS_FONT)
+    for name, colour in (("Ok", palette.ok), ("Warn", palette.warn),
+                         ("Danger", palette.danger),
+                         ("Recording", palette.recording)):
+        style.configure(f"Card.{name}.TLabel", background=palette.surface,
+                        foreground=colour)
+
+    # The wordmark beside the logo in the header.
+    style.configure("Brand.TLabel", background=palette.surface,
+                    foreground=palette.text, font=BRAND_FONT)
+    style.configure("BrandVersion.TLabel", background=palette.surface,
+                    foreground=palette.text_muted, font=SMALL_FONT)
+
+    # Window-coloured, not surface. ttk has no cascade: a plain ttk.Label
+    # inside a group box keeps whatever background its own style says, so
+    # filling the frame with `surface` left every label sitting in a
+    # window-coloured rectangle. Fixing it the other way would mean a Card.
+    # variant at several hundred call sites. The frame earns its shape from
+    # the border and the heading weight instead.
     style.configure("TLabelframe", background=palette.window,
-                    bordercolor=palette.border, relief="solid", borderwidth=1)
+                    bordercolor=palette.border, relief="solid", borderwidth=1,
+                    lightcolor=palette.border, darkcolor=palette.border)
     style.configure("TLabelframe.Label", background=palette.window,
-                    foreground=palette.text_muted)
+                    foreground=palette.text, font=HEADING_FONT)
 
     style.configure("TEntry", fieldbackground=palette.surface,
                     foreground=palette.text, bordercolor=palette.border,
@@ -210,7 +267,9 @@ def apply(root, mode: str = SYSTEM) -> Palette:
 
     style.configure("TButton", background=palette.surface_alt,
                     foreground=palette.text, bordercolor=palette.border,
-                    focusthickness=1, padding=(10, 5), relief="flat")
+                    lightcolor=palette.surface_alt, darkcolor=palette.surface_alt,
+                    focusthickness=1, padding=(12, 6), relief="flat",
+                    borderwidth=1)
     style.map("TButton",
               background=[("active", palette.border), ("disabled", palette.window)],
               foreground=[("disabled", palette.text_muted)])
@@ -222,28 +281,106 @@ def apply(root, mode: str = SYSTEM) -> Palette:
                           ("disabled", palette.surface_alt)],
               foreground=[("disabled", palette.text_muted)])
 
+    # indicatorcolor is the box's *fill*, and clam draws the tick in the
+    # foreground colour on top of it. Leaving indicatorforeground alone gives
+    # a dark tick on a dark-red fill, which reads as a smudged glyph rather
+    # than a checkmark — which is exactly how the Enabled box looked.
     style.configure("TCheckbutton", background=palette.window,
-                    foreground=palette.text, focuscolor=palette.accent)
+                    foreground=palette.text, focuscolor=palette.accent,
+                    indicatorcolor=palette.surface,
+                    indicatorforeground=palette.accent_text,
+                    indicatorrelief="flat", indicatormargin=(0, 0, 6, 0),
+                    padding=(2, 3))
     style.map("TCheckbutton",
               background=[("active", palette.window)],
               indicatorcolor=[("selected", palette.accent),
-                              ("!selected", palette.surface)])
+                              ("active", palette.surface_alt),
+                              ("!selected", palette.surface)],
+              indicatorforeground=[("selected", palette.accent_text)])
+    style.configure("Card.TCheckbutton", background=palette.surface)
+    style.map("Card.TCheckbutton", background=[("active", palette.surface)])
 
+    # borderwidth=0 on the notebook itself: clam draws a sunken frame around
+    # the page area, and a 3D bevel around flat content is the other half of
+    # what made this look like a 1998 dialog.
     style.configure("TNotebook", background=palette.window,
-                    bordercolor=palette.border, tabmargins=(6, 4, 6, 0))
+                    bordercolor=palette.window, borderwidth=0,
+                    tabmargins=(0, 6, 0, 0))
     style.configure("TNotebook.Tab", background=palette.window,
-                    foreground=palette.text_muted, padding=(14, 7),
-                    bordercolor=palette.border)
+                    foreground=palette.text_muted, padding=(16, 9),
+                    bordercolor=palette.window, borderwidth=0,
+                    lightcolor=palette.window, darkcolor=palette.window)
     style.map("TNotebook.Tab",
-              background=[("selected", palette.surface)],
-              foreground=[("selected", palette.text)])
+              background=[("selected", palette.surface),
+                          ("active", palette.surface_alt)],
+              foreground=[("selected", palette.text),
+                          ("active", palette.text)],
+              lightcolor=[("selected", palette.surface)],
+              darkcolor=[("selected", palette.surface)],
+              expand=[("selected", (0, 0, 0, 0))])
 
     style.configure("TSeparator", background=palette.border)
-    style.configure("TScrollbar", background=palette.surface_alt,
-                    troughcolor=palette.window, bordercolor=palette.border,
-                    arrowcolor=palette.text_muted)
-    style.configure("Horizontal.TProgressbar", background=palette.accent,
-                    troughcolor=palette.surface_alt, bordercolor=palette.border)
+
+    # Arrowless, flat, and no border: clam's default scrollbar has stepper
+    # buttons at both ends and a raised bevel, which is the single most dated
+    # thing on screen next to a modern window. The layout has to be replaced
+    # to drop the arrows — configure() alone cannot remove an element.
+    #
+    # Both orientations are named explicitly. Configuring bare "TScrollbar"
+    # looks like it works and does not: ttk resolves the orientation-prefixed
+    # style first, and the log pane kept its stepper arrows for exactly that
+    # reason.
+    for orient in ("Vertical", "Horizontal"):
+        with_suppressed(lambda o=orient: style.layout(
+            f"{o}.TScrollbar",
+            [(f"{o}.Scrollbar.trough", {
+                "sticky": "ns" if o == "Vertical" else "ew",
+                "children": [(f"{o}.Scrollbar.thumb",
+                              {"expand": "1", "sticky": "nswe"})],
+            })],
+        ))
+        style.configure(f"{orient}.TScrollbar",
+                        background=palette.border,
+                        troughcolor=palette.window,
+                        bordercolor=palette.window,
+                        lightcolor=palette.border, darkcolor=palette.border,
+                        borderwidth=0, relief="flat",
+                        arrowsize=0, width=10)
+        style.map(f"{orient}.TScrollbar",
+                  background=[("active", palette.text_muted),
+                              ("disabled", palette.window)])
+    # lightcolor and darkcolor are the bevel clam draws on trough and bar.
+    # Left at their defaults they are near-white, which is why the level meter
+    # and the gain slider showed up as a pale beige strip in a dark window —
+    # the two widgets that most obviously had never been themed.
+    # Both the bare and the orientation-prefixed names. A widget created
+    # without an explicit `orient=` does not always resolve to the prefixed
+    # style, and configuring only "Horizontal.TProgressbar" left the level
+    # meter drawing clam's default cream trough in a dark window.
+    for name in ("TProgressbar", "Horizontal.TProgressbar",
+                 "Vertical.TProgressbar"):
+        style.configure(name, background=palette.accent,
+                        troughcolor=palette.surface_alt,
+                        bordercolor=palette.border,
+                        lightcolor=palette.accent, darkcolor=palette.accent,
+                        borderwidth=0, thickness=10)
+
+    # `background` is the slider thumb's fill, not the widget's backdrop.
+    # Leaving it at the window colour with an accent bevel drew the thumb as a
+    # hollow red outline rather than a grip.
+    # light/dark are the trough's bevel here, not the thumb's — setting them
+    # to the accent outlined the whole track in red.
+    for name in ("TScale", "Horizontal.TScale", "Vertical.TScale"):
+        style.configure(name, background=palette.accent,
+                        troughcolor=palette.surface_alt,
+                        bordercolor=palette.border,
+                        lightcolor=palette.border, darkcolor=palette.border,
+                        borderwidth=0)
+        style.map(name,
+                  background=[("active", palette.recording),
+                              ("disabled", palette.border)],
+                  lightcolor=[("active", palette.recording)],
+                  darkcolor=[("active", palette.recording)])
 
     style.configure("Treeview", background=palette.surface,
                     fieldbackground=palette.surface, foreground=palette.text,

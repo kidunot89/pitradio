@@ -36,7 +36,7 @@ def build_language_tab(app) -> None:
               "every language Whisper knows, and English additionally has a dedicated build "
               "that is more accurate at the same size. Pick a size per language "
               "— a second language often wants a larger model than English."),
-        foreground="#666", wraplength=880, justify="left",
+        style="Hint.TLabel", wraplength=880, justify="left",
     ).pack(fill="x", pady=(0, 10))
 
     body = ttk.Frame(frame)
@@ -84,18 +84,18 @@ def build_language_tab(app) -> None:
         right,
         text=("Only one language is active at a time. The others stay configured "
               "and downloaded, so switching is instant."),
-        foreground="#777", wraplength=220, justify="left",
+        style="Hint.TLabel", wraplength=220, justify="left",
     ).pack(anchor="w")
 
     sizes = "\n".join(
         f"  {name}: {size} — {note}"
         for name, (size, note) in languages_mod.SIZES.items()
     )
-    ttk.Label(right, text=f"Download sizes:\n{sizes}", foreground="#777",
+    ttk.Label(right, text=f"Download sizes:\n{sizes}", style="Hint.TLabel",
               justify="left", wraplength=220).pack(anchor="w", pady=(10, 0))
 
     app.v_language_status = tk.StringVar(value="")
-    ttk.Label(frame, textvariable=app.v_language_status, foreground="#333",
+    ttk.Label(frame, textvariable=app.v_language_status, style="Value.TLabel",
               wraplength=880, justify="left").pack(fill="x", pady=(10, 0))
 
     buttons = footer

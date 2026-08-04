@@ -10,6 +10,7 @@ Nothing catches that except asking the widget what colour it ended up.
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,8 @@ from pitradio import config as config_mod
 from pitradio import paths
 from pitradio import state as state_mod
 from pitradio.ui import theme
+
+ROOT = Path(__file__).parent.parent
 
 
 @pytest.fixture
@@ -189,3 +192,37 @@ def test_valid_themes_are_accepted(mode):
 def test_an_unknown_theme_is_reported(mode):
     cfg = config_mod.Config.from_dict({"gui": {"theme": mode}})
     assert any("gui.theme" in p for p in cfg.validate())
+
+
+def test_the_palette_defines_every_style_the_gui_asks_for(root):
+    """A style name with no configure() behind it is not an error in ttk.
+
+    The widget simply renders with clam's defaults, which in a dark window is
+    a light grey box — the same look-at-it-only failure as a hardcoded colour,
+    with nothing raised and nothing logged. Checked against a real styled Tk
+    rather than by grepping theme.py, because these styles are built in loops
+    and a grep would pass on a name that is never actually configured.
+    """
+    import re
+    from tkinter import ttk
+
+    sources = ["src/pitradio/ui/gui.py", "src/pitradio/ui/gui_settings.py",
+               "src/pitradio/ui/gui_language.py"]
+    used = set()
+    for name in sources:
+        used |= set(re.findall(
+            r'style="([A-Za-z.]+\.T[A-Za-z]+)"',
+            (ROOT / name).read_text(encoding="utf-8")))
+    assert used, "no ttk styles found in the GUI sources"
+
+    theme.apply(root, theme.DARK)
+    style = ttk.Style(root)
+    undefined = sorted(
+        name for name in used
+        if not style.lookup(name, "foreground")
+        and not style.lookup(name, "background")
+    )
+    assert not undefined, (
+        "used in the GUI but never configured in theme.py, so these render "
+        f"with clam's defaults: {', '.join(undefined)}"
+    )

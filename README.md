@@ -81,17 +81,57 @@ swallowed so binding Enter doesn't also do something behind the window.
 
 ### Binding a wheel or gamepad button
 
-Use **[JoyToKey](https://joytokey.net/)**, or your wheel's own software, to map
-a button to F13. PitRadio then sees it as an ordinary keypress, and everything
-below about keys applies unchanged.
+PitRadio does **not** read wheels or gamepads directly. Map the button to a
+keyboard key first, with **[JoyToKey](https://joytokey.net/)** — free to try,
+about $7 to register, and the standard tool for this in sim racing. PitRadio
+then sees an ordinary keypress and everything above applies unchanged.
 
-PitRadio does **not** read controllers itself. It did, through four backends —
-SDL3, SDL2, XInput and the Windows multimedia API — and between them they still
-could not reliably read a Fanatec rim or a Steam Controller, because both are
-claimed by software that will not share the device. Reading them anyway meant
-taking the controller away from Steam and from the game, which is worse than
-not supporting it. JoyToKey solves the same problem at the layer that owns it,
-and PitRadio's keyboard hook has always worked.
+**Step by step:**
+
+1. **Install and open JoyToKey.** Your wheel, rim, button box or pad appears in
+   the device list on the right. If several are listed, pick the one whose
+   buttons light up when you press them.
+2. **Create a profile** (or use `Default`). JoyToKey applies whichever profile
+   is selected, so if you keep one per sim, remember to select it.
+3. **Find the button row.** Press the button you want to talk with — JoyToKey
+   highlights the matching `Button N` row as you press. This is the reliable
+   way to identify it; wheel rims rarely number their buttons the way the
+   driver does.
+4. **Double-click that row**, choose the **Keyboard** tab, click into the first
+   box and press **F13**.
+
+   If your keyboard has no F13 key — almost none do — JoyToKey lets you pick it
+   from the dropdown list instead of pressing it. F13 is the default because no
+   sim binds it, so it can never also do something in the game.
+5. **Click OK, then leave JoyToKey running.** It has to be running for the
+   mapping to work. Its tray icon is enough; the window can be closed.
+6. **Check it in PitRadio.** Open the **Status** tab and press the button. The
+   **Last trigger** row stamps the time the moment the press is seen. If it
+   updates, the mapping works and the rest is just Settings.
+
+**If the button does nothing:**
+
+- **Is JoyToKey still running?** Closing it to the tray is fine; quitting it is
+  not.
+- **Is the right profile selected?** JoyToKey only applies the highlighted one.
+- **Is the sim eating the button?** Unbind it in the sim, or pick a button the
+  sim does not use. JoyToKey passes the button through to the game as well as
+  sending the key.
+- **Run both as administrator.** PitRadio's installed build self-elevates. If
+  JoyToKey is not elevated, Windows will not let its synthetic keypresses reach
+  an elevated PitRadio, and nothing happens with no error at all.
+- **Does the key work from the keyboard?** Bind the trigger to something you
+  can actually press, like `scrolllock`, and test that first. That separates a
+  JoyToKey problem from a PitRadio one.
+
+**Why not read the controller directly?** PitRadio used to, through four
+backends — SDL3, SDL2, XInput and the Windows multimedia API. Between them they
+still could not reliably read a Fanatec rim (79 inputs enumerated, no button
+press ever reported) or a Steam Controller, because both are held by software
+that will not share the device. The only way to see a Steam Controller at all
+was to take it away from Steam, which breaks the owner's own shortcuts. A
+dictation app has no business seizing your wheel. JoyToKey solves it at the
+layer that actually owns the device, and the keyboard hook has always worked.
 
 To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
 choices: present on most keyboards, rarely bound by sims.

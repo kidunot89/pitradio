@@ -126,6 +126,10 @@ def nuitka_args(version: str) -> list[str]:
         # without this manifest UIPI discards everything it sends, silently.
         "--windows-uac-admin",
         f"--windows-icon-from-ico={ROOT / 'packaging' / 'icon.ico'}",
+        # Also as a data file, not only embedded in the exe. The window asks
+        # Windows to use it directly at runtime -- iconbitmap() needs a path on
+        # disk, and cannot read the exe's own resource section.
+        f"--include-data-files={ROOT / 'packaging' / 'icon.ico'}=icon.ico",
         "--include-data-files="
         f"{ROOT / 'config.default.json'}=config.default.json",
         # Native payloads standalone mode misses on its own.

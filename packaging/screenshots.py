@@ -219,8 +219,8 @@ def capture(app, root, name: str, tab: str, attribute: str | None, pad: int) -> 
 
 
 def main() -> int:
+    from pitradio import __version__, paths
     from pitradio import config as config_mod
-    from pitradio import paths
     from pitradio import state as state_mod
     from pitradio.ui import gui
 
@@ -235,7 +235,7 @@ def main() -> int:
 
     root = tk.Tk()
     root.geometry(f"{WINDOW[0]}x{WINDOW[1]}+20+20")
-    app = gui.App(root, store, state_mod.AppState(), "", use_tray=False)
+    app = gui.App(root, store, state_mod.AppState(), __version__, use_tray=False)
     populate(app)
     root.update()
     with contextlib.suppress(tk.TclError):
