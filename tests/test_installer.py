@@ -92,3 +92,23 @@ def test_app_id_is_stable():
 def test_architecture_is_64bit(script):
     """ctranslate2 and PyAV ship 64-bit binaries only."""
     assert "x64" in (_directive(script, "ArchitecturesAllowed") or "")
+
+
+def test_a_silent_install_relaunches_the_app():
+    """A silent install skips every postinstall entry, which is why the app
+    vanished after updating: Setup replaced the files and nothing started them
+    again. The self-updater relies on this entry."""
+    text = (Path(__file__).parent.parent / "packaging" / "pitradio.iss").read_text(
+        encoding="utf-8")
+    run = [line for line in text.splitlines()
+           if line.startswith("Filename:") and "{#AppExe}" in line]
+
+    silent = [line for line in run if "WizardSilent" in line]
+    assert silent, "no [Run] entry gated on WizardSilent"
+    assert "skipifsilent" not in silent[0], (
+        "the silent entry must not also skip when silent"
+    )
+    # And the interactive one must still skip, or an attended install launches
+    # the app twice.
+    interactive = [line for line in run if "WizardSilent" not in line]
+    assert interactive and "skipifsilent" in interactive[0]

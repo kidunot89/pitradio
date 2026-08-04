@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
@@ -157,101 +156,36 @@ def _expected_hash(info: UpdateInfo) -> str | None:
     return None
 
 
-def shim_script(installer: Path, pid: int, app: Path, log_path: Path) -> str:
-    """PowerShell that waits for us to exit, installs, then relaunches.
-
-    The obvious approach — start the installer with /CLOSEAPPLICATIONS and let
-    it shut us down — does not work. That uses the Windows Restart Manager,
-    which needs the target application to register with it and answer shutdown
-    requests. A tkinter app does neither, so Setup stalls on "Closing
-    applications" and asks the user what to do. That is what v0.1.13 did on the
-    first real self-update.
-
-    Inverting it removes the problem: PitRadio exits first, and by the time the
-    installer touches a file there is nothing holding one. Waiting on the PID
-    rather than sleeping a fixed interval matters — shutdown has a model to
-    unload and four threads to join, and a guessed delay would be a race.
-
-    Written to a **file** rather than passed with `-Command`. A command string
-    is flattened into one argument by subprocess, quoted by Windows, then
-    re-parsed by PowerShell — three chances for a path or a `$` to be mangled,
-    and the whole thing ran with its output discarded, so a failure looked
-    exactly like "the app just closed".
-
-    Everything it does is transcribed to `log_path`, because a handoff nobody
-    can see is a handoff nobody can fix.
-    """
-    return f"""\
-$ErrorActionPreference = 'Continue'
-Start-Transcript -Path '{log_path}' -Force | Out-Null
-Write-Output "installer : {installer}"
-Write-Output "relaunch  : {app}"
-Write-Output "waiting on: pid {pid}"
-
-Wait-Process -Id {pid} -Timeout 120 -ErrorAction SilentlyContinue
-Write-Output "pitradio has exited"
-
-if (-not (Test-Path -LiteralPath '{installer}')) {{
-    Write-Output "ERROR: the installer is not there any more"
-    Stop-Transcript | Out-Null
-    exit 1
-}}
-
-$p = Start-Process -FilePath '{installer}' `
-    -ArgumentList '/SILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
-Write-Output "installer exit code: $($p.ExitCode)"
-
-# Relaunch whatever the outcome. If the install failed, the previous build is
-# still installed and still works — leaving the user with nothing on screen is
-# strictly worse than running the version they already had.
-for ($i = 0; $i -lt 15; $i++) {{
-    if (Test-Path -LiteralPath '{app}') {{ break }}
-    Start-Sleep -Milliseconds 400
-}}
-if (Test-Path -LiteralPath '{app}') {{
-    Write-Output "relaunching"
-    Start-Process -FilePath '{app}'
-}} else {{
-    Write-Output "ERROR: {app} is missing after the install"
-}}
-Stop-Transcript | Out-Null
-"""
-
-
 def launch_installer(installer: Path, app: Path | None = None) -> None:
-    """Hand off to the installer and expect the caller to exit immediately.
+    """Start the installer and expect the caller to exit immediately.
 
-    We already run elevated, so the shim and the installer inherit that and no
-    second UAC prompt appears.
+    Directly — no shim. A PowerShell script that waited on this process id and
+    relaunched the app afterwards *never once ran*: its transcript, written as
+    the script's very first statement, was never created on any machine that
+    tried it, across every release that shipped it. Meanwhile every successful
+    self-update this app has ever performed used a plain direct launch.
+
+    So the two jobs the shim existed for are done elsewhere. Exiting promptly
+    is this function's caller's responsibility, and by the time Setup has
+    extracted itself and reached the file phase there is nothing left holding a
+    handle. Relaunching afterwards belongs to the installer, which knows when
+    it has finished — a [Run] entry gated on WizardSilent, because a silent
+    install skips every postinstall entry and that is why the app used to
+    vanish after updating.
+
+    We already run elevated, so the installer inherits it and no second UAC
+    prompt appears.
     """
-    if app is None:
-        app = Path(sys.executable)
-
     if not installer.exists():
         log.error("not handing off: %s is missing", installer)
         raise FileNotFoundError(installer)
-
-    logs = paths.log_dir()
-    logs.mkdir(parents=True, exist_ok=True)
-    script = logs / "update-shim.ps1"
-    transcript = logs / "update-shim.log"
-    script.write_text(shim_script(installer, os.getpid(), app, transcript),
-                      encoding="utf-8")
 
     creation_flags = 0
     if sys.platform == "win32":
         creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
-    command = [
-        "powershell", "-NoProfile", "-NonInteractive",
-        # A .ps1 will not run under the default Restricted policy, and this
-        # one is written by us seconds earlier rather than fetched.
-        "-ExecutionPolicy", "Bypass",
-        "-WindowStyle", "Hidden",
-        "-File", str(script),
-    ]
-    log.info("handing off to %s", " ".join(command))
-    log.info("shim transcript will be at %s", transcript)
+    command = [str(installer), "/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"]
+    log.info("starting the installer: %s", " ".join(command))
 
     subprocess.Popen(
         command,
@@ -266,7 +200,7 @@ def launch_installer(installer: Path, app: Path | None = None) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    log.info("update handed off; exiting so the installer can replace this build")
+    log.info("installer started; exiting so it can replace this build")
 
 
 class UpdateChecker(threading.Thread):

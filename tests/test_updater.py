@@ -166,112 +166,14 @@ def test_checksum_line_with_binary_marker_is_accepted(monkeypatch, tmp_path):
 
 
 
-class Shim(str):
-    """The generated script, carrying the paths as the script spells them.
-
-    Assertions compare against `str(Path(...))`, never a literal — a
-    forward-slash literal passes on Linux and macOS and fails on the one
-    platform that ships. That mistake cost three CI runs before this existed.
-    """
-
-    installer: str
-    app: str
-    log: str
-
-
-def _script(installer="C:/updates/setup.exe", pid=4321,
-            app="C:/app/pitradio.exe", log="C:/logs/update-shim.log") -> Shim:
+def test_the_installer_is_started_directly(tmp_path, monkeypatch):
+    """No shim. The PowerShell one never ran on any machine that tried it —
+    its transcript, written as the script's first statement, was never
+    created — while every successful self-update used a direct launch."""
     from pathlib import Path
 
-    parts = [Path(installer), Path(app), Path(log)]
-    shim = Shim(updater.shim_script(parts[0], pid, parts[1], parts[2]))
-    shim.installer, shim.app, shim.log = (str(part) for part in parts)
-    return shim
-
-
-def test_the_shim_waits_for_this_process_before_installing():
-    """Setup cannot replace a file this process still holds open.
-
-    /CLOSEAPPLICATIONS would be the obvious alternative and does not work: it
-    drives the Restart Manager, which needs the app to register and answer, and
-    a tkinter app does neither. v0.1.13 shipped that and stalled on a dialog.
-    """
-    script = _script(pid=4321)
-    assert "Wait-Process -Id 4321" in script
-    assert script.index("Wait-Process") < script.index("Start-Process -FilePath")
-
-
-def test_the_shim_does_not_ask_setup_to_close_anything():
-    script = _script()
-    assert "/CLOSEAPPLICATIONS" not in script
-    assert "/RESTARTAPPLICATIONS" not in script
-
-
-def test_the_shim_relaunches_whatever_the_outcome():
-    """A failed install leaves the previous build installed and working.
-
-    Relaunching only on success — which is what this used to do — turns "the
-    update failed" into "the app vanished", which is strictly worse and
-    indistinguishable to whoever is looking at an empty screen.
-    """
-    script = _script()
-    assert f"Start-Process -FilePath '{script.app}'" in script
-    assert "$p.ExitCode -eq 0" not in script
-
-
-def test_the_shim_suppresses_dialogs():
-    script = _script()
-    for flag in ("/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"):
-        assert flag in script
-
-
-def test_the_shim_waits_for_the_installer_to_finish():
-    """Without -Wait the relaunch would race the file copy."""
-    assert "-Wait" in _script()
-
-
-def test_the_shim_records_what_it_did():
-    """Its output went to DEVNULL, so a failed handoff looked exactly like the
-    app closing by itself — which is precisely how it was first reported."""
-    script = _script()
-    assert f"Start-Transcript -Path '{script.log}'" in script
-    assert "Stop-Transcript" in script
-    assert "installer exit code:" in script
-
-
-def test_the_shim_checks_the_installer_is_still_there():
-    """Downloads are cleaned up between runs; a missing one must say so
-    rather than failing silently at the point of no return."""
-    script = _script()
-    assert f"Test-Path -LiteralPath '{script.installer}'" in script
-
-
-def test_the_shim_waits_for_the_exe_to_reappear():
-    """The installer replaces it, so for a moment it is not there."""
-    assert "Start-Sleep" in _script()
-
-
-def test_the_handoff_refuses_a_missing_installer(tmp_path):
-    """Better a visible error than exiting the app for nothing."""
-    from pathlib import Path
-
-    import pytest
-
-    with pytest.raises(FileNotFoundError):
-        updater.launch_installer(tmp_path / "not-there.exe", Path("app.exe"))
-
-
-def test_the_shim_runs_from_a_file_not_a_command_string(tmp_path, monkeypatch):
-    """A command string is flattened by subprocess, quoted by Windows, then
-    re-parsed by PowerShell — three chances to mangle a path, with the output
-    discarded so nothing says it happened."""
-    from pathlib import Path
-
-    from pitradio import paths
-
-    monkeypatch.setattr(paths, "log_dir", lambda: tmp_path)
-    installer = tmp_path / "setup.exe"
-    installer.write_text("stub")
+    installer = tmp_path / "pitradio-setup-9.9.9.exe"
+    installer.write_text("stub", encoding="utf-8")
 
     spawned = {}
     monkeypatch.setattr(updater.subprocess, "Popen",
@@ -279,10 +181,54 @@ def test_the_shim_runs_from_a_file_not_a_command_string(tmp_path, monkeypatch):
 
     updater.launch_installer(installer, Path("C:/app/pitradio.exe"))
 
-    assert "-File" in spawned["cmd"]
-    assert "-Command" not in spawned["cmd"]
-    assert (tmp_path / "update-shim.ps1").exists()
-    # Restricted is the default policy and would refuse to run a .ps1.
-    assert "Bypass" in spawned["cmd"]
-    # The GUI has invalid standard handles when launched from a shortcut.
-    assert spawned["kw"]["stdin"] is updater.subprocess.DEVNULL
+    assert spawned["cmd"][0] == str(installer)
+    assert "powershell" not in " ".join(spawned["cmd"]).lower()
+
+
+def test_the_installer_is_told_to_be_silent(tmp_path, monkeypatch):
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub", encoding="utf-8")
+    spawned = {}
+    monkeypatch.setattr(updater.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.update(cmd=cmd))
+
+    updater.launch_installer(installer)
+
+    for flag in ("/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"):
+        assert flag in spawned["cmd"]
+
+
+def test_setup_is_not_asked_to_close_this_app(tmp_path, monkeypatch):
+    """/CLOSEAPPLICATIONS drives the Restart Manager, which needs the target to
+    register and answer shutdown requests. A tkinter app does neither, so Setup
+    stalls on "Closing applications" behind a dialog. v0.1.13 shipped that."""
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub", encoding="utf-8")
+    spawned = {}
+    monkeypatch.setattr(updater.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.update(cmd=cmd))
+
+    updater.launch_installer(installer)
+    assert "/CLOSEAPPLICATIONS" not in spawned["cmd"]
+
+
+def test_all_three_streams_are_redirected(tmp_path, monkeypatch):
+    """A GUI build launched from a shortcut has invalid standard handles, and
+    inheriting them fails process creation with [WinError 6]."""
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub", encoding="utf-8")
+    spawned = {}
+    monkeypatch.setattr(updater.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.update(kw=kw))
+
+    updater.launch_installer(installer)
+    for stream in ("stdin", "stdout", "stderr"):
+        assert spawned["kw"][stream] is updater.subprocess.DEVNULL
+
+
+def test_a_missing_installer_is_refused(tmp_path):
+    """Better a visible error than exiting the app for nothing."""
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        updater.launch_installer(tmp_path / "not-there.exe")
