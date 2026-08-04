@@ -295,3 +295,23 @@ def test_a_detection_failure_still_leaves_a_usable_config(seeding, monkeypatch):
     cli.seed_config()
     assert target.exists()
     assert config.load(target).validate() == []
+
+
+def test_the_os_default_does_not_override_an_explicit_setting(monkeypatch):
+    """Windows-only ordering bug, found by CI and invisible everywhere else.
+
+    `GetUserDefaultUILanguage` was consulted before the environment, so on
+    Windows it always won. Nothing caught it locally because these variables
+    are normally unset there, so the two never disagreed — the branch only
+    ever ran with nothing to lose to.
+    """
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+
+    calls = []
+
+    def record(default="en"):
+        calls.append(default)
+        return "en"
+
+    # Whatever the OS says, an explicit LC_ALL is a stated preference.
+    assert languages.system_language() == "de"

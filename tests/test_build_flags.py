@@ -104,7 +104,9 @@ def test_default_config_is_bundled(args):
 
 def test_entry_point_is_last(args):
     """Nuitka takes the script as a positional argument."""
-    assert args[-1].endswith("src/pitradio/__main__.py")
+    # Compared as a Path, not a string: the same assertion spelled with
+    # forward slashes passes everywhere except the one platform that ships.
+    assert Path(args[-1]).parts[-3:] == ("src", "pitradio", "__main__.py")
 
 
 # -- version ------------------------------------------------------------

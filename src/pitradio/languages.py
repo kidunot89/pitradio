@@ -137,10 +137,21 @@ def system_language(default: str = "en") -> str:
     import os
 
     candidates: list[str] = []
+
+    # Explicit environment first, on every platform. Someone who sets LC_ALL
+    # has stated a preference; the OS default is only a default. Putting the
+    # Windows call first made it unconditional there, because these variables
+    # are usually unset on Windows and so never got a chance to disagree —
+    # which also meant this precedence was untested until CI ran it.
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        value = os.environ.get(name)
+        if value:
+            candidates.append(value.split(":")[0])
+
     if sys.platform == "win32":
-        # The UI language, not the formatting locale — LANG is rarely set on
-        # Windows and the formatting locale follows the region, so a British
-        # user with a US regional format would otherwise be misread.
+        # The UI language, not the formatting locale: the formatting locale
+        # follows the region, so a British user with a US number format would
+        # otherwise be misread.
         try:
             import ctypes
 
@@ -151,11 +162,6 @@ def system_language(default: str = "en") -> str:
                 candidates.append(buffer.value)
         except Exception:
             pass
-
-    for name in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
-        value = os.environ.get(name)
-        if value:
-            candidates.append(value.split(":")[0])
 
     try:
         current = locale.getlocale()[0]
