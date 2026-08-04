@@ -91,6 +91,7 @@ def populate(app) -> None:
     import time
 
     from pitradio import state as state_mod
+    from pitradio.ui import gui_settings
 
     app.state.set_context("le mans ultimate.exe", "le mans ultimate.exe")
     app.state.set_status(state_mod.STATUS_IDLE)
@@ -113,6 +114,40 @@ def populate(app) -> None:
         app.log_text.insert("end", f"20:14:07 INFO    worker: {entry}\n")
         app.log_text.configure(state="disabled")
     app.log_text.see("end")
+
+    # The History tab is a table, and a screenshot of an empty table with four
+    # column headings tells a reader nothing about what lands in it. Rows are
+    # inserted through the same call the worker makes, so this is the real
+    # widget with real entries rather than a drawing of one.
+    #
+    # The last one is deliberately a message that was transcribed but not
+    # sent: that is what the "Sent" column exists to distinguish, and with
+    # every row reading "yes" the column looks like decoration.
+    # An empty Release notes pane is a large grey rectangle documenting
+    # nothing. Written through the widget, not faked: this is what a pending
+    # update actually looks like.
+    app.notes_text.configure(state="normal")
+    app.notes_text.insert("1.0",
+        "PitRadio 0.1.28\n\n"
+        "- Wheel and gamepad buttons are mapped through JoyToKey rather than\n"
+        "  read directly. See the README for the setup.\n"
+        "- The self-updater now runs the installer visibly, so a failed\n"
+        "  update can no longer look like nothing happening.\n"
+        "- Window styling: readable values in dark mode, and the taskbar\n"
+        "  icon is the app's own rather than a rescaled bitmap.\n")
+    app.notes_text.configure(state="disabled")
+
+    now = time.time()
+    for offset, exe, text, typed in (
+        (95.0, "le mans ultimate.exe", "@G.Taylor box this lap", True),
+        (62.0, "le mans ultimate.exe", "yellow flag in sector two", True),
+        (34.0, "le mans ultimate.exe", "pitting this lap for fronts", True),
+        (11.0, "le mans ultimate.exe", "sorry about that", False),
+    ):
+        gui_settings.add_history_row(app, state_mod.HistoryEntry(
+            when=now - offset, exe=exe, profile=exe, text=text, typed=typed,
+            transcribe_seconds=0.42, total_seconds=2.31,
+        ))
 
 
 def _looks_like_a_desktop(image) -> bool:

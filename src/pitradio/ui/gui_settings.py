@@ -1232,7 +1232,11 @@ def build_updates_tab(app) -> None:
     notes = ttk.LabelFrame(frame, text=t("Release notes"), padding=6)
     notes.pack(fill="both", expand=True)
     app.notes_text = tk.Text(notes, wrap="word", height=12, state="disabled",
+                             padx=8, pady=6,
                              **theme.text_options(app.palette))
+    # One border, not two: the LabelFrame already draws one, and
+    # text_options() adds a highlight ring meant for a standalone pane.
+    app.notes_text.configure(highlightthickness=0)
     app.notes_text.pack(fill="both", expand=True)
 
 
