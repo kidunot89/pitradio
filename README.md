@@ -18,6 +18,8 @@ wheel's own software) and PitRadio sees it as an ordinary key.
 > by adding a profile, which takes about a minute — see
 > [Adding your sim](#adding-your-sim).
 
+![The PitRadio window](docs/images/window.png)
+
 ---
 
 ## Install
@@ -410,6 +412,8 @@ English racing terms, and a prompt in the wrong language works against you.
 ---
 
 ## Updates
+
+![Updates](docs/images/updates.png)
 
 PitRadio checks GitHub for new releases and can install them itself. Automatic
 installs are **off by default**, and always deferred while a sim is in focus —

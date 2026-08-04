@@ -129,6 +129,35 @@ def _looks_like_a_desktop(image) -> bool:
     return len(colours) > 1500
 
 
+def _scroll_into_view(target) -> None:
+    """Bring a widget inside a scrolling pane into the visible area.
+
+    The Settings tab scrolls, so a section far enough down is simply not on
+    screen — and cropping to it then yields whatever *is* at those coordinates.
+    The Appearance shot came out as a 45px sliver of the footer's Save button,
+    which is the kind of thing that looks like a capture bug rather than a
+    scroll position.
+    """
+    widget, canvas = target, None
+    while True:
+        parent = widget.winfo_parent()
+        if not parent:
+            return
+        widget = widget._nametowidget(parent)
+        if widget.winfo_class() == "Canvas":
+            canvas = widget
+            break
+
+    body = next((child for child in canvas.winfo_children()), None)
+    if body is None or not body.winfo_height():
+        return
+
+    offset = target.winfo_rooty() - body.winfo_rooty()
+    # A little above the target, so it does not sit flush against the edge.
+    canvas.yview_moveto(max(0.0, (offset - 12) / body.winfo_height()))
+    canvas.update_idletasks()
+
+
 def capture(app, root, name: str, tab: str, attribute: str | None, pad: int) -> Path:
     for tab_id in app.notebook.tabs():
         if app.notebook.tab(tab_id, "text") == tab:
@@ -141,6 +170,10 @@ def capture(app, root, name: str, tab: str, attribute: str | None, pad: int) -> 
     root.update_idletasks()
 
     target = root if attribute is None else getattr(app, attribute, None)
+    if target is not None and target is not root:
+        _scroll_into_view(target)
+        root.update()
+        root.update_idletasks()
     if target is None:
         raise SystemExit(
             f"{name}: App has no attribute {attribute!r} to crop to. "
