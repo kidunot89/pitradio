@@ -165,56 +165,108 @@ def test_checksum_line_with_binary_marker_is_accepted(monkeypatch, tmp_path):
 # -- the installer handoff -----------------------------------------------
 
 
-def test_the_shim_waits_for_this_process_before_installing():
-    """Inno's /CLOSEAPPLICATIONS cannot close a tkinter app.
 
-    That uses the Windows Restart Manager, which needs the target to register
-    and answer shutdown requests. PitRadio does neither, so v0.1.13's first
-    real self-update stalled on "Closing applications" with a dialog. Exiting
-    first removes the problem entirely.
-    """
+def _script(installer="setup.exe", pid=4321, app="C:/app/pitradio.exe",
+            log="C:/logs/update-shim.log"):
     from pathlib import Path
 
-    installer = Path("C:/tmp/setup.exe")
-    command = updater.shim_command(installer, 4321, Path("C:/app/pitradio.exe"))
+    return updater.shim_script(Path(installer), pid, Path(app), Path(log))
 
-    assert "Wait-Process -Id 4321" in command
-    assert command.index("Wait-Process") < command.index(str(installer)), (
-        "the installer must not start until this process has exited")
+
+def test_the_shim_waits_for_this_process_before_installing():
+    """Setup cannot replace a file this process still holds open.
+
+    /CLOSEAPPLICATIONS would be the obvious alternative and does not work: it
+    drives the Restart Manager, which needs the app to register and answer, and
+    a tkinter app does neither. v0.1.13 shipped that and stalled on a dialog.
+    """
+    script = _script(pid=4321)
+    assert "Wait-Process -Id 4321" in script
+    assert script.index("Wait-Process") < script.index("Start-Process -FilePath")
 
 
 def test_the_shim_does_not_ask_setup_to_close_anything():
-    """Setup closes nothing now, so those flags would only reintroduce the stall."""
-    from pathlib import Path
-
-    command = updater.shim_command(Path("setup.exe"), 1, Path("app.exe"))
-    assert "/CLOSEAPPLICATIONS" not in command
-    assert "/RESTARTAPPLICATIONS" not in command
+    script = _script()
+    assert "/CLOSEAPPLICATIONS" not in script
+    assert "/RESTARTAPPLICATIONS" not in script
 
 
-def test_the_shim_relaunches_only_on_success():
-    """A failed install should leave the old build in place, not start it."""
-    from pathlib import Path
+def test_the_shim_relaunches_whatever_the_outcome():
+    """A failed install leaves the previous build installed and working.
 
-    # Rendered through Path, not written literally: Windows turns forward
-    # slashes into backslashes, so a hardcoded path only matches on one OS.
-    app = Path("C:/app/pitradio.exe")
-    command = updater.shim_command(Path("setup.exe"), 1, app)
-
-    assert "$p.ExitCode -eq 0" in command
-    assert command.index("ExitCode") < command.index(str(app))
+    Relaunching only on success — which is what this used to do — turns "the
+    update failed" into "the app vanished", which is strictly worse and
+    indistinguishable to whoever is looking at an empty screen.
+    """
+    script = _script(app="C:/app/pitradio.exe")
+    assert "Start-Process -FilePath 'C:/app/pitradio.exe'" in script
+    assert "$p.ExitCode -eq 0" not in script
 
 
 def test_the_shim_suppresses_dialogs():
-    """Nothing is watching: the app has exited by the time Setup runs."""
-    from pathlib import Path
-
-    assert "/SUPPRESSMSGBOXES" in updater.shim_command(
-        Path("setup.exe"), 1, Path("app.exe"))
+    script = _script()
+    for flag in ("/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"):
+        assert flag in script
 
 
 def test_the_shim_waits_for_the_installer_to_finish():
     """Without -Wait the relaunch would race the file copy."""
+    assert "-Wait" in _script()
+
+
+def test_the_shim_records_what_it_did():
+    """Its output went to DEVNULL, so a failed handoff looked exactly like the
+    app closing by itself — which is precisely how it was first reported."""
+    script = _script(log="C:/logs/update-shim.log")
+    assert "Start-Transcript -Path 'C:/logs/update-shim.log'" in script
+    assert "Stop-Transcript" in script
+    assert "installer exit code:" in script
+
+
+def test_the_shim_checks_the_installer_is_still_there():
+    """Downloads are cleaned up between runs; a missing one must say so
+    rather than failing silently at the point of no return."""
+    script = _script(installer="C:/updates/setup.exe")
+    assert "Test-Path -LiteralPath 'C:/updates/setup.exe'" in script
+
+
+def test_the_shim_waits_for_the_exe_to_reappear():
+    """The installer replaces it, so for a moment it is not there."""
+    assert "Start-Sleep" in _script()
+
+
+def test_the_handoff_refuses_a_missing_installer(tmp_path):
+    """Better a visible error than exiting the app for nothing."""
     from pathlib import Path
 
-    assert "-Wait" in updater.shim_command(Path("setup.exe"), 1, Path("app.exe"))
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        updater.launch_installer(tmp_path / "not-there.exe", Path("app.exe"))
+
+
+def test_the_shim_runs_from_a_file_not_a_command_string(tmp_path, monkeypatch):
+    """A command string is flattened by subprocess, quoted by Windows, then
+    re-parsed by PowerShell — three chances to mangle a path, with the output
+    discarded so nothing says it happened."""
+    from pathlib import Path
+
+    from pitradio import paths
+
+    monkeypatch.setattr(paths, "log_dir", lambda: tmp_path)
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub")
+
+    spawned = {}
+    monkeypatch.setattr(updater.subprocess, "Popen",
+                        lambda cmd, **kw: spawned.update(cmd=cmd, kw=kw))
+
+    updater.launch_installer(installer, Path("C:/app/pitradio.exe"))
+
+    assert "-File" in spawned["cmd"]
+    assert "-Command" not in spawned["cmd"]
+    assert (tmp_path / "update-shim.ps1").exists()
+    # Restricted is the default policy and would refuse to run a .ps1.
+    assert "Bypass" in spawned["cmd"]
+    # The GUI has invalid standard handles when launched from a shortcut.
+    assert spawned["kw"]["stdin"] is updater.subprocess.DEVNULL

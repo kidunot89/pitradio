@@ -157,31 +157,65 @@ def _expected_hash(info: UpdateInfo) -> str | None:
     return None
 
 
-def shim_command(installer: Path, pid: int, app: Path) -> str:
+def shim_script(installer: Path, pid: int, app: Path, log_path: Path) -> str:
     """PowerShell that waits for us to exit, installs, then relaunches.
 
     The obvious approach — start the installer with /CLOSEAPPLICATIONS and let
     it shut us down — does not work. That uses the Windows Restart Manager,
     which needs the target application to register with it and answer shutdown
     requests. A tkinter app does neither, so Setup stalls on "Closing
-    applications" and asks the user what to do. That is exactly what v0.1.13
-    did on the first real self-update.
+    applications" and asks the user what to do. That is what v0.1.13 did on the
+    first real self-update.
 
     Inverting it removes the problem: PitRadio exits first, and by the time the
     installer touches a file there is nothing holding one. Waiting on the PID
     rather than sleeping a fixed interval matters — shutdown has a model to
     unload and four threads to join, and a guessed delay would be a race.
 
-    /RESTARTAPPLICATIONS is gone with it: it only restarts what Setup itself
-    closed, and Setup no longer closes anything. The shim relaunches instead,
-    and only if the install succeeded.
+    Written to a **file** rather than passed with `-Command`. A command string
+    is flattened into one argument by subprocess, quoted by Windows, then
+    re-parsed by PowerShell — three chances for a path or a `$` to be mangled,
+    and the whole thing ran with its output discarded, so a failure looked
+    exactly like "the app just closed".
+
+    Everything it does is transcribed to `log_path`, because a handoff nobody
+    can see is a handoff nobody can fix.
     """
-    return (
-        f"Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue; "
-        f"$p = Start-Process -FilePath '{installer}' "
-        f"-ArgumentList '/SILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru; "
-        f"if ($p.ExitCode -eq 0) {{ Start-Process -FilePath '{app}' }}"
-    )
+    return f"""\
+$ErrorActionPreference = 'Continue'
+Start-Transcript -Path '{log_path}' -Force | Out-Null
+Write-Output "installer : {installer}"
+Write-Output "relaunch  : {app}"
+Write-Output "waiting on: pid {pid}"
+
+Wait-Process -Id {pid} -Timeout 120 -ErrorAction SilentlyContinue
+Write-Output "pitradio has exited"
+
+if (-not (Test-Path -LiteralPath '{installer}')) {{
+    Write-Output "ERROR: the installer is not there any more"
+    Stop-Transcript | Out-Null
+    exit 1
+}}
+
+$p = Start-Process -FilePath '{installer}' `
+    -ArgumentList '/SILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
+Write-Output "installer exit code: $($p.ExitCode)"
+
+# Relaunch whatever the outcome. If the install failed, the previous build is
+# still installed and still works — leaving the user with nothing on screen is
+# strictly worse than running the version they already had.
+for ($i = 0; $i -lt 15; $i++) {{
+    if (Test-Path -LiteralPath '{app}') {{ break }}
+    Start-Sleep -Milliseconds 400
+}}
+if (Test-Path -LiteralPath '{app}') {{
+    Write-Output "relaunching"
+    Start-Process -FilePath '{app}'
+}} else {{
+    Write-Output "ERROR: {app} is missing after the install"
+}}
+Stop-Transcript | Out-Null
+"""
 
 
 def launch_installer(installer: Path, app: Path | None = None) -> None:
@@ -193,16 +227,34 @@ def launch_installer(installer: Path, app: Path | None = None) -> None:
     if app is None:
         app = Path(sys.executable)
 
+    if not installer.exists():
+        log.error("not handing off: %s is missing", installer)
+        raise FileNotFoundError(installer)
+
+    logs = paths.log_dir()
+    logs.mkdir(parents=True, exist_ok=True)
+    script = logs / "update-shim.ps1"
+    transcript = logs / "update-shim.log"
+    script.write_text(shim_script(installer, os.getpid(), app, transcript),
+                      encoding="utf-8")
+
     creation_flags = 0
     if sys.platform == "win32":
         creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
+    command = [
+        "powershell", "-NoProfile", "-NonInteractive",
+        # A .ps1 will not run under the default Restricted policy, and this
+        # one is written by us seconds earlier rather than fetched.
+        "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden",
+        "-File", str(script),
+    ]
+    log.info("handing off to %s", " ".join(command))
+    log.info("shim transcript will be at %s", transcript)
+
     subprocess.Popen(
-        [
-            "powershell", "-NoProfile", "-NonInteractive",
-            "-WindowStyle", "Hidden",
-            "-Command", shim_command(installer, os.getpid(), app),
-        ],
+        command,
         creationflags=creation_flags,
         close_fds=True,
         # All three streams, explicitly. This runs from the GUI, which when
