@@ -570,3 +570,67 @@ def test_the_identity_still_wins_when_it_matches(joystick, pad):
 
     w = watcher(joystick, device=None, button=5, guid=wheel, name="Wheel")
     assert w._resolve_device().guid == wheel
+
+
+# -- one backend, not all of them -----------------------------------------
+
+
+def test_only_one_backend_is_used(joystick, monkeypatch):
+    """SDL2 and SDL3 enumerate the same hardware through the same drivers.
+
+    Running both means two libraries opening the same HID device in one
+    process: every controller appears twice and one copy reads a button state
+    that never changes. A Fanatec wheel showed up under both [SDL3] and [SDL2]
+    and could not be bound at all.
+    """
+    first = StubBackend("SDL3", {0: ("Wheel", 20, "wheel-guid")})
+    second = StubBackend("SDL2", {0: ("Wheel", 20, "other-guid")})
+    monkeypatch.setattr(joystick, "_candidates", lambda: [first, second])
+    monkeypatch.setattr(joystick, "_STARTED", False)
+    monkeypatch.setattr(joystick, "_BACKENDS", [])
+
+    started = joystick.backends()
+    assert [b.version for b in started] == ["SDL3"]
+    assert [d.name for d in joystick.devices()] == ["Wheel"]
+
+
+def test_the_next_backend_is_tried_when_one_will_not_start(joystick, monkeypatch):
+    class Dead(StubBackend):
+        def start(self):
+            return False
+
+    dead = Dead("SDL3", {})
+    alive = StubBackend("SDL2", {0: ("Wheel", 20, "wheel-guid")})
+    monkeypatch.setattr(joystick, "_candidates", lambda: [dead, alive])
+    monkeypatch.setattr(joystick, "_STARTED", False)
+    monkeypatch.setattr(joystick, "_BACKENDS", [])
+
+    assert [b.version for b in joystick.backends()] == ["SDL2"]
+
+
+def test_the_detector_names_the_backends_not_in_use(joystick, monkeypatch):
+    """Otherwise there is no way to know another one could be tried."""
+    monkeypatch.setattr(joystick, "_candidates", lambda: [
+        StubBackend("SDL3", {}), StubBackend("SDL2", {})])
+    monkeypatch.setattr(joystick, "_STARTED", False)
+    monkeypatch.setattr(joystick, "_BACKENDS", [])
+
+    lines = "\n".join(joystick.diagnose())
+    assert "backend in use: SDL3" in lines
+    assert "not in use: SDL2" in lines
+    assert "joystick.backend" in lines
+
+
+def test_a_backend_can_be_pinned(joystick, monkeypatch):
+    monkeypatch.setattr(joystick, "_STARTED", False)
+    monkeypatch.setattr(joystick, "_BACKENDS", [])
+    monkeypatch.setattr(joystick, "_preferred", "sdl2")
+
+    names = [b.version for b in joystick._candidates()]
+    assert names == ["SDL2"]
+
+
+def test_pinning_something_unknown_falls_back_to_automatic(joystick, monkeypatch):
+    """A typo in config.json must not leave the app with no input at all."""
+    monkeypatch.setattr(joystick, "_preferred", "sdl9")
+    assert len(joystick._candidates()) > 1

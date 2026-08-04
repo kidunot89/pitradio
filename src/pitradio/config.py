@@ -86,6 +86,12 @@ class JoystickConfig:
     button: Any = None      # 1-based button number
     guid: Any = None        # stable device identity; preferred over `device`
     name: Any = None        # remembered label, for display only
+    # Which input library to read controllers through: "auto", "sdl3", "sdl2",
+    # "xinput" or "windows legacy". Only one is ever used — they enumerate the
+    # same hardware, and running two means two libraries opening the same
+    # device. "auto" takes the first that loads, which is almost always right;
+    # this exists for when it is not.
+    backend: str = "auto"
 
 
 @dataclass
@@ -298,6 +304,9 @@ class Config:
             keys.parse_trigger(self.trigger_key)
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
+
+        if not isinstance(self.joystick.backend, str) or not self.joystick.backend:
+            problems.append('joystick.backend must be "auto" or a backend name')
 
         for label, binding in (
             ("joystick", self.joystick),

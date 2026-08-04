@@ -67,32 +67,79 @@ _BACKENDS: list = []
 _STARTED = False
 
 
-def _ensure_started() -> list:
-    """Start every backend once, keeping the ones that loaded."""
-    global _STARTED
-    if _STARTED:
-        return _BACKENDS
+#: Set from config to force one backend, for when the automatic choice is
+#: wrong. "auto" takes the first that starts.
+_preferred = "auto"
 
-    _STARTED = True
-    candidates = [sdl3input.Sdl3Joysticks(), sdlinput.SdlJoysticks()]
+
+def prefer(backend_name: str) -> None:
+    """Pin the backend, or "auto". Takes effect on the next start."""
+    global _preferred, _STARTED
+    if backend_name != _preferred:
+        _preferred = backend_name or "auto"
+        stop_all()
+
+
+def _candidates() -> list:
+    order = [sdl3input.Sdl3Joysticks(), sdlinput.SdlJoysticks()]
     if sys.platform == "win32":
         # Imported here, not at module scope: ctypes.wintypes raises off
         # Windows, and this module has to stay importable for the tests.
         from pitradio.input import xinput
 
-        candidates.append(xinput.XInputPads())
-    candidates.append(LegacyPads())
+        order.append(xinput.XInputPads())
+    order.append(LegacyPads())
 
-    for backend in candidates:
+    if _preferred != "auto":
+        chosen = [b for b in order if b.version.lower() == _preferred.lower()]
+        if chosen:
+            return chosen
+        log.warning("no backend called %r; choosing automatically", _preferred)
+    return order
+
+
+def _ensure_started() -> list:
+    """Start backends in preference order and keep **one**.
+
+    Not all of them. SDL2 and SDL3 enumerate the same hardware through the same
+    drivers, so running both means two libraries opening the same HID device in
+    one process — every controller appears twice, and one of the two copies
+    reads a button state that never changes. A Fanatec wheel showed up under
+    both and could not be bound at all.
+
+    XInput and the legacy interface overlap SDL just as much. So the first
+    backend that starts is the one used, and the rest are reported by
+    `diagnose()` as available but idle. `prefer()` pins a specific one when the
+    automatic choice is wrong, which is the only way to find that out.
+    """
+    global _STARTED
+    if _STARTED:
+        return _BACKENDS
+
+    _STARTED = True
+    for backend in _candidates():
         try:
             if backend.start():
                 _BACKENDS.append(backend)
-            else:
-                log.info("%s unavailable: %s", backend.version, backend.failure)
+                log.info("joystick backend: %s", backend.version)
+                return _BACKENDS
+            log.info("%s unavailable: %s", backend.version, backend.failure)
         except Exception:
             # A backend that throws on load must cost only itself.
             log.exception("%s failed to start", backend.version)
     return _BACKENDS
+
+
+def stop_all() -> None:
+    """Release every backend, so a different one can be started."""
+    global _STARTED
+    for backend in _BACKENDS:
+        try:
+            backend.stop()
+        except Exception:
+            log.debug("%s teardown failed", backend.version, exc_info=True)
+    _BACKENDS.clear()
+    _STARTED = False
 
 
 class LegacyPads:
@@ -158,7 +205,7 @@ def backends() -> list:
 
 def backend_name() -> str:
     live = [b.version for b in backends()]
-    return ", ".join(live) if live else "none"
+    return live[0] if live else "none"
 
 
 @dataclass(frozen=True)
@@ -263,10 +310,18 @@ def diagnose() -> list[str]:
     anything this app can fix.
     """
     live = backends()
-    lines = [f"backends: {backend_name()}"]
+    lines = [f"backend in use: {backend_name()}"]
+    if _preferred != "auto":
+        lines.append(f"  pinned by config to {_preferred!r}")
     for backend in live:
         if backend.failure:
             lines.append(f"  {backend.version}: {backend.failure}")
+    idle = [b.version for b in _candidates()
+            if not any(b.version == used.version for used in live)]
+    if idle:
+        # Named so it is obvious another one could be tried, and how.
+        lines.append(f"  not in use: {', '.join(idle)} "
+                     f"(set joystick.backend in config.json to force one)")
 
     found = devices()
     for device in found:
