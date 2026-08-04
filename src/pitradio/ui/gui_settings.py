@@ -39,7 +39,10 @@ def _row(parent, row: int, label: str, widget, hint: str = "") -> None:
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
     widget.grid(row=row, column=1, sticky="we", pady=3, padx=(8, 0))
     if hint:
-        ttk.Label(parent, text=hint, foreground="#777").grid(
+        # Wrapped, not stretched: an unwrapped hint pushes the row wider than
+        # the window and is simply cut off at the edge.
+        ttk.Label(parent, text=hint, style="Muted.TLabel",
+                  wraplength=240, justify="left").grid(
             row=row, column=2, sticky="w", padx=(8, 0))
     parent.columnconfigure(1, weight=1)
 
@@ -61,16 +64,24 @@ def _field_grid(parent, row: int, *fields, columns: int = 2) -> int:
     """
     for index, (label, widget, hint) in enumerate(fields):
         column = (index % columns) * 2
-        line = row + (index // columns)
+        # Two grid rows per line: one for the controls, one for their hints.
+        # Without reserving the second, a hint drew straight over the next
+        # line's labels — "Key hold (ms)" with "raise this if the first
+        # characters go missing" on top of it, which reads as corruption
+        # rather than as a layout mistake. A screenshot found it; nothing else
+        # would have.
+        line = row + (index // columns) * 2
         ttk.Label(parent, text=label).grid(
-            row=line, column=column, sticky="w", pady=3, padx=(0, 8))
-        widget.grid(row=line, column=column + 1, sticky="w", pady=3, padx=(0, 20))
+            row=line, column=column, sticky="w", pady=(3, 0), padx=(0, 8))
+        widget.grid(row=line, column=column + 1, sticky="w", pady=(3, 0),
+                    padx=(0, 24))
         if hint:
-            ttk.Label(parent, text=hint, style="Muted.TLabel").grid(
+            ttk.Label(parent, text=hint, style="Muted.TLabel",
+                      wraplength=240, justify="left").grid(
                 row=line + 1, column=column, columnspan=2, sticky="w",
-                pady=(0, 4))
-    used = (len(fields) + columns - 1) // columns
-    return row + used + 1
+                pady=(0, 2))
+    lines = (len(fields) + columns - 1) // columns
+    return row + lines * 2
 
 
 def _as_int(var: tk.StringVar, fallback: int) -> int:
@@ -559,7 +570,7 @@ def _tick_button_capture(app, slot) -> None:
                 "PitRadio can currently see.",
             )
         return
-    slot["button"].configure(text=f"Press a button… {remaining // 1000}")
+    slot["button"].configure(text=f"{remaining // 1000}…")
     slot["deadline"] = remaining - 1000
     slot["timer"] = app.root.after(1000, lambda: _tick_button_capture(app, slot))
 
@@ -572,7 +583,7 @@ def _end_button_capture(app, slot) -> None:
     if app.joystick is not None:
         app.joystick.cancel_capture()
     slot["button"].state(["!disabled"])
-    slot["button"].configure(text="Press a button…")
+    slot["button"].configure(text=t("Button…"))
 
 
 def _clear_joystick(app, slot) -> None:
@@ -581,23 +592,32 @@ def _clear_joystick(app, slot) -> None:
     _end_button_capture(app, slot)
 
 
-def _binding_row(app, parent, slot, key_var=None, key_label="Press a key…"):
-    """A key box and a controller box side by side, for one action."""
+def _binding_row(app, parent, slot, key_var=None, key_label=None):
+    """A key box and a controller box side by side, for one action.
+
+    Labels are short because six widgets share one row and the window is 720px
+    at its minimum. Spelled out as "Press a button…" the Clear button was
+    pushed off the right edge — found by looking at a screenshot rather than by
+    resizing the window, which is why it survived. The row's own label already
+    says what is being bound.
+    """
+    key_label = key_label or t("Key…")
     row = ttk.Frame(parent)
 
     if key_var is not None:
-        _entry(row, key_var, 14).pack(side="left")
-        key_button = ttk.Button(row, text=key_label)
+        _entry(row, key_var, 12).pack(side="left")
+        key_button = ttk.Button(row, text=key_label, width=7)
         key_button.pack(side="left", padx=(4, 10))
         capture = KeyCapture(app, key_var, key_button, append=False, label=key_label)
         key_button.configure(command=capture.start)
 
-    ttk.Label(row, textvariable=slot["var"], foreground="#333",
-              width=30).pack(side="left")
+    ttk.Label(row, textvariable=slot["var"], style="Muted.TLabel",
+              width=24).pack(side="left")
     slot["button"] = ttk.Button(
-        row, text="Press a button…", command=lambda: _capture_button(app, slot))
+        row, text=t("Button…"), width=9,
+        command=lambda: _capture_button(app, slot))
     slot["button"].pack(side="left", padx=6)
-    ttk.Button(row, text=t("Clear"),
+    ttk.Button(row, text=t("Clear"), width=6,
                command=lambda: _clear_joystick(app, slot)).pack(side="left")
     return row
 
@@ -627,7 +647,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
         _row(parent, row, label, _key_list_row(app, parent, v, field), hint)
     # Six short numbers, two per row. One per row ran the editor off the
     # bottom of the window for the sake of fields four characters wide.
-    _field_grid(
+    next_row = _field_grid(
         parent, 3,
         (t("Chat open delay (ms)"), _entry(parent, v["pre_delay_ms"], 8),
          t("raise this if the first characters go missing")),
@@ -641,7 +661,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
 
     mode = ttk.Combobox(parent, textvariable=v["text_mode"], width=12,
                         values=("unicode", "scancode"), state="readonly")
-    _row(parent, 10, t("Text injection"), mode,
+    _row(parent, next_row, t("Text injection"), mode,
          t("switch to scancode if the game ignores typed text"))
 
     # Off leaves the message in the chat box to be read before it goes out.
@@ -649,9 +669,10 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     # everyone's problem.
     ttk.Checkbutton(
         parent, text=t("Send automatically"), variable=v["auto_send"],
-    ).grid(row=11, column=1, sticky="w", pady=3, padx=(8, 0))
+    ).grid(row=next_row + 1, column=1, sticky="w", pady=3, padx=(8, 0))
     ttk.Label(parent, text=t("off types the message and leaves it for you to send"),
-              style="Muted.TLabel").grid(row=11, column=2, sticky="w", padx=(8, 0))
+              style="Muted.TLabel", wraplength=240, justify="left").grid(
+        row=next_row + 1, column=2, sticky="w", padx=(8, 0))
 
     # Hidden on the default profile. A session plugin reads one specific game,
     # and the default profile is what applies to games that have none — so a
@@ -671,7 +692,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["plugin"] = tk.StringVar(value=_plugin_label(choices, profile.plugin))
     picker = ttk.Combobox(parent, textvariable=v["plugin"], width=24,
                           values=[name for _id, name in choices], state="readonly")
-    _row(parent, 12, t("Session plugin"), picker,
+    _row(parent, next_row + 2, t("Session plugin"), picker,
          t("reads who is in the session; automatic picks by executable name"))
 
     # The assigned plugin's own options, rebuilt whenever the choice changes so
@@ -679,7 +700,7 @@ def _profile_vars(app, parent, profile, *, show_plugin: bool = True) -> dict:
     v["_plugin_settings"] = dict(getattr(profile, "plugin_settings", {}) or {})
     v["_settings_vars"] = {}
     v["_settings_frame"] = ttk.Frame(parent)
-    v["_settings_frame"].grid(row=13, column=0, columnspan=3, sticky="we", pady=(4, 0))
+    v["_settings_frame"].grid(row=next_row + 3, column=0, columnspan=3, sticky="we", pady=(4, 0))
     _rebuild_plugin_settings(app, v)
     picker.bind("<<ComboboxSelected>>",
                 lambda _e: _rebuild_plugin_settings(app, v))
