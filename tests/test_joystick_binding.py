@@ -777,27 +777,38 @@ def test_a_single_frame_blip_cannot_take_the_binding(joystick, pad):
 # -- reading, not owning ---------------------------------------------------
 
 
-def test_the_sdl_backends_do_not_take_a_controller_by_default(joystick):
+def test_the_sdl_backends_do_not_take_a_controller_by_default(joystick, monkeypatch):
     """Reading a button state does not require owning the device.
 
     SDL's HIDAPI Steam driver opens a Steam Controller directly, which takes it
     from Steam: its desktop keyboard and mouse shortcuts stop working, and the
-    raw device reports touchpads and grip sensors as buttons that sit active or
-    chatter. Breaking another application to read a button is the wrong trade.
+    raw device reports gyro and touch flags as buttons that fire whenever the
+    controller moves. Breaking another application to read a button is the
+    wrong trade.
     """
-    joystick._take_over_steam = False
+    monkeypatch.setattr(joystick, "_take_over_steam", False)
     for backend in joystick._candidates():
         if backend.version.startswith("SDL"):
             assert backend.steam_hidapi is False
 
 
-def test_it_can_be_turned_on_for_a_controller_nothing_else_sees(joystick):
-    joystick.prefer("auto", True)
-    try:
-        sdl = [b for b in joystick._candidates() if b.version.startswith("SDL")]
-        assert sdl and all(b.steam_hidapi is True for b in sdl)
-    finally:
-        joystick.prefer("auto", False)
+def test_it_can_be_turned_on_for_a_controller_nothing_else_sees(joystick, monkeypatch):
+    # Set directly rather than through prefer(), which tears down whatever is
+    # running — including the shared SDL3 the rest of this file is using.
+    monkeypatch.setattr(joystick, "_take_over_steam", True)
+    sdl = [b for b in joystick._candidates() if b.version.startswith("SDL")]
+    assert sdl and all(b.steam_hidapi is True for b in sdl)
+
+
+def test_changing_the_preference_restarts_the_backends(joystick, monkeypatch):
+    """It has to: the hints are read by SDL_Init and cannot be changed after."""
+    stopped = []
+    monkeypatch.setattr(joystick, "stop_all", lambda: stopped.append(True))
+    monkeypatch.setattr(joystick, "_preferred", "auto")
+    monkeypatch.setattr(joystick, "_take_over_steam", False)
+
+    joystick.prefer("sdl2", False)
+    assert stopped, "a pinned backend must take effect"
 
 
 def test_a_real_press_wins_through_intermittent_noise(joystick, pad):
