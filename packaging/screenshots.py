@@ -97,7 +97,7 @@ def populate(app) -> None:
     app.status_var.set(state_mod.STATUS_IDLE)
     app.exe_var.set("le mans ultimate.exe")
     app.profile_var.set("le mans ultimate.exe")
-    app.armed_var.set("f13   ·   Fanatec CSL Elite - button 13 (SDL2)")
+    app.armed_var.set("f13")
     app.last_trigger_var.set(time.strftime("%H:%M:%S"))
     app.last_var.set("@G.Taylor box this lap")
 
