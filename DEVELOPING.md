@@ -11,6 +11,20 @@ loads. If you write the code first you will see the app "working" and have no
 way to tell that it isn't. Writing the failing test first is how you find out
 your test was testing nothing.
 
+## Contents
+
+- [First: can you run it?](#first-can-you-run-it)
+- [Where things live](#where-things-live)
+- [Recipe: support a new sim](#recipe-support-a-new-sim)
+- [Recipe: add a session plugin](#recipe-add-a-session-plugin)
+- [Recipe: add a config option](#recipe-add-a-config-option)
+- [Recipe: add a field to the Settings window](#recipe-add-a-field-to-the-settings-window)
+- [Recipe: add a user-facing string](#recipe-add-a-user-facing-string)
+- [Recipe: change what happens on a trigger](#recipe-change-what-happens-on-a-trigger)
+- [Recipe: add a controller backend](#recipe-add-a-controller-backend)
+- [The invariants that will bite you](#the-invariants-that-will-bite-you)
+- [When you have to build](#when-you-have-to-build)
+
 ## First: can you run it?
 
 ```bash

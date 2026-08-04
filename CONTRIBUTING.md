@@ -13,6 +13,18 @@ The interface ships in English only. It is fully extracted and ready to
 translate, so a language really is a file — see
 [Adding a language](#adding-a-language).
 
+## Contents
+
+- [The quickest useful contribution: a profile](#the-quickest-useful-contribution-a-profile)
+- [Getting set up](#getting-set-up)
+- [Before you open a pull request](#before-you-open-a-pull-request)
+- [What gets asked in review](#what-gets-asked-in-review)
+- [Adding a language](#adding-a-language)
+- [Adding a sim plugin](#adding-a-sim-plugin)
+- [Commit messages](#commit-messages)
+- [Reporting a bug](#reporting-a-bug)
+- [Licence](#licence)
+
 ## The quickest useful contribution: a profile
 
 If you got PitRadio working with a sim that isn't listed, that's worth sharing
