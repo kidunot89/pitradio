@@ -158,7 +158,7 @@ class Sdl3Joysticks:
                 lib.SDL_SetHint(HINT_HIDAPI_STEAM,
                                 b"1" if self.steam_hidapi else b"0")
                 # SDL3 returns true on success, where SDL2 returned 0.
-                if not lib.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD):
+                if not lib.SDL_Init(SDL_INIT_JOYSTICK):
                     self._failure = self._error(lib)
                     return False
             except Exception as exc:
@@ -176,6 +176,7 @@ class Sdl3Joysticks:
         lib.SDL_Init.argtypes = (ctypes.c_uint32,)
         lib.SDL_Init.restype = ctypes.c_bool
         lib.SDL_Quit.argtypes = ()
+        lib.SDL_PumpEvents.argtypes = ()
         lib.SDL_GetError.argtypes = ()
         lib.SDL_GetError.restype = ctypes.c_char_p
         lib.SDL_free.argtypes = (ctypes.c_void_p,)
@@ -251,12 +252,26 @@ class Sdl3Joysticks:
         self._handles[instance_id] = handle
         return handle
 
+    def _pump(self) -> None:
+        """Refresh device state before reading it.
+
+        `SDL_UpdateJoysticks` alone is documented as sufficient and mostly is. But
+        SDL's Windows joystick backends do some of their work off the event
+        queue, and this project has already been bitten once by a documented
+        "this is enough" call that was not — device *detection* silently
+        stopped without a message pump. Pumping costs nothing here: SDL is
+        initialised with no video subsystem, so there is no window whose
+        thread we would have to be on.
+        """
+        self._lib.SDL_PumpEvents()
+        self._lib.SDL_UpdateJoysticks()
+
     def list_devices(self) -> list[tuple[int, str, int]]:
         with self._lock:
             if self._lib is None:
                 return []
             try:
-                self._lib.SDL_UpdateJoysticks()
+                self._pump()
                 devices = []
                 for instance_id in self._instance_ids():
                     handle = self._handle(instance_id)
@@ -279,7 +294,7 @@ class Sdl3Joysticks:
             if self._lib is None:
                 return None
             try:
-                self._lib.SDL_UpdateJoysticks()
+                self._pump()
                 handle = self._handle(instance_id)
                 if handle is None:
                     return None

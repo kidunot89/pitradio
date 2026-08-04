@@ -163,7 +163,7 @@ class SdlJoysticks:
                 # "buttons" nobody wants.
                 lib.SDL_SetHint(HINT_HIDAPI_STEAM,
                                 b"1" if self.steam_hidapi else b"0")
-                if lib.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0:
+                if lib.SDL_Init(SDL_INIT_JOYSTICK) != 0:
                     self._failure = self._error(lib)
                     return False
             except Exception as exc:
@@ -243,12 +243,26 @@ class SdlJoysticks:
         self._handles[index] = handle
         return handle
 
+    def _pump(self) -> None:
+        """Refresh device state before reading it.
+
+        `SDL_JoystickUpdate` alone is documented as sufficient and mostly is. But
+        SDL's Windows joystick backends do some of their work off the event
+        queue, and this project has already been bitten once by a documented
+        "this is enough" call that was not — device *detection* silently
+        stopped without a message pump. Pumping costs nothing here: SDL is
+        initialised with no video subsystem, so there is no window whose
+        thread we would have to be on.
+        """
+        self._lib.SDL_PumpEvents()
+        self._lib.SDL_JoystickUpdate()
+
     def list_devices(self) -> list[tuple[int, str, int]]:
         with self._lock:
             if self._lib is None:
                 return []
             try:
-                self._lib.SDL_JoystickUpdate()
+                self._pump()
                 devices = []
                 for index in range(self._lib.SDL_NumJoysticks()):
                     handle = self._handle(index)
@@ -277,7 +291,7 @@ class SdlJoysticks:
             if self._lib is None:
                 return None
             try:
-                self._lib.SDL_JoystickUpdate()
+                self._pump()
                 handle = self._handle(index)
                 if handle is None:
                     return None
