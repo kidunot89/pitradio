@@ -21,7 +21,6 @@ your test was testing nothing.
 - [Recipe: add a field to the Settings window](#recipe-add-a-field-to-the-settings-window)
 - [Recipe: add a user-facing string](#recipe-add-a-user-facing-string)
 - [Recipe: change what happens on a trigger](#recipe-change-what-happens-on-a-trigger)
-- [Recipe: add a controller backend](#recipe-add-a-controller-backend)
 - [The invariants that will bite you](#the-invariants-that-will-bite-you)
 - [When you have to build](#when-you-have-to-build)
 
@@ -57,7 +56,6 @@ You probably need one of these and not the others.
 | driver names from a sim | `src/pitradio/plugins/` |
 | turning a name into `@G.Taylor` | `src/pitradio/mentions.py` |
 | tap / double-tap / hold | `src/pitradio/gestures.py` |
-| which controllers are seen | `src/pitradio/input/joystick.py` |
 | key names → scan codes | `src/pitradio/keys.py` |
 | the build or the installer | `packaging/` |
 
@@ -270,19 +268,6 @@ specification.
 
 ---
 
-## Recipe: add a controller backend
-
-`joystick.py` combines backends rather than choosing one. A backend is a class
-with `start / stop / list_devices / guid / button_mask / label / name` — see
-`xinput.py`, which is the smallest.
-
-Test it against a stand-in first (`StubBackend` in
-`tests/test_joystick_binding.py`), then add it to `_ensure_started`. If it can
-be driven for real — SDL3 can, through its virtual joystick API — do that
-instead; `tests/test_sdl3.py` shows how, and it caught things a mock could not.
-
----
-
 ## The invariants that will bite you
 
 Four rules. Each has a test that fails if you break it, so you'll find out —
@@ -315,15 +300,13 @@ silence. v0.1.22 shipped exactly that.
 Only for packaging changes. `--gui-only` and `pytest` cover everything else.
 
 ```bash
-python packaging/fetch_sdl3.py
 python packaging/build.py
 .\build\pitradio.dist\pitradio.exe --self-test
 ```
 
-`--self-test` is the one that matters: it loads every component, opens a real
-window, and checks SDL2 and SDL3 actually load. It has caught a missing
-`av.utils`, a missing `SDL2.dll` and a GUI that could not construct — none of
-which any other check noticed.
+`--self-test` is the one that matters: it imports every component and opens a
+real window. It has caught a missing `av.utils` and a GUI that could not
+construct — neither of which any other check noticed.
 
 Run it **without a console** too (`Start-Process` with no `-NoNewWindow`).
 That is how a Start Menu shortcut launches it, and it is not the same code

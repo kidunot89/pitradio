@@ -16,9 +16,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
-import subprocess
-import sys
 import threading
 import urllib.error
 import urllib.request
@@ -159,47 +158,44 @@ def _expected_hash(info: UpdateInfo) -> str | None:
 def launch_installer(installer: Path, app: Path | None = None) -> None:
     """Start the installer and expect the caller to exit immediately.
 
-    Directly — no shim. A PowerShell script that waited on this process id and
-    relaunched the app afterwards *never once ran*: its transcript, written as
-    the script's very first statement, was never created on any machine that
-    tried it, across every release that shipped it. Meanwhile every successful
-    self-update this app has ever performed used a plain direct launch.
+    Through **ShellExecute**, not CreateProcess. The installer is built with
+    PrivilegesRequired=admin, and CreateProcess — which is what
+    subprocess.Popen calls — refuses to start a requireAdministrator binary
+    and fails with ERROR_ELEVATION_REQUIRED (740). ShellExecuteEx honours the
+    manifest and elevates instead.
 
-    So the two jobs the shim existed for are done elsewhere. Exiting promptly
-    is this function's caller's responsibility, and by the time Setup has
-    extracted itself and reached the file phase there is nothing left holding a
-    handle. Relaunching afterwards belongs to the installer, which knows when
-    it has finished — a [Run] entry gated on WizardSilent, because a silent
-    install skips every postinstall entry and that is why the app used to
-    vanish after updating.
+    This repository already learned that once: it is why the installer's own
+    [Run] entry carries the `shellexec` flag, with a comment explaining
+    exactly this. The self-updater then went on to use Popen anyway, and
+    failed the same way — the app exited, nothing started, and no error was
+    logged because Popen had succeeded at *queuing* a process that Windows
+    then refused to elevate.
 
-    We already run elevated, so the installer inherits it and no second UAC
-    prompt appears.
+    Relaunching afterwards is the installer's job, through a [Run] entry gated
+    on a silent install. Exiting promptly is the caller's: by the time Setup
+    has extracted itself there is nothing holding a handle.
     """
     if not installer.exists():
         log.error("not handing off: %s is missing", installer)
         raise FileNotFoundError(installer)
 
-    creation_flags = 0
-    if sys.platform == "win32":
-        creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    arguments = "/SILENT /NORESTART /SUPPRESSMSGBOXES"
+    log.info("starting the installer via ShellExecute: %s %s", installer, arguments)
 
-    command = [str(installer), "/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"]
-    log.info("starting the installer: %s", " ".join(command))
+    # startfile is Windows-only. Absent anywhere else, which is a hard error
+    # here rather than a silent no-op: the caller exits the app next.
+    start = getattr(os, "startfile", None)
+    if start is None:
+        raise OSError("ShellExecute is only available on Windows")
 
-    subprocess.Popen(
-        command,
-        creationflags=creation_flags,
-        close_fds=True,
-        # All three streams, explicitly. This runs from the GUI, which when
-        # launched from a shortcut has no console and invalid standard handles —
-        # inheriting them fails process creation with [WinError 6]. Leaving this
-        # out would break self-update precisely for the users who install
-        # normally, and work for anyone testing from a terminal.
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        start(str(installer), arguments=arguments)
+    except OSError as exc:
+        # Worth shouting about: the caller is about to exit the application on
+        # the assumption this worked.
+        log.error("could not start the installer: %s", exc)
+        raise
+
     log.info("installer started; exiting so it can replace this build")
 
 

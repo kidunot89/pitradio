@@ -79,32 +79,19 @@ You don't have to type key names. **Settings → Press a key…** binds whatever
 you press next, including combinations like `Ctrl+F12`, and the press is
 swallowed so binding Enter doesn't also do something behind the window.
 
-**Settings → Press a button…** binds a wheel or gamepad button directly, which
-removes the need for JoyToKey entirely. The key and the button work alongside
-each other — either one triggers.
+### Binding a wheel or gamepad button
 
-Buttons are read through four backends at once — **SDL3, SDL2, XInput** and the
-Windows multimedia API — because no single one sees everything. A wheel on SDL2
-and a pad on XInput is an ordinary rig, so PitRadio combines what they all
-report instead of picking one. It reads them while the game has focus, not only
-when PitRadio does. A few details worth knowing:
+Use **[JoyToKey](https://joytokey.net/)**, or your wheel's own software, to map
+a button to F13. PitRadio then sees it as an ordinary keypress, and everything
+below about keys applies unchanged.
 
-- The binding is stored against the **device itself**, not its position in the
-  list, so plugging in a headset or starting Steam won't quietly point it at
-  something else.
-- **D-pads and POV hats can be bound**, and appear as `POV up` and so on.
-- Capture waits for a button to be **pressed**, so the latched switches and
-  rotary encoders on a rim don't grab the binding before you touch anything.
-- If the bound controller isn't plugged in, Settings says so rather than
-  showing a stale device.
-
-- The detector names **which API found each device**, which is the first useful
-  thing to know when one misbehaves.
-
-If a controller doesn't show up at all, **Settings → Rescan controllers** lists
-every backend and everything each one detected — start there. A device missing
-from all four is usually one Steam has captured, or one in desktop mode, where
-it presents as a keyboard and mouse rather than a controller.
+PitRadio does **not** read controllers itself. It did, through four backends —
+SDL3, SDL2, XInput and the Windows multimedia API — and between them they still
+could not reliably read a Fanatec rim or a Steam Controller, because both are
+claimed by software that will not share the device. Reading them anyway meant
+taking the controller away from Steam and from the game, which is worse than
+not supporting it. JoyToKey solves the same problem at the layer that owns it,
+and PitRadio's keyboard hook has always worked.
 
 To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
 choices: present on most keyboards, rarely bound by sims.
@@ -134,10 +121,10 @@ trigger then controls what happens to it, without letting go of the wheel:
 
 The status bar shows **waiting to send** while a message is sitting there.
 
-If you have buttons to spare, **Settings → Trigger** also lets you bind a key
-or a wheel button directly to *Send waiting message* and *Clear waiting
-message*. Those act immediately, with no double-tap window to wait out, and
-work alongside the gestures rather than replacing them.
+If you have buttons to spare, **Settings → Trigger** also lets you bind keys
+directly to *Send waiting message* and *Clear waiting message*. Those act
+immediately, with no double-tap window to wait out, and work alongside the
+gestures rather than replacing them.
 
 Because a single tap might turn out to be the first half of a double, sending
 waits for the double-tap window to close — about a third of a second. If you'd
@@ -180,25 +167,20 @@ Whisper heard, before any mention matching. `sent N chars` closes the cycle.
 
 ![Trigger](docs/images/trigger.png)
 
-Four bindings, each taking a key and/or a controller button. They work
-alongside each other — either fires.
+Three key bindings. All are optional except the trigger itself.
 
 | Binding | What it does |
 | --- | --- |
 | **Trigger key** | hold to talk; swallowed, so it never reaches the game |
-| **Wheel / gamepad button** | the same, from a controller |
 | **Send waiting message** | sends a message left in the chat box |
 | **Clear waiting message** | discards it |
 
 **Press a key…** binds whatever you press next, including `Ctrl+F12`, and
 swallows it — so binding Enter doesn't also actuate whatever is behind the
-window. **Press a button…** waits five seconds for a *press*, which is what
-lets you bind a button on a rim covered in latched switches.
+window.
 
-The controller list underneath names the API each device was found through.
-That is the first thing to look at when a controller misbehaves — a device seen
-only by XInput has no stable identity, and one missing from all four backends
-is a driver or Steam problem rather than anything PitRadio can fix.
+To use a wheel or gamepad button, map it to a key with JoyToKey first — see
+[Binding a wheel or gamepad button](#binding-a-wheel-or-gamepad-button).
 
 ### Settings → Appearance
 
@@ -463,7 +445,7 @@ Where to start:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to get set up and what review asks
 - [DEVELOPING.md](DEVELOPING.md) — task-shaped recipes: add a sim plugin, a
-  config option, a settings field, a controller backend. Written test-first,
+  config option, a settings field, a GUI tab. Written test-first,
   because almost everything in this app fails silently.
 
 ---

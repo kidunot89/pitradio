@@ -309,3 +309,62 @@ def test_the_prompt_fits_whispers_window():
     past it loses its tail without saying so. Roughly four characters a token.
     """
     assert len(config.RACING_VOCABULARY) < 224 * 4
+
+
+# -- saving must not orphan what the GUI is holding ----------------------
+
+
+def test_marking_saved_keeps_the_object_the_caller_is_holding(tmp_path):
+    """store.load() after a write is not the same as accepting the write.
+
+    Reloading builds an equal-but-distinct object graph. Anything still
+    referencing a sub-object of the old one — the Profiles tab holds a
+    Profile, the Audio tab held a CueConfig — then mutates an orphan, and no
+    later save ever writes it. The edit is silently lost, which is
+    indistinguishable from "the setting doesn't persist".
+    """
+    path = tmp_path / "config.json"
+    store = config.ConfigStore(path)
+    store.config.trigger_key = "ctrl+f9"
+    config.save(path, store.config)
+
+    held_config = store.config
+    held_profile = store.config.default_profile
+    store.mark_saved()
+
+    assert store.config is held_config
+    assert store.config.default_profile is held_profile
+    # ...and a later edit through the held reference still reaches disk.
+    held_profile.max_chars = 77
+    config.save(path, store.config)
+    assert config.load(path).default_profile.max_chars == 77
+
+
+def test_marking_saved_stops_the_write_reading_back_as_an_external_edit(tmp_path):
+    """The worker reloads when the mtime moves. Without this, the GUI's own
+    write looks like someone editing the file by hand."""
+    path = tmp_path / "config.json"
+    store = config.ConfigStore(path)
+    config.save(path, store.config)
+    store.load()
+
+    store.config.trigger_key = "f14"
+    config.save(path, store.config)
+    store.mark_saved()
+
+    assert not store.maybe_reload()
+    assert store.config.trigger_key == "f14"
+
+
+def test_marking_saved_refreshes_the_problem_list(tmp_path):
+    """The banner is driven by store.problems, and load() used to refresh it."""
+    path = tmp_path / "config.json"
+    store = config.ConfigStore(path)
+    config.save(path, store.config)
+    store.load()
+    assert store.problems == []
+
+    store.config.trigger_key = "not a key"
+    config.save(path, store.config)
+    store.mark_saved()
+    assert any("trigger_key" in problem for problem in store.problems)

@@ -1,17 +1,17 @@
 """The GUI's collaborators must actually provide what the GUI calls.
 
 gui.py and gui_settings.py cannot import winapi, so they reach Windows-only
-functionality through objects handed to App: hook, joystick, worker, recorder,
+functionality through objects handed to App: hook, worker, recorder,
 transcriber, checker. Nothing type-checks those calls, and every one of them
 sits behind an `is None` guard that makes the failure invisible until a real
 object is present on a real machine.
 
-v0.1.4 shipped calling JoystickWatcher.list_devices(), which existed only as a
-module function. The app crashed on startup for every user.
+v0.1.4 shipped a GUI calling a method that existed only at module level. The
+app crashed on startup for every user.
 
 These tests read the ASTs rather than importing, so they run anywhere — which
-matters, because joystick.py and hook.py import winapi and cannot be imported
-off Windows at all.
+matters, because hook.py imports winapi and cannot be imported off Windows at
+all.
 """
 
 import ast
@@ -27,7 +27,6 @@ GUI_SOURCES = ["src/pitradio/ui/gui.py", "src/pitradio/ui/gui_settings.py"]
 
 # Attribute on App -> module providing the object, and the class inside it.
 COLLABORATORS = {
-    "joystick": ("src/pitradio/input/joystick.py", "JoystickWatcher"),
     "hook": ("src/pitradio/input/hook.py", "KeyboardHook"),
     "worker": ("src/pitradio/worker.py", "Worker"),
     "recorder": ("src/pitradio/speech.py", "Recorder"),
@@ -61,9 +60,8 @@ def _class_attributes(filename: str, class_name: str) -> set[str]:
 def _attributes_used_on(collaborator: str) -> set[str]:
     """Every `app.<collaborator>.NAME` / `self.<collaborator>.NAME` in the GUI.
 
-    Anchored to `app` and `self` deliberately. A looser match also catches
-    `cfg.joystick.device`, which is the config *section* of the same name and
-    has nothing to do with the watcher object.
+    Anchored to `app` and `self` deliberately: a looser match would also pick
+    up same-named attributes on unrelated objects, such as config sections.
     """
     used = set()
     for filename in GUI_SOURCES:
@@ -91,16 +89,6 @@ def test_gui_only_calls_methods_that_exist(collaborator):
         f"{class_name} in {filename} provides none of those. This crashes on "
         f"startup on a real machine and is invisible when the object is None."
     )
-
-
-def test_the_joystick_watcher_exposes_enumeration():
-    """The GUI holds a watcher, not the module, so these must be on the class.
-
-    Pinned separately because this is the exact regression that shipped: the
-    functions existed at module level and the GUI could not reach them.
-    """
-    available = _class_attributes("src/pitradio/input/joystick.py", "JoystickWatcher")
-    assert {"list_devices", "describe"} <= available
 
 
 def test_every_collaborator_is_covered():
@@ -202,10 +190,6 @@ def test_a_tab_with_a_save_button_scrolls(source, builder):
 SELF_CALL_SOURCES = [
     "src/pitradio/worker.py",
     "src/pitradio/input/hook.py",
-    "src/pitradio/input/joystick.py",
-    "src/pitradio/input/sdlinput.py",
-    "src/pitradio/input/sdl3input.py",
-    "src/pitradio/input/xinput.py",
     "src/pitradio/updater.py",
     "src/pitradio/speech.py",
     "src/pitradio/state.py",

@@ -98,37 +98,6 @@ def av_extension_modules() -> list[str]:
     return sorted(names)
 
 
-def sdl2_library() -> Path | None:
-    """The SDL2 binary inside the sdl2dll package, if it is installed.
-
-    Shipped to the dist root rather than left inside the package: relying on
-    --include-package-data put it somewhere sdlinput could not find at runtime,
-    and the built binary reported "SDL2 library not found". Beside the exe it
-    is both on the DLL search path and where sdlinput looks first.
-    """
-    try:
-        import sdl2dll
-    except ImportError:
-        return None
-
-    root = Path(sdl2dll.get_dllpath())
-    for candidate in sorted(root.rglob("SDL2.dll")):
-        return candidate
-    return None
-
-
-def sdl3_library() -> Path | None:
-    """The bundled SDL3 binary, if packaging/fetch_sdl3.py has been run.
-
-    Absent on a development machine that has not fetched it, in which case the
-    build simply ships without SDL3 and falls back to SDL2 at runtime. CI
-    fetches it, so released builds always carry it — and `--self-test` fails
-    when a frozen build does not, rather than silently losing devices.
-    """
-    candidate = ROOT / "packaging" / "runtime" / "SDL3.dll"
-    return candidate if candidate.exists() else None
-
-
 def nuitka_args(version: str) -> list[str]:
     """The full Nuitka command line.
 
@@ -208,18 +177,6 @@ def nuitka_args(version: str) -> list[str]:
     for name in av_extension_modules():
         args.insert(-1, f"--include-module={name}")
 
-    sdl2 = sdl2_library()
-    if sdl2 is not None:
-        args.insert(-1, f"--include-data-files={sdl2}=SDL2.dll")
-
-    # Beside the exe for the same reason as SDL2: sdl3input looks there first,
-    # and --include-package-data put SDL2 somewhere unreachable at runtime.
-    sdl3 = sdl3_library()
-    if sdl3 is not None:
-        args.insert(-1, f"--include-data-files={sdl3}=SDL3.dll")
-        licence = sdl3.parent / "SDL3-LICENSE.txt"
-        if licence.exists():
-            args.insert(-1, f"--include-data-files={licence}=SDL3-LICENSE.txt")
 
     # PortAudio's DLL lives in a separate data package on Windows wheels.
     if _have("_sounddevice_data"):

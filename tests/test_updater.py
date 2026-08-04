@@ -166,36 +166,45 @@ def test_checksum_line_with_binary_marker_is_accepted(monkeypatch, tmp_path):
 
 
 
-def test_the_installer_is_started_directly(tmp_path, monkeypatch):
-    """No shim. The PowerShell one never ran on any machine that tried it —
-    its transcript, written as the script's first statement, was never
-    created — while every successful self-update used a direct launch."""
-    from pathlib import Path
+def test_the_installer_is_started_through_shellexecute(tmp_path, monkeypatch):
+    """CreateProcess refuses a requireAdministrator binary with error 740.
 
+    subprocess.Popen is CreateProcess, and the installer is built with
+    PrivilegesRequired=admin. This repository already recorded that lesson —
+    it is why the installer's own [Run] entry uses shellexec — and the
+    self-updater used Popen anyway. The app exited, nothing started, and
+    nothing was logged, because Popen had succeeded at queueing a process
+    Windows then refused to elevate.
+    """
     installer = tmp_path / "pitradio-setup-9.9.9.exe"
     installer.write_text("stub", encoding="utf-8")
 
-    spawned = {}
-    monkeypatch.setattr(updater.subprocess, "Popen",
-                        lambda cmd, **kw: spawned.update(cmd=cmd, kw=kw))
-
-    updater.launch_installer(installer, Path("C:/app/pitradio.exe"))
-
-    assert spawned["cmd"][0] == str(installer)
-    assert "powershell" not in " ".join(spawned["cmd"]).lower()
-
-
-def test_the_installer_is_told_to_be_silent(tmp_path, monkeypatch):
-    installer = tmp_path / "setup.exe"
-    installer.write_text("stub", encoding="utf-8")
-    spawned = {}
-    monkeypatch.setattr(updater.subprocess, "Popen",
-                        lambda cmd, **kw: spawned.update(cmd=cmd))
-
+    started = {}
+    monkeypatch.setattr(updater.os, "startfile",
+                        lambda path, **kw: started.update(path=path, **kw),
+                        raising=False)
     updater.launch_installer(installer)
 
+    # CreateProcess must not be how this happens.
+    assert not hasattr(updater, "subprocess"), "the updater must not spawn processes"
+    assert started["path"] == str(installer)
     for flag in ("/SILENT", "/NORESTART", "/SUPPRESSMSGBOXES"):
-        assert flag in spawned["cmd"]
+        assert flag in started["arguments"]
+
+
+def test_a_failure_to_start_is_raised_not_swallowed(tmp_path, monkeypatch):
+    """The caller exits the app immediately afterwards, on the assumption this
+    worked. Failing quietly is how "it just closes" happens."""
+    installer = tmp_path / "setup.exe"
+    installer.write_text("stub", encoding="utf-8")
+
+    def refuse(path, **kw):
+        raise OSError(740, "elevation required")
+
+    monkeypatch.setattr(updater.os, "startfile", refuse, raising=False)
+
+    with pytest.raises(OSError):
+        updater.launch_installer(installer)
 
 
 def test_setup_is_not_asked_to_close_this_app(tmp_path, monkeypatch):
@@ -204,31 +213,15 @@ def test_setup_is_not_asked_to_close_this_app(tmp_path, monkeypatch):
     stalls on "Closing applications" behind a dialog. v0.1.13 shipped that."""
     installer = tmp_path / "setup.exe"
     installer.write_text("stub", encoding="utf-8")
-    spawned = {}
-    monkeypatch.setattr(updater.subprocess, "Popen",
-                        lambda cmd, **kw: spawned.update(cmd=cmd))
+    started = {}
+    monkeypatch.setattr(updater.os, "startfile",
+                        lambda path, **kw: started.update(kw), raising=False)
 
     updater.launch_installer(installer)
-    assert "/CLOSEAPPLICATIONS" not in spawned["cmd"]
-
-
-def test_all_three_streams_are_redirected(tmp_path, monkeypatch):
-    """A GUI build launched from a shortcut has invalid standard handles, and
-    inheriting them fails process creation with [WinError 6]."""
-    installer = tmp_path / "setup.exe"
-    installer.write_text("stub", encoding="utf-8")
-    spawned = {}
-    monkeypatch.setattr(updater.subprocess, "Popen",
-                        lambda cmd, **kw: spawned.update(kw=kw))
-
-    updater.launch_installer(installer)
-    for stream in ("stdin", "stdout", "stderr"):
-        assert spawned["kw"][stream] is updater.subprocess.DEVNULL
+    assert "/CLOSEAPPLICATIONS" not in started["arguments"]
 
 
 def test_a_missing_installer_is_refused(tmp_path):
     """Better a visible error than exiting the app for nothing."""
-    import pytest
-
     with pytest.raises(FileNotFoundError):
         updater.launch_installer(tmp_path / "not-there.exe")

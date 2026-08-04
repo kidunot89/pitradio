@@ -216,7 +216,7 @@ def cmd_self_test() -> int:
     """
     windows_only = {
         "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
-        "pitradio.worker", "pitradio.input.joystick",
+        "pitradio.worker",
     }
     modules = [
         "tkinter", "tkinter.ttk",
@@ -232,8 +232,6 @@ def cmd_self_test() -> int:
         "pitradio.gestures", "pitradio.i18n", "pitradio.speech",
         "pitradio.updater", "pitradio.worker",
         "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
-        "pitradio.input.joystick", "pitradio.input.sdlinput",
-        "pitradio.input.sdl3input", "pitradio.input.xinput",
         "pitradio.ui.gui", "pitradio.ui.gui_settings", "pitradio.ui.gui_language",
         "pitradio.ui.theme", "pitradio.ui.logo", "pitradio.ui.tray",
         "pitradio.input", "pitradio.ui",
@@ -251,35 +249,6 @@ def cmd_self_test() -> int:
         except Exception as exc:
             failures.append((name, f"{type(exc).__name__}: {exc}"))
             out(f"  FAILED  {name}: {type(exc).__name__}: {exc}")
-
-    # Importing the bindings proves nothing about the libraries themselves:
-    # both DLLs are bundled data, loaded by path at runtime. A bundle that
-    # drops one would import fine and then silently fall back, losing exactly
-    # the devices that backend was added for. Same shape as the av.utils
-    # failure. SDL3 is required in a frozen build because CI fetches it; from
-    # source it is optional, since a developer may not have run fetch_sdl3.py.
-    for label, module_name, class_name, required in (
-        ("SDL3", "pitradio.input.sdl3input", "Sdl3Joysticks", paths.is_frozen()),
-        ("SDL2", "pitradio.input.sdlinput", "SdlJoysticks", True),
-    ):
-        try:
-            module = importlib.import_module(module_name)
-            probe = getattr(module, class_name)()
-            if probe.start():
-                out(f"  ok      {label} loaded ({len(probe.list_devices())} controllers)")
-                probe.stop()
-            elif required:
-                failures.append((label, probe.failure or "did not initialise"))
-                out(f"  FAILED  {label}: {probe.failure}")
-            else:
-                out(f"  skip    {label}: {probe.failure}")
-        except Exception as exc:
-            detail = f"{type(exc).__name__}: {exc}"
-            if required:
-                failures.append((label, detail))
-                out(f"  FAILED  {label}: {detail}")
-            else:
-                out(f"  skip    {label}: {detail}")
 
     # The catalogues are data files, so a build that dropped them imports
     # perfectly and simply renders English forever, saying nothing.
@@ -328,21 +297,19 @@ def cmd_self_test() -> int:
 
         # Real collaborators, not None. Every one of them is optional, and the
         # None branches skip most of the attribute access — so building with
-        # None proves far less than it appears to. v0.1.4 shipped calling a
-        # method on the joystick watcher that did not exist, and this test
-        # passed anyway because it had handed App a None.
+        # None proves far less than it appears to. v0.1.4 shipped a GUI that
+        # called a method its backend did not have, and this test passed
+        # anyway, because it had handed App a None.
         wiring = {}
         if sys.platform == "win32":
             from pitradio import keys as keys_mod
             from pitradio.input import hook as hook_mod
-            from pitradio.input import joystick as joystick_mod
 
             events: queue.Queue = queue.Queue()
             # Constructing these does not install the hook or start polling;
             # only their run() does, and nothing starts a thread here.
             wiring["hook"] = hook_mod.KeyboardHook(
                 keys_mod.VK["f13"], events, lambda: True)
-            wiring["joystick"] = joystick_mod.JoystickWatcher(events, lambda: True)
 
         gui.App(root, store, AppState(), __version__, use_tray=False, **wiring)
         root.update()
@@ -434,20 +401,6 @@ def _action_keys(cfg) -> dict:
     return actions
 
 
-def _action_buttons(cfg) -> dict:
-    buttons = {}
-    for kind, binding in (
-        (state_mod.TRIGGER_SEND, cfg.send_joystick),
-        (state_mod.TRIGGER_CLEAR, cfg.clear_joystick),
-    ):
-        if binding.button is None:
-            continue
-        buttons[kind] = (binding.guid or "", binding.device, binding.button)
-        log.info("%s button: %s button %s", kind,
-                 binding.name or f"device {binding.device}", binding.button)
-    return buttons
-
-
 def run(args) -> int:
     import tkinter as tk
 
@@ -455,7 +408,6 @@ def run(args) -> int:
     from pitradio import plugins as plugins_mod
     from pitradio import worker as worker_mod
     from pitradio.input import hook as hook_mod
-    from pitradio.input import joystick as joystick_mod
     from pitradio.input import winapi
     from pitradio.ui import gui
 
@@ -503,19 +455,10 @@ def run(args) -> int:
     events: queue.Queue[tuple[str, object]] = queue.Queue()
     hook = hook_mod.KeyboardHook(
         trigger_vk, events, lambda: app_state.enabled, trigger_mods)
-    # A wheel button feeds the same queue, so the worker never learns which
-    # input fired -- and does not need to.
-    joystick_mod.prefer(cfg.joystick.backend,
-                        cfg.joystick.take_over_steam_controller)
-    joystick = joystick_mod.JoystickWatcher(
-        events, lambda: app_state.enabled,
-        cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid,
-        cfg.joystick.name)
     # Send/clear act on a message left waiting when a profile has auto-send
     # off. Armed here as well as on save, or they would only work after
     # visiting Settings once.
     hook.set_actions(_action_keys(cfg))
-    joystick.set_actions(_action_buttons(cfg))
 
     registry = plugins_mod.PluginRegistry()
     registry.start_all()
@@ -542,7 +485,7 @@ def run(args) -> int:
     app = gui.App(
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
-        transcriber=transcriber, hook=hook, joystick=joystick, plugins=registry,
+        transcriber=transcriber, hook=hook, plugins=registry,
         use_tray=not args.no_tray,
     )
 
@@ -551,12 +494,8 @@ def run(args) -> int:
             0, lambda: app._launch_installer(installer)
         )
 
-    for line in joystick_mod.diagnose():
-        log.info("joystick: %s", line)
-
     worker.start()
     hook.start()
-    joystick.start()
     if not hook.wait_until_ready(5.0):
         log.error("the keyboard hook did not come up; the trigger key will do nothing")
 

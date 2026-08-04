@@ -24,9 +24,9 @@ EV_LEVEL = "level"
 EV_UPDATE = "update"
 EV_MODEL = "model"
 
-# Trigger event kinds, shared by the keyboard hook, the joystick watcher and
-# the worker. They live here rather than in hook.py because the GUI needs to
-# name them too, and gui.py must never import anything that reaches winapi.
+# Trigger event kinds, shared by the keyboard hook and the worker. They live
+# here rather than in hook.py because the GUI needs to name them too, and
+# gui.py must never import anything that reaches winapi.
 TRIGGER_DOWN = "down"
 TRIGGER_UP = "up"
 TRIGGER_SEND = "send"

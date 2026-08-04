@@ -40,10 +40,6 @@ jobs:
           pip install -r requirements-dev.txt
           pip install nuitka
 
-      # Before the suite: the SDL3 tests need the DLL, and a release that
-      # skipped them would be the one shipping the untested backend.
-      - name: Fetch SDL3
-        run: python packaging/fetch_sdl3.py
 
       # This workflow built and installed but never ran the suite, so a release
       # could publish with failing tests. It nearly did.

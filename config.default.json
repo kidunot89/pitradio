@@ -2,10 +2,6 @@
   "version": 1,
   "enabled": true,
   "trigger_key": "f13",
-  "joystick": {
-    "device": null,
-    "button": null
-  },
   "audio": {
     "input_device": null,
     "samplerate": 16000,

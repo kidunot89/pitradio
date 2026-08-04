@@ -52,15 +52,8 @@ controller and no speech model. That is deliberate and worth preserving — see
 [DEVELOPING.md](DEVELOPING.md) for how, and why it keeps costing less than it
 saves.
 
-Two optional extras unlock more of it:
-
-| | |
-| --- | --- |
-| `brew install sdl3` / `apt install libsdl3-0` | runs the SDL3 backend tests against a real SDL3 |
-| `python packaging/fetch_sdl3.py` | fetches the Windows DLL, needed to build |
-
-Without SDL3 the tests that need it **skip** — check the summary line if you
-touched anything under `src/pitradio/input/`.
+There is nothing else to install: the suite runs on any platform, with no
+Windows and no audio hardware.
 
 ## Before you open a pull request
 
@@ -80,7 +73,6 @@ cold, and almost every packaging mistake reproduces in minutes on a Windows
 machine:
 
 ```bash
-python packaging/fetch_sdl3.py
 python packaging/build.py
 .\build\pitradio.dist\pitradio.exe --self-test
 ```

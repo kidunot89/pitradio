@@ -26,9 +26,8 @@ log = logging.getLogger(__name__)
 
 TASK_NAME = "PitRadio"
 
-# Capture arms a global hook and a joystick poll. Leaving either armed
-# indefinitely because someone clicked the button and wandered off is worse
-# than making them click again.
+# Capture arms the global hook. Leaving it armed indefinitely because someone
+# clicked the button and wandered off is worse than making them click again.
 CAPTURE_TIMEOUT_MS = 5000
 
 
@@ -245,48 +244,29 @@ def build_settings_tab(app) -> None:
     _row(trigger, 0, t("Trigger key"), key_row,
          t("hold it to talk; it never reaches the game"))
 
-    # Every controller binding is held until Save, so cancelling out of
-    # Settings changes nothing.
-    app.joy_slots = {}
-    talk = joy_slot(app, "talk", cfg.joystick)
-    _row(trigger, 1, t("Wheel / gamepad button"), _binding_row(app, trigger, talk),
-         "works alongside the key — either one triggers")
-
     # Send and clear act on a message left waiting when a profile has
     # auto-send off. The tap/double-tap gestures on the talk trigger do the
-    # same job; these exist for a wheel with buttons to spare, where one
-    # button per action beats counting taps at speed.
+    # same job; these exist for anyone who would rather not count taps.
     app.v_send_key = tk.StringVar(value=cfg.review.send_key)
     app.v_clear_key = tk.StringVar(value=cfg.review.clear_key)
-    send = joy_slot(app, "send", cfg.send_joystick)
-    clear = joy_slot(app, "clear", cfg.clear_joystick)
-    _row(trigger, 2, t("Send waiting message"),
-         _binding_row(app, trigger, send, app.v_send_key),
+    _row(trigger, 1, t("Send waiting message"),
+         _key_binding_row(app, trigger, app.v_send_key),
          t("optional; same as tapping the trigger once"))
-    _row(trigger, 3, t("Clear waiting message"),
-         _binding_row(app, trigger, clear, app.v_clear_key),
+    _row(trigger, 2, t("Clear waiting message"),
+         _key_binding_row(app, trigger, app.v_clear_key),
          t("optional; same as tapping the trigger twice"))
 
-    if app.joystick is None:
-        for slot in app.joy_slots.values():
-            slot["button"].state(["disabled"])
-        ttk.Label(
-            trigger,
-            text=t("Joystick input is unavailable in this run."),
-            foreground="#777",
-        ).grid(row=4, column=0, columnspan=3, sticky="w")
-    else:
-        app.v_joystick_devices = tk.StringVar(value="")
-        ttk.Label(trigger, textvariable=app.v_joystick_devices, foreground="#777",
-                  wraplength=640, justify="left").grid(
-            row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        ttk.Button(trigger, text=t("Rescan controllers"),
-                   command=lambda: _refresh_joystick_devices(app)).grid(
-            row=5, column=1, sticky="w", pady=(4, 0))
-        _refresh_joystick_devices(app)
-
-    # Built whether or not joystick input is available, so it can say which.
-    _build_input_monitor(app, trigger, row=6)
+    # Wheels and gamepads are not read directly. Four input libraries were
+    # tried — SDL3, SDL2, XInput and the legacy multimedia API — and between
+    # them they still could not read a Fanatec rim or a Steam Controller
+    # reliably, because both are claimed by software that does not share.
+    # JoyToKey maps a button to a keyboard key, which the hook already sees.
+    ttk.Label(
+        trigger,
+        text=t("Using a wheel or gamepad button? Map it to a keyboard key "
+               "with JoyToKey, then set that key above."),
+        style="Muted.TLabel", wraplength=640, justify="left",
+    ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
     defaults = ttk.LabelFrame(frame, text=t("Default profile"), padding=10)
     defaults.pack(fill="x", pady=(10, 0))
@@ -386,153 +366,6 @@ def _theme_mode(label: str) -> str:
     return "system"
 
 
-def _joystick_label(app, joystick_cfg) -> str:
-    """What the binding is, whether or not the controller is plugged in.
-
-    A binding resolves by identity, so the bound device may be absent — saying
-    "(not bound)" then would be a lie, and showing a stale index would be worse.
-    The remembered name covers that case.
-    """
-    if joystick_cfg.button is None:
-        return "(not bound)"
-
-    remembered = joystick_cfg.name or None
-    if app.joystick is None:
-        return f"{remembered or f'device {joystick_cfg.device}'}, button {joystick_cfg.button}"
-
-    if joystick_cfg.guid:
-        for device in app.joystick.devices():
-            if device.guid == joystick_cfg.guid:
-                return app.joystick.describe(device.index, joystick_cfg.button)
-        if remembered:
-            return f"{remembered} - button {joystick_cfg.button} (not connected)"
-
-    if joystick_cfg.device is None:
-        return f"button {joystick_cfg.button} (not connected)"
-    return app.joystick.describe(joystick_cfg.device, joystick_cfg.button)
-
-
-# How often the live readout polls. Fast enough that a button press is not
-# missed by a human tapping it, slow enough to be invisible in a frame time.
-MONITOR_MS = 100
-
-
-def _build_input_monitor(app, parent, row: int) -> None:
-    """A live view of what the app can actually see from your controller.
-
-    "Nothing happens when I press the button" has no visible cause: capture and
-    the trigger take different paths, so a binding can capture correctly and
-    then resolve to nothing on every poll, with the app simply not reacting.
-    This turns that into something you can look at.
-
-    Off by default and only polling while it is on — it reads every device's
-    button state, which is cheap but not free, and nobody needs it running
-    while they drive.
-    """
-    app.v_monitor_on = tk.BooleanVar(value=app.store.config.gui.debug)
-    app.v_monitor = tk.StringVar(value="")
-
-    ttk.Checkbutton(
-        parent, text=t("Show live controller input"), variable=app.v_monitor_on,
-        command=lambda: _toggle_input_monitor(app),
-    ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 0))
-    ttk.Label(
-        parent,
-        text=t("Also writes every button press to the log, so you can press "
-               "one with your game focused and read it back here — Steam "
-               "changes what a controller is depending on which window is "
-               "focused, so a button bound from this window may not be the "
-               "one you press while racing."),
-        style="Muted.TLabel", wraplength=640, justify="left",
-    ).grid(row=row + 1, column=0, columnspan=3, sticky="w")
-
-    app.monitor_label = ttk.Label(
-        parent, textvariable=app.v_monitor, style="Muted.TLabel",
-        font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
-        justify="left", wraplength=680)
-    app.monitor_label.grid(row=row + 2, column=0, columnspan=3, sticky="w")
-
-    if app.v_monitor_on.get():
-        _toggle_input_monitor(app)
-
-
-def _toggle_input_monitor(app) -> None:
-    timer = getattr(app, "_monitor_timer", None)
-    if timer is not None:
-        app.root.after_cancel(timer)
-        app._monitor_timer = None
-
-    if app.joystick is not None:
-        app.joystick.set_press_logging(app.v_monitor_on.get())
-
-    if app.v_monitor_on.get():
-        _tick_input_monitor(app)
-    else:
-        app.v_monitor.set("")
-
-
-def _tick_input_monitor(app) -> None:
-    if not app.v_monitor_on.get():
-        return
-    if app.joystick is None:
-        app.v_monitor.set(t("joystick input is unavailable in this run"))
-        return
-
-    lines = []
-    try:
-        for device, held in app.joystick.snapshot():
-            if held is None:
-                # Enumerated but unreadable. Completely different from "you are
-                # not pressing anything", and they used to print the same.
-                state = t("COULD NOT READ — another application may have it")
-            elif held:
-                state = ", ".join(str(b) for b in held)
-            else:
-                state = t("nothing pressed")
-            lines.append(f"[{device.api}] {device.name} "
-                         f"({device.buttons} inputs): {state}")
-        if not lines:
-            lines.append(t("no controllers visible"))
-
-        status = app.joystick.binding_status()
-        if not status.get("bound"):
-            lines.append(t("trigger button: not bound"))
-        elif not status["resolved"]:
-            # The failure that is otherwise completely silent.
-            lines.append(t("trigger button {button}: BOUND DEVICE NOT FOUND "
-                           "(guid {guid})").format(
-                button=status["button"], guid=status["guid"] or "none"))
-        elif not status["readable"]:
-            lines.append(t("trigger button {button}: device found but not "
-                           "responding").format(button=status["button"]))
-        else:
-            state = t("PRESSED") if status["pressed"] else t("up")
-            lines.append(t("trigger button {button} on {name}: {state}").format(
-                button=status["button"], name=status["device"].name, state=state))
-    except Exception as exc:
-        lines.append(f"monitor error: {exc}")
-
-    app.v_monitor.set("\n".join(lines))
-    app._monitor_timer = app.root.after(MONITOR_MS, lambda: _tick_input_monitor(app))
-
-
-def _refresh_joystick_devices(app) -> None:
-    """Report what the joystick interface can actually see.
-
-    Steam Input can capture a controller and re-present it in a form this
-    interface never enumerates, and a Steam Controller in desktop mode is a
-    keyboard and mouse rather than a joystick at all. Without this the user
-    cannot tell "your controller is invisible to Windows here" from "capture is
-    broken", which are entirely different problems.
-    """
-    if app.joystick is None:
-        return
-    lines = app.joystick.diagnose()
-    app.v_joystick_devices.set("\n".join(lines))
-    for line in lines:
-        log.info("joystick: %s", line)
-
-
 class KeyCapture:
     """Binds the next key pressed into a text field.
 
@@ -615,117 +448,17 @@ def _capture_key(app) -> None:
     app.trigger_capture.start()
 
 
-def joy_slot(app, name: str, binding) -> dict:
-    """State for one controller binding in the Settings tab.
-
-    The talk trigger, send and clear each get one. They behave identically, so
-    they share the capture machinery rather than having three near-copies that
-    drift apart — which is how the talk binding ended up with a timeout message
-    the others would have lacked.
-    """
-    slot = {
-        "name": name,
-        "binding": binding,
-        # Held until Save, so leaving Settings without saving changes nothing.
-        "captured": (binding.device, binding.button, binding.guid, binding.name),
-        "var": tk.StringVar(value=_joystick_label(app, binding)),
-        "button": None,
-        "deadline": 0,
-        "timer": None,
-    }
-    app.joy_slots[name] = slot
-    return slot
-
-
-def _capture_button(app, slot) -> None:
-    """Bind the next wheel or gamepad button pressed."""
-    if app.joystick is None:
-        return
-
-    slot["button"].state(["disabled"])
-    slot["var"].set("waiting for a button…")
-    slot["deadline"] = CAPTURE_TIMEOUT_MS
-    _tick_button_capture(app, slot)
-
-    def done(device, button) -> None:
-        def apply() -> None:
-            _end_button_capture(app, slot)
-            slot["captured"] = (device.index, button, device.guid, device.name)
-            slot["var"].set(app.joystick.describe(device.index, button))
-            log.info("captured %s on %r [%s] for %s (save to apply)",
-                     app.joystick.describe(device.index, button),
-                     device.name, device.guid or "no identity", slot["name"])
-
-        app.root.after(0, apply)
-
-    app.joystick.start_capture(done)
-
-
-def _tick_button_capture(app, slot) -> None:
-    remaining = slot["deadline"]
-    if remaining <= 0:
-        log.info("button capture timed out; no button was pressed")
-        _end_button_capture(app, slot)
-        # Say why, rather than silently reverting: with no detected controller
-        # this is the expected outcome and the user needs to know that.
-        slot["var"].set(_joystick_label(app, slot["binding"]))
-        if not app.joystick.list_devices():
-            messagebox.showinfo(
-                t("PitRadio"),
-                "No controller was detected, so no button could be captured.\n\n"
-                "See the controller list under the Trigger section for what "
-                "PitRadio can currently see.",
-            )
-        return
-    slot["button"].configure(text=f"{remaining // 1000}…")
-    slot["deadline"] = remaining - 1000
-    slot["timer"] = app.root.after(1000, lambda: _tick_button_capture(app, slot))
-
-
-def _end_button_capture(app, slot) -> None:
-    if slot["timer"] is not None:
-        app.root.after_cancel(slot["timer"])
-        slot["timer"] = None
-    slot["deadline"] = 0
-    if app.joystick is not None:
-        app.joystick.cancel_capture()
-    slot["button"].state(["!disabled"])
-    slot["button"].configure(text=t("Button…"))
-
-
-def _clear_joystick(app, slot) -> None:
-    slot["captured"] = (None, None, None, None)
-    slot["var"].set("(not bound)")
-    _end_button_capture(app, slot)
-
-
-def _binding_row(app, parent, slot, key_var=None, key_label=None):
-    """A key box and a controller box side by side, for one action.
-
-    Labels are short because six widgets share one row and the window is 720px
-    at its minimum. Spelled out as "Press a button…" the Clear button was
-    pushed off the right edge — found by looking at a screenshot rather than by
-    resizing the window, which is why it survived. The row's own label already
-    says what is being bound.
-    """
+def _key_binding_row(app, parent, key_var, key_label=None):
+    """An entry and a capture button, for one optional key binding."""
     key_label = key_label or t("Key…")
     row = ttk.Frame(parent)
-
-    if key_var is not None:
-        _entry(row, key_var, 12).pack(side="left")
-        key_button = ttk.Button(row, text=key_label, width=7)
-        key_button.pack(side="left", padx=(4, 10))
-        capture = KeyCapture(app, key_var, key_button, append=False, label=key_label)
-        key_button.configure(command=capture.start)
-
-    ttk.Label(row, textvariable=slot["var"], style="Muted.TLabel",
-              width=24).pack(side="left")
-    slot["button"] = ttk.Button(
-        row, text=t("Button…"), width=9,
-        command=lambda: _capture_button(app, slot))
-    slot["button"].pack(side="left", padx=6)
+    _entry(row, key_var, 12).pack(side="left")
+    button = ttk.Button(row, text=key_label, width=8)
+    button.pack(side="left", padx=(4, 0))
+    capture = KeyCapture(app, key_var, button, append=False, label=key_label)
+    button.configure(command=capture.start)
     ttk.Button(row, text=t("Clear"), width=6,
-               command=lambda: _clear_joystick(app, slot)).pack(side="left")
+               command=lambda: key_var.set("")).pack(side="left", padx=(6, 0))
     return row
 
 
@@ -918,21 +651,10 @@ def _save_settings(app) -> None:
     cfg = app.store.config
     cfg.trigger_key = app.v_trigger.get().strip() or cfg.trigger_key
 
-    for slot_name, binding in (
-        ("talk", cfg.joystick),
-        ("send", cfg.send_joystick),
-        ("clear", cfg.clear_joystick),
-    ):
-        slot = app.joy_slots.get(slot_name)
-        if slot is None:
-            continue
-        binding.device, binding.button, binding.guid, binding.name = slot["captured"]
-
     cfg.review.send_key = app.v_send_key.get().strip()
     cfg.review.clear_key = app.v_clear_key.get().strip()
     cfg.gui.theme = _theme_mode(app.v_theme.get())
     cfg.gui.language = _language_code(app.v_language.get())
-    cfg.gui.debug = bool(app.v_monitor_on.get())
 
     _read_profile_vars(app.v_default, cfg.default_profile)
 

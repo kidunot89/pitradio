@@ -27,7 +27,6 @@ pytest -q                             # test suite (runs on any platform)
 pytest tests/test_updater.py -q       # one file
 pytest -q -k checksum                 # one case
 ruff check .                          # lint (config in pyproject.toml)
-python packaging/fetch_sdl3.py        # fetch the bundled SDL3.dll
 python packaging/build.py             # Nuitka build
 python packaging/build.py --version   # print __version__
 python packaging/make_icon.py         # regenerate packaging/icon.ico
@@ -75,11 +74,11 @@ src/pitradio/            the app, as a package
   __init__.py            __version__, and nothing else that imports
   __main__.py            the CLI; `python -m pitradio`
   config paths state keys languages mentions gestures updater worker speech
-  input/                 winapi hook inject joystick sdlinput sdl3input xinput
+  input/                 winapi hook inject
   ui/                    gui gui_settings gui_language tray
   plugins/               per-sim session data
 vendor/                  third-party modules that are deliberately not deps
-packaging/               build, installer, icon, checksums, SDL3 fetch
+packaging/               build, installer, icon, checksums
 tests/
 ```
 
@@ -104,7 +103,7 @@ keep as much as possible testable anyway, and both are load-bearing:
 - **`ui/` must not import `winapi` either.** That is
   what makes `--gui-only` able to launch the real window locally. They reach
   Windows-only functionality through the objects passed into `App` — `hook`,
-  `joystick`, `recorder`, `transcriber`, `worker` — all of which may be `None`,
+  `recorder`, `transcriber`, `worker` — all of which may be `None`,
   and every use site must cope with that.
 
 `pitradio.py` imports `winapi`, `hook`, `worker` and `inject` *inside*
@@ -120,66 +119,28 @@ Four threads, and mixing them up is how this breaks:
 | hook | `WH_KEYBOARD_LL` + its `GetMessageW` pump |
 | worker | audio, transcription, injection — everything slow |
 | tray | pystray's blocking `run()` |
-| joystick | polls wheel/gamepad buttons; feeds the same queue as the hook |
 
-Joystick input has **four backends, combined rather than chosen between**
-(`joystick._ensure_started`, in preference order):
+**Controllers are not read at all.** PitRadio once had four joystick backends
+— SDL3, SDL2, XInput and the legacy multimedia API — merged and deduplicated
+by device identity. All of it was removed in v0.1.27.
 
-| Backend | Sees | Notes |
-| --- | --- | --- |
-| SDL3 ([sdl3input.py](sdl3input.py)) | devices SDL2 never covered, read over HIDAPI | bundled `SDL3.dll` |
-| SDL2 ([sdlinput.py](sdlinput.py)) | the widest range of wheels, pedals, button boxes | bundled `SDL2.dll` |
-| XInput ([xinput.py](xinput.py)) | four slots of anything presenting as an Xbox pad | no library to bundle |
-| legacy (`winapi` via `joystick.LegacyPads`) | whatever the multimedia API reports | the floor |
+It is worth knowing why, because "just add SDL back" is the obvious wrong
+instinct:
 
-A rig routinely spans more than one — a wheel on SDL2 and a pad on XInput is
-ordinary — so `devices()` merges every backend's list and deduplicates by
-identity, earlier backends winning. Picking a single backend, which is what the
-SDL2-only path did, silently drops half the hardware.
+- A Fanatec rim enumerated with **79 inputs** and never reported a press
+  through any of the four.
+- A Steam Controller was only visible at all with `SDL_JOYSTICK_HIDAPI_STEAM`,
+  which *takes the device away from Steam* — breaking the owner's own desktop
+  shortcuts and surfacing touchpad and grip sensors as buttons that chatter or
+  sit permanently down. Turning it off, as the owner rightly insisted, made
+  the controller invisible instead.
+- Both devices are claimed by software that will not share them. Reading them
+  anyway means seizing them, and a dictation app has no business doing that.
 
-**Each `Device` carries the `api` that found it**, and `diagnose()` prints it
-per device. Which backend saw something is the first useful question when it
-does not work: a pad only XInput can see has no real identity, and a device
-missing from every backend is a driver or Steam problem rather than anything
-this app can fix.
-
-A backend that fails to load, or throws while enumerating, must cost only
-itself — never the others and never the app. `--self-test` reports each one and
-fails if SDL2, or SDL3 in a frozen build, did not load, so a bundle that drops
-a DLL is caught rather than silently losing devices.
-
-**`SDL3.dll` is fetched, not committed** — [packaging/fetch_sdl3.py](packaging/fetch_sdl3.py)
-downloads the official libsdl-org release and verifies a pinned SHA256. There is
-no Python package that ships an SDL3 Windows binary (PySDL3 is a pure wrapper
-with no library in it), and a 2.8MB binary in the repo is something nobody
-reviews. CI fetches it before building.
-`tests/test_build_flags.py` parses the DLL's PE export table and asserts every
-symbol `sdl3input` declares actually exists — SDL3 renamed most of the SDL2
-joystick calls (`SDL_JoystickUpdate` became `SDL_UpdateJoysticks`), and a
-misspelling would fail inside `start()`, be caught, and drop silently to SDL2.
-
-`SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS` is not optional: without it SDL drops
-joystick input whenever PitRadio isn't focused, which is always, while racing.
-SDL is also initialised without a video subsystem, so it has no window and no
-focus to gate on, and state polling asks the driver directly rather than going
-through an event queue.
-
-**`SDL_JOYSTICK_THREAD` is not optional either, and is less obvious.** SDL only
-re-scans for devices when its device-change window receives `WM_DEVICECHANGE`,
-and with that hint off SDL creates the window on whichever thread called
-`SDL_Init` — ours, which runs a polling loop and never pumps messages. The
-result is that anything connected *after* startup is never noticed, for the
-life of the process. See `WINDOWS_JoystickDetect`, which returns immediately
-unless `s_bWindowsDeviceChanged` is set.
-
-**Bindings are stored against the device's SDL GUID, not its index** — see
-`JoystickConfig` and `JoystickWatcher._resolve_index`. Indices are positional:
-plug in a headset that enumerates as a controller, or start Steam, and every
-index after it shifts, silently rebinding the trigger to a different device.
-`device` is kept only as the fallback for bindings written before identities
-were recorded. POV hats are folded into the button mask above the physical
-buttons, because a wheel rim's D-pad is a hat and a binding UI that cannot see
-it looks broken to the person pressing it.
+The supported route is **JoyToKey**: the user maps a wheel button to a keyboard
+key, and the existing `WH_KEYBOARD_LL` hook sees it as an ordinary keypress.
+That path has always worked, needs no bundled DLLs, and costs nothing to
+maintain. The Settings → Trigger section says so in the window.
 
 Worker and hook never call into Tk. They publish onto `AppState.events`, which
 the GUI drains on a `root.after(100, …)` tick. Log lines reach the GUI through
@@ -242,11 +203,19 @@ produces a bug with no error message.
   one key at a time, so `ctrl+f12` works by asking `GetAsyncKeyState` about Ctrl
   when F12 arrives. Only the main key is swallowed; swallowing Ctrl would break
   it system-wide.
-- **Button capture waits for a press, not a held button.** Wheel rims and button
-  boxes are covered in toggle switches and rotary encoders that read as
-  permanently down, so "the first button that reads as down" captures one nobody
-  touched. `JoystickWatcher._poll_capture` snapshots what is already held and
-  waits for a change.
+- **`ConfigStore.mark_saved`, not `store.load()`, after the GUI writes.**
+  Reloading builds an equal-but-distinct object graph, so any tab still
+  holding a sub-object of the old one — a `Profile`, a `CueConfig` — goes on
+  mutating an orphan that no later save writes. The edit vanishes with no
+  error, which is indistinguishable from "the setting doesn't persist".
+- **The self-updater launches the installer with `os.startfile`, not
+  `subprocess.Popen`.** Popen is CreateProcess, which refuses to start a
+  `requireAdministrator` binary and fails with ERROR_ELEVATION_REQUIRED (740).
+  The installer is `PrivilegesRequired=admin`. This repo had already recorded
+  that lesson — it is why the installer's own `[Run]` entry carries
+  `shellexec` — and the updater used Popen anyway: the app exited, nothing
+  started, and nothing was logged, because Popen had succeeded at *queuing* a
+  process Windows then refused to elevate.
 
 ## Reviewing before sending
 
@@ -269,14 +238,13 @@ tested — every case in [tests/test_gestures.py](tests/test_gestures.py) is one
 that would otherwise only be found mid-race.
 
 **Send and clear can also be bound directly** — `review.send_key`,
-`review.clear_key`, `send_joystick` and `clear_joystick`, all shown in
-Settings → Trigger. These are *momentary*: the hook and the joystick watcher
-post one event on the press edge and nothing on release, so the worker never
-has to pair them up. They work alongside the gestures rather than replacing
-them.
+`review.clear_key`, both shown in Settings → Trigger. These are *momentary*:
+the hook posts one event on the press edge and nothing on release, so the
+worker never has to pair them up. They work alongside the gestures rather than
+replacing them.
 
 The event kind strings (`TRIGGER_DOWN`/`UP`/`SEND`/`CLEAR`) live in
-[state.py](state.py) and are re-exported by `hook` and `joystick`. They cannot
+[state.py](state.py) and are re-exported by `hook`. They cannot
 live in `hook.py`: the GUI names them when arming a binding, and importing
 `hook` from `gui.py` drags in `winapi` and breaks `--gui-only` everywhere but
 Windows. `test_portable_modules_do_not_reach_winapi` walks the import graph to
@@ -305,8 +273,8 @@ python packaging/build.py
 ```
 
 `--self-test` is the check that matters: it loads every component, opens a real
-window, and verifies SDL2 actually loads. It has caught a missing `av.utils`, a
-missing `SDL2.dll` and a GUI that could not construct.
+window. It has caught a missing `av.utils` and a GUI that could not
+construct.
 
 Also run it **with no console** — `Start-Process` without `-NoNewWindow` — which
 is how a Start Menu shortcut launches it and is not the same code path.

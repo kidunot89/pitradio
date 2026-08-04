@@ -42,7 +42,6 @@ class App:
         recorder=None,
         transcriber=None,
         hook=None,
-        joystick=None,
         plugins=None,
         use_tray: bool = True,
     ):
@@ -55,7 +54,6 @@ class App:
         self.recorder = recorder
         self.transcriber = transcriber
         self.hook = hook
-        self.joystick = joystick
         self.plugins = plugins
         self.tray = None
         self._quitting = False
@@ -263,10 +261,6 @@ class App:
         else:
             parts.append(self.store.config.trigger_key)
 
-        joy = self.store.config.joystick
-        if joy.device is not None and joy.button is not None:
-            parts.append(f"or button {joy.button}")
-
         if not self.state.enabled:
             parts.append("— disabled")
         self.armed_var.set(" ".join(parts))
@@ -329,10 +323,11 @@ class App:
             messagebox.showerror(t("PitRadio"), f"Could not save config:\n{exc}")
             return
         # Keep the store's mtime in step so this write doesn't read back as an
-        # external edit on the next trigger.
-        self.store.load()
+        # external edit on the next trigger. Deliberately not store.load():
+        # that would swap in a fresh object graph and orphan every sub-object
+        # the tabs are holding — see ConfigStore.mark_saved.
+        self.store.mark_saved()
         self._apply_trigger_key()
-        self._apply_joystick_binding()
         self._apply_action_bindings()
         self._refresh_warnings()
         if problems:
@@ -359,16 +354,6 @@ class App:
             log.info("trigger key is now %s", self.store.config.trigger_key)
         except keys.KeyNameError as exc:
             log.error("keeping the previous trigger key: %s", exc)
-
-    def _apply_joystick_binding(self) -> None:
-        """Same reasoning as the trigger key: apply on save, not on next trigger."""
-        if self.joystick is None:
-            return
-        joy = self.store.config.joystick
-        self.joystick.set_binding(joy.device, joy.button, joy.guid, joy.name)
-        if joy.button is not None:
-            log.info("joystick trigger: %s button %s",
-                     joy.name or f"device {joy.device}", joy.button)
 
     def _apply_action_bindings(self) -> None:
         """Arm the send and clear bindings.
@@ -399,19 +384,6 @@ class App:
                 actions[kind] = (vk, mods)
                 log.info("%s key is now %s", kind, spec)
             self.hook.set_actions(actions)
-
-        if self.joystick is not None:
-            buttons = {}
-            for kind, binding in (
-                (state_mod.TRIGGER_SEND, cfg.send_joystick),
-                (state_mod.TRIGGER_CLEAR, cfg.clear_joystick),
-            ):
-                if binding.button is None:
-                    continue
-                buttons[kind] = (binding.guid or "", binding.device, binding.button)
-                log.info("%s button is now %s button %s", kind,
-                         binding.name or f"device {binding.device}", binding.button)
-            self.joystick.set_actions(buttons)
 
     def reload_model(self) -> None:
         """Load the configured model now, off the Tk thread.
@@ -522,7 +494,7 @@ class App:
         except Exception:
             log.debug("could not persist window geometry", exc_info=True)
 
-        for component in (self.tray, self.checker, self.worker, self.hook, self.joystick,
+        for component in (self.tray, self.checker, self.worker, self.hook,
                           self.plugins):
             if component is None:
                 continue

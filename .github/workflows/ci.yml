@@ -94,11 +94,6 @@ jobs:
           pip install nuitka
 
       # Same suite as the Linux job, on the platform that actually ships.
-      # Before pytest, not after: the SDL3 tests need the DLL and this is
-      # the only runner that has it. Fetching later would let them skip
-      # on every platform, which is how untested code ships.
-      - name: Fetch SDL3
-        run: python packaging/fetch_sdl3.py
 
       - run: pytest -q
 

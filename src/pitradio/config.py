@@ -69,38 +69,6 @@ class Profile:
 
 
 @dataclass
-class JoystickConfig:
-    """A wheel or gamepad button as an alternative trigger.
-
-    Works alongside the keyboard trigger rather than replacing it: either fires
-    the same cycle. Buttons are 1-based, matching how wheels label them.
-
-    `guid` is what the binding actually resolves against — device indices shift
-    whenever anything else is plugged in, so storing one alone silently rebinds
-    the trigger to a different device. `device` remains as the fallback for
-    configs written before identities were recorded, and `name` exists only so
-    the GUI can say which controller is bound while it is unplugged.
-    """
-
-    device: Any = None      # joystick id, or null for "not bound"
-    button: Any = None      # 1-based button number
-    guid: Any = None        # stable device identity; preferred over `device`
-    name: Any = None        # remembered label, for display only
-    # Which input library to read controllers through: "auto", "sdl3", "sdl2",
-    # "xinput" or "windows legacy". Only one is ever used — they enumerate the
-    # same hardware, and running two means two libraries opening the same
-    # device. "auto" takes the first that loads, which is almost always right;
-    # this exists for when it is not.
-    backend: str = "auto"
-    # Whether to read a Steam Controller directly, taking it away from Steam.
-    # Off, and it should stay off: PitRadio only needs to *read* button state,
-    # and seizing the device stops Steam's own desktop shortcuts working and
-    # surfaces touchpad and grip sensors as buttons that sit active or chatter.
-    # Here only so someone whose controller is invisible any other way can try.
-    take_over_steam_controller: bool = False
-
-
-@dataclass
 class ReviewConfig:
     """Trigger gestures for a message left waiting when auto_send is off.
 
@@ -219,12 +187,9 @@ class Config:
     version: int = CONFIG_VERSION
     enabled: bool = True
     trigger_key: str = "f13"
-    joystick: JoystickConfig = field(default_factory=JoystickConfig)
     # Wheel/gamepad equivalents of review.send_key and review.clear_key.
     # Top level rather than nested in ReviewConfig so every controller
     # binding has the same shape and the GUI can treat them alike.
-    send_joystick: JoystickConfig = field(default_factory=JoystickConfig)
-    clear_joystick: JoystickConfig = field(default_factory=JoystickConfig)
     review: ReviewConfig = field(default_factory=ReviewConfig)
     mentions: MentionConfig = field(default_factory=MentionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -244,9 +209,6 @@ class Config:
         cfg.enabled = bool(data.get("enabled", True))
         cfg.trigger_key = str(data.get("trigger_key", cfg.trigger_key))
 
-        cfg.joystick = _section(JoystickConfig, data.get("joystick"))
-        cfg.send_joystick = _section(JoystickConfig, data.get("send_joystick"))
-        cfg.clear_joystick = _section(JoystickConfig, data.get("clear_joystick"))
         cfg.review = _section(ReviewConfig, data.get("review"))
         cfg.mentions = _section(MentionConfig, data.get("mentions"))
         cfg.audio = _section(AudioConfig, data.get("audio"))
@@ -272,9 +234,6 @@ class Config:
             "version": self.version,
             "enabled": self.enabled,
             "trigger_key": self.trigger_key,
-            "joystick": asdict(self.joystick),
-            "send_joystick": asdict(self.send_joystick),
-            "clear_joystick": asdict(self.clear_joystick),
             "review": asdict(self.review),
             "mentions": asdict(self.mentions),
             "audio": asdict(self.audio),
@@ -310,19 +269,6 @@ class Config:
             keys.parse_trigger(self.trigger_key)
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
-
-        if not isinstance(self.joystick.take_over_steam_controller, bool):
-            problems.append("joystick.take_over_steam_controller must be true or false")
-
-        if not isinstance(self.joystick.backend, str) or not self.joystick.backend:
-            problems.append('joystick.backend must be "auto" or a backend name')
-
-        for label, binding in (
-            ("joystick", self.joystick),
-            ("send_joystick", self.send_joystick),
-            ("clear_joystick", self.clear_joystick),
-        ):
-            problems.extend(_joystick_problems(label, binding))
 
         # Optional, so an empty string is "unbound" rather than a bad name.
         for label, spec in (
@@ -462,38 +408,6 @@ def _section(cls, raw: Any):
     return cls(**values)
 
 
-def _joystick_problems(label: str, binding: JoystickConfig) -> list[str]:
-    """Everything wrong with one controller binding.
-
-    Shared by the talk trigger and the send/clear bindings — three copies of
-    these rules would drift, and a binding that validates differently from the
-    one beside it is the kind of thing nobody notices until it silently stops
-    working.
-    """
-    bound = (
-        binding.device is not None
-        or binding.button is not None
-        or binding.guid is not None
-    )
-    if not bound:
-        return []
-
-    problems = []
-    # An identity is enough on its own: the index is only consulted when no
-    # identity was recorded, so a binding may legitimately omit it.
-    if binding.guid is None and (
-        not isinstance(binding.device, int) or binding.device < 0
-    ):
-        problems.append(f"{label}.device must be a device number, or null")
-    if binding.guid is not None and not isinstance(binding.guid, str):
-        problems.append(f"{label}.guid must be a device identity string, or null")
-    # 1-based to match the numbering printed on wheels. The ceiling covers
-    # button boxes and the POV hats folded in above them.
-    if not isinstance(binding.button, int) or not 1 <= binding.button <= 128:
-        problems.append(f"{label}.button must be between 1 and 128, or null")
-    return problems
-
-
 # -- persistence ---------------------------------------------------------
 
 
@@ -537,6 +451,23 @@ class ConfigStore:
             self.problems = [f"{self.path} could not be parsed: {exc}"]
         self._mtime = self._current_mtime()
         return self.config
+
+    def mark_saved(self) -> None:
+        """Accept the file on disk as current, without re-reading it.
+
+        Called after the GUI writes the config it is already holding. Reading
+        it back would produce an equal-but-distinct object graph, and anything
+        still referencing a sub-object of the old one — a Profile held by the
+        Profiles tab, a CueConfig captured when the Audio tab was built —
+        would go on mutating an orphan that no later save ever writes. Every
+        such edit is then silently lost, which looks exactly like "it doesn't
+        persist".
+
+        Only the mtime needs updating, so that this write is not mistaken for
+        an external edit on the worker's next trigger.
+        """
+        self.problems = self.config.validate()
+        self._mtime = self._current_mtime()
 
     def maybe_reload(self) -> bool:
         """Reload if the file changed. Returns True when it did."""
