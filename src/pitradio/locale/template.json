@@ -81,6 +81,7 @@
   "Start minimised to tray": "",
   "Save": "",
   "Show live controller input": "",
+  "Also writes every button press to the log, so you can press one with your game focused and read it back here — Steam changes what a controller is depending on which window is focused, so a button bound from this window may not be the one you press while racing.": "",
   "Clear": "",
   "Send automatically": "",
   "off types the message and leaves it for you to send": "",

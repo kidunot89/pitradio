@@ -436,12 +436,21 @@ def _build_input_monitor(app, parent, row: int) -> None:
         parent, text=t("Show live controller input"), variable=app.v_monitor_on,
         command=lambda: _toggle_input_monitor(app),
     ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    ttk.Label(
+        parent,
+        text=t("Also writes every button press to the log, so you can press "
+               "one with your game focused and read it back here — Steam "
+               "changes what a controller is depending on which window is "
+               "focused, so a button bound from this window may not be the "
+               "one you press while racing."),
+        style="Muted.TLabel", wraplength=640, justify="left",
+    ).grid(row=row + 1, column=0, columnspan=3, sticky="w")
 
     app.monitor_label = ttk.Label(
         parent, textvariable=app.v_monitor, style="Muted.TLabel",
         font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
         justify="left", wraplength=680)
-    app.monitor_label.grid(row=row + 1, column=0, columnspan=3, sticky="w")
+    app.monitor_label.grid(row=row + 2, column=0, columnspan=3, sticky="w")
 
     if app.v_monitor_on.get():
         _toggle_input_monitor(app)
@@ -452,6 +461,9 @@ def _toggle_input_monitor(app) -> None:
     if timer is not None:
         app.root.after_cancel(timer)
         app._monitor_timer = None
+
+    if app.joystick is not None:
+        app.joystick.set_press_logging(app.v_monitor_on.get())
 
     if app.v_monitor_on.get():
         _tick_input_monitor(app)

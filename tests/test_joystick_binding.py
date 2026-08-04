@@ -652,3 +652,49 @@ def test_a_device_with_no_inputs_is_not_listed(joystick, monkeypatch):
     monkeypatch.setattr(joystick, "_STARTED", True)
 
     assert [d.name for d in joystick.devices()] == ["Real Wheel"]
+
+
+def test_presses_are_logged_whatever_has_focus(joystick, pad, caplog):
+    """Binding needs the window focused, and for anything Steam mediates that
+    changes what the controller is: Steam Input applies its Desktop
+    configuration to a non-Steam window and the game's configuration to the
+    game. A button captured from the settings window is therefore not
+    necessarily the button pressed while racing.
+
+    So the press has to be readable after the fact, from the log, pressed at
+    the moment that matters.
+    """
+    import logging
+
+    device = pad(name="Steam Controller", buttons=18)
+    w = watcher(joystick)
+    w.set_press_logging(True)
+    w._poll_press_log()
+
+    with caplog.at_level(logging.INFO, logger="pitradio.input.joystick"):
+        device.press(6)
+        w._poll_press_log()
+
+    logged = [r.getMessage() for r in caplog.records
+              if "controller press" in r.getMessage()]
+    assert logged, "the press was not logged"
+    assert "button 7" in logged[0]
+    assert "Steam Controller" in logged[0]
+
+
+def test_a_held_button_is_logged_once(joystick, pad, caplog):
+    """Otherwise holding it fills the log at eighty lines a second."""
+    import logging
+
+    device = pad(name="Wheel", buttons=20)
+    w = watcher(joystick)
+    w.set_press_logging(True)
+    w._poll_press_log()
+
+    with caplog.at_level(logging.INFO, logger="pitradio.input.joystick"):
+        device.press(3)
+        for _ in range(5):
+            w._poll_press_log()
+
+    logged = [r for r in caplog.records if "controller press" in r.getMessage()]
+    assert len(logged) == 1

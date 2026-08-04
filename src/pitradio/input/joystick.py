@@ -421,6 +421,10 @@ class JoystickWatcher(threading.Thread):
         self._action_held: dict[str, bool] = {}
         self._pressed = False
         self._named_fallback_logged = False
+        # Debug aid: log every button press on every device, whatever has
+        # focus. See set_press_logging.
+        self._log_presses = False
+        self._press_state: dict[str, int] = {}
         self._capture: Callable[[Device, int], None] | None = None
         self._baseline: dict[str, int] | None = None
         self._stop = threading.Event()
@@ -488,6 +492,41 @@ class JoystickWatcher(threading.Thread):
         self._action_held.clear()
         self._resolved.clear()
 
+    def set_press_logging(self, enabled: bool) -> None:
+        """Log every button press on every device, to the ordinary app log.
+
+        Binding a controller normally requires the window to have focus, and
+        for anything Steam mediates that changes what the controller *is* —
+        Steam Input applies its Desktop configuration to a non-Steam window and
+        the game's configuration to the game, so the same physical button
+        reports differently depending on what is focused. Capturing a binding
+        in the GUI therefore records the desktop-mode button, and the one
+        pressed while racing never matches.
+
+        With this on, press the button with the *game* focused and read the
+        number out of the log afterwards. It is the only way to learn what the
+        app sees at the moment that matters.
+        """
+        self._log_presses = enabled
+        self._press_state.clear()
+        if enabled:
+            log.info("controller press logging on — press a button with your "
+                     "game focused, then look for 'controller press' here")
+
+    def _poll_press_log(self) -> None:
+        for device in devices():
+            mask = _mask(device)
+            if mask is None:
+                continue
+            previous = self._press_state.get(device.key, 0)
+            for bit in range(device.buttons or 128):
+                weight = 1 << bit
+                if mask & weight and not previous & weight:
+                    log.info("controller press: %s button %d  [%s] %s",
+                             device.name, bit + 1, device.api,
+                             device.guid or "no identity")
+            self._press_state[device.key] = mask
+
     def start_capture(self, on_captured: Callable[[Device, int], None]) -> None:
         """Report the next button *pressed* on any device.
 
@@ -521,6 +560,8 @@ class JoystickWatcher(threading.Thread):
                         self._poll_binding()
                     if self._actions:
                         self._poll_actions()
+                    if self._log_presses:
+                        self._poll_press_log()
             except Exception:
                 # A disconnected wheel must not take the thread down; the
                 # trigger would then be silently dead until a restart.
