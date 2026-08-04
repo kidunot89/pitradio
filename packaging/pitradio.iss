@@ -75,7 +75,7 @@ Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait post
 ; This replaces a PowerShell shim that waited on the app's process id and
 ; relaunched it. That shim never once ran: its transcript, written as the first
 ; statement of the script, was never created on any machine.
-Filename: "{app}\{#AppExe}"; Flags: nowait shellexec; Check: WizardSilent
+Filename: "{app}\{#AppExe}"; Flags: nowait shellexec; Check: LaunchAfterSilentInstall
 
 [UninstallDelete]
 ; Leave %APPDATA%\pitradio alone: config, logs and the cached model are the
@@ -94,4 +94,18 @@ begin
     Exec(ExpandConstant('{sys}\schtasks.exe'),
          '/delete /f /tn PitRadio', '', SW_HIDE,
          ewWaitUntilTerminated, ResultCode);
+end;
+
+[Code]
+function LaunchAfterSilentInstall: Boolean;
+begin
+  { A silent install skips every postinstall entry, so nothing restarts the
+    app — which is why it used to vanish after a self-update. This entry fills
+    that gap.
+
+    But CI installs silently too, to prove the installer works, and it must not
+    be left with a GUI that never exits: the run hung for twenty-four minutes
+    on a step that takes one, then could not uninstall a running exe. CI passes
+    /NOLAUNCH=1. }
+  Result := WizardSilent and (ExpandConstant('{param:NOLAUNCH|0}') <> '1');
 end;

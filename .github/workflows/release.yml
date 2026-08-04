@@ -140,7 +140,7 @@ jobs:
         run: |
           $setup = Get-ChildItem packaging\Output\pitradio-setup-*.exe | Select-Object -First 1
           $p = Start-Process -FilePath $setup.FullName `
-                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' `
+                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOLAUNCH=1' `
                  -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "refusing to publish: install failed (exit $($p.ExitCode))" }
 
@@ -163,7 +163,7 @@ jobs:
 
           # Uninstall again so the runner doesn't carry state into later steps.
           $unins = (Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1).FullName
-          Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/NORESTART' -Wait
+          Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
           for ($i = 0; $i -lt 30 -and (Test-Path "$dir\pitradio.exe"); $i++) { Start-Sleep -Seconds 2 }
 
       - name: Package the portable build

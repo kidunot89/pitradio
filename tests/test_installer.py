@@ -103,12 +103,32 @@ def test_a_silent_install_relaunches_the_app():
     run = [line for line in text.splitlines()
            if line.startswith("Filename:") and "{#AppExe}" in line]
 
-    silent = [line for line in run if "WizardSilent" in line]
-    assert silent, "no [Run] entry gated on WizardSilent"
+    silent = [line for line in run if "LaunchAfterSilentInstall" in line]
+    assert silent, "no [Run] entry gated on a silent-install check"
     assert "skipifsilent" not in silent[0], (
         "the silent entry must not also skip when silent"
     )
     # And the interactive one must still skip, or an attended install launches
     # the app twice.
-    interactive = [line for line in run if "WizardSilent" not in line]
+    interactive = [line for line in run if "LaunchAfterSilentInstall" not in line]
     assert interactive and "skipifsilent" in interactive[0]
+
+
+def test_a_silent_install_can_be_told_not_to_launch():
+    """CI installs silently to prove the installer works, and must not be left
+    running a GUI that never exits.
+
+    Without this the release run hung for twenty-four minutes on a step that
+    takes one, then could not uninstall an exe that was still running.
+    """
+    text = (Path(__file__).parent.parent / "packaging" / "pitradio.iss").read_text(
+        encoding="utf-8")
+
+    assert "LaunchAfterSilentInstall" in text, "the silent [Run] entry has no override"
+    assert "{param:NOLAUNCH|0}" in text, "no /NOLAUNCH parameter is honoured"
+
+    for name in ("ci.yml", "release.yml"):
+        workflow = (Path(__file__).parent.parent / ".github" / "workflows" / name
+                    ).read_text(encoding="utf-8")
+        if "/VERYSILENT" in workflow:
+            assert "/NOLAUNCH=1" in workflow, f"{name} installs without /NOLAUNCH"

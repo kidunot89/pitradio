@@ -204,7 +204,7 @@ jobs:
         run: |
           $setup = Get-ChildItem packaging\Output\pitradio-setup-*.exe | Select-Object -First 1
           $p = Start-Process -FilePath $setup.FullName `
-                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' `
+                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOLAUNCH=1' `
                  -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "install failed (exit $($p.ExitCode))" }
 
@@ -244,7 +244,7 @@ jobs:
         run: |
           $dir = "C:\Program Files\PitRadio"
           $unins = (Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1).FullName
-          Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/NORESTART' -Wait
+          Start-Process -FilePath $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
 
           # Inno's uninstaller copies itself to temp and relaunches, so -Wait can
           # return before the removal has actually finished.
