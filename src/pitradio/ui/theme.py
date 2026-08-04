@@ -162,6 +162,106 @@ def resolve(mode: str) -> Palette:
     return DARK_PALETTE if system_prefers_dark() else LIGHT_PALETTE
 
 
+INDICATOR_PX = 15
+# Transparent space to the right of the box. An image element ignores
+# `indicatormargin`, so the gap between indicator and label has to be part of
+# the artwork or the tick sits flush against the text.
+INDICATOR_GAP_PX = 7
+
+
+def _indicator_images(palette: Palette) -> dict:
+    """Draw the checkbox indicator, because clam's is an X.
+
+    clam renders a *cross* for the selected state, not a tick. On a control
+    labelled "Enabled" that reads as "no" — it is the glyph that made the
+    header checkbox look broken. The shape is baked into the theme's C
+    element, so no amount of colour configuration reaches it; the only way to
+    get a checkmark is to supply the artwork.
+
+    Drawn at 4x and downsampled, so the tick has smooth edges at the 15px it
+    is actually shown at. Returned rather than stored: the caller has to keep
+    a reference, because Tk holds images weakly and a collected one leaves an
+    empty square with no error.
+    """
+    from PIL import Image, ImageDraw, ImageTk
+
+    scale = 4
+    size = INDICATOR_PX * scale
+    width = (INDICATOR_PX + INDICATOR_GAP_PX) * scale
+    radius = 4 * scale
+
+    def draw(fill: str, border: str, tick: str | None) -> ImageTk.PhotoImage:
+        image = Image.new("RGBA", (width, size), (0, 0, 0, 0))
+        pen = ImageDraw.Draw(image)
+        pen.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius,
+                              fill=fill, outline=border, width=scale)
+        if tick:
+            # Three points, not a font glyph: a checkmark drawn as two strokes
+            # stays legible at 15px where a scaled-down "✓" turns to mush.
+            pen.line([(size * 0.26, size * 0.52),
+                      (size * 0.44, size * 0.70),
+                      (size * 0.76, size * 0.30)],
+                     fill=tick, width=int(scale * 1.8), joint="curve")
+        return ImageTk.PhotoImage(image.resize(
+            (INDICATOR_PX + INDICATOR_GAP_PX, INDICATOR_PX), Image.LANCZOS))
+
+    return {
+        "off": draw(palette.surface, palette.border, None),
+        "on": draw(palette.accent, palette.accent, palette.accent_text),
+        "off_hover": draw(palette.surface_alt, palette.text_muted, None),
+        "on_hover": draw(palette.recording, palette.recording, palette.accent_text),
+        "disabled": draw(palette.window, palette.border, None),
+    }
+
+
+def _install_indicator(root, style, palette) -> bool:
+    """Swap the drawn indicator in for clam's. True if it took.
+
+    Element names are per-interpreter and cannot be redefined, so each palette
+    gets its own and a second call for the same one simply reuses it — which
+    is what makes switching theme at runtime survivable.
+    """
+    from tkinter import TclError
+
+    name = f"PitRadio{palette.name.capitalize()}.Checkbutton.indicator"
+    images = getattr(root, "_pitradio_indicators", {})
+
+    if palette.name not in images:
+        try:
+            drawn = _indicator_images(palette)
+        except Exception as exc:
+            # Pillow missing or a draw failure: keep clam's X rather than
+            # losing the checkbox entirely.
+            log.debug("could not draw the checkbox indicator: %s", exc)
+            return False
+        images[palette.name] = drawn
+        # Held on the root: Tk keeps only a weak reference to a PhotoImage.
+        root._pitradio_indicators = images
+        try:
+            style.element_create(
+                name, "image", drawn["on"],
+                ("disabled", drawn["disabled"]),
+                ("!selected", "active", drawn["off_hover"]),
+                ("selected", "active", drawn["on_hover"]),
+                ("!selected", drawn["off"]),
+                border=0, sticky="",
+            )
+        except TclError as exc:
+            log.debug("could not create the indicator element: %s", exc)
+            return False
+
+    for widget in ("TCheckbutton", "TRadiobutton"):
+        style.layout(widget, [
+            (f"{widget[1:]}.padding", {"sticky": "nswe", "children": [
+                (name, {"side": "left", "sticky": ""}),
+                (f"{widget[1:]}.focus", {"side": "left", "sticky": "w",
+                                         "children": [
+                    (f"{widget[1:]}.label", {"sticky": "nswe"})]}),
+            ]}),
+        ])
+    return True
+
+
 def apply(root, mode: str = SYSTEM) -> Palette:
     """Style every ttk widget class the app uses. Returns the palette applied.
 
@@ -281,24 +381,61 @@ def apply(root, mode: str = SYSTEM) -> Palette:
                           ("disabled", palette.surface_alt)],
               foreground=[("disabled", palette.text_muted)])
 
-    # indicatorcolor is the box's *fill*, and clam draws the tick in the
-    # foreground colour on top of it. Leaving indicatorforeground alone gives
-    # a dark tick on a dark-red fill, which reads as a smudged glyph rather
-    # than a checkmark — which is exactly how the Enabled box looked.
+    # The option is `indicatorbackground`, not `indicatorcolor`. clam's
+    # Checkbutton.indicator element offers indicatorsize, indicatormargin,
+    # indicatorbackground, indicatorforeground, upperbordercolor and
+    # lowerbordercolor — and nothing else. ttk ignores an option an element
+    # does not declare, without raising, so mapping `indicatorcolor` did
+    # exactly nothing and a ticked box was indistinguishable from an empty
+    # one. Ask element_options() before writing a map; guessing the name
+    # fails silently every time.
     style.configure("TCheckbutton", background=palette.window,
                     foreground=palette.text, focuscolor=palette.accent,
-                    indicatorcolor=palette.surface,
+                    indicatorbackground=palette.surface,
                     indicatorforeground=palette.accent_text,
-                    indicatorrelief="flat", indicatormargin=(0, 0, 6, 0),
-                    padding=(2, 3))
-    style.map("TCheckbutton",
-              background=[("active", palette.window)],
-              indicatorcolor=[("selected", palette.accent),
-                              ("active", palette.surface_alt),
-                              ("!selected", palette.surface)],
-              indicatorforeground=[("selected", palette.accent_text)])
+                    upperbordercolor=palette.border,
+                    lowerbordercolor=palette.border,
+                    indicatormargin=(0, 0, 7, 0), padding=(2, 3))
+    style.map(
+        "TCheckbutton",
+        background=[("active", palette.window)],
+        indicatorbackground=[
+            # Order matters: ttk takes the first matching spec, so the
+            # selected+hover pair has to precede the plain hover one or a
+            # ticked box loses its fill the moment the pointer touches it.
+            ("selected", "pressed", palette.recording),
+            ("selected", "active", palette.recording),
+            ("selected", palette.accent),
+            ("active", palette.surface_alt),
+            ("disabled", palette.window),
+            ("!selected", palette.surface),
+        ],
+        indicatorforeground=[("selected", palette.accent_text),
+                             ("disabled", palette.text_muted)],
+        upperbordercolor=[("selected", palette.accent),
+                          ("active", palette.text_muted)],
+        lowerbordercolor=[("selected", palette.accent),
+                          ("active", palette.text_muted)],
+    )
     style.configure("Card.TCheckbutton", background=palette.surface)
     style.map("Card.TCheckbutton", background=[("active", palette.surface)])
+
+    # Replaces clam's cross with a drawn tick. Falls back silently to the
+    # stock indicator, which is wrong-looking but present.
+    _install_indicator(root, style, palette)
+
+    # Radiobuttons share the indicator element and the same trap.
+    style.configure("TRadiobutton", background=palette.window,
+                    foreground=palette.text, focuscolor=palette.accent,
+                    indicatorbackground=palette.surface,
+                    indicatorforeground=palette.accent_text,
+                    upperbordercolor=palette.border,
+                    lowerbordercolor=palette.border)
+    style.map("TRadiobutton",
+              background=[("active", palette.window)],
+              indicatorbackground=[("selected", palette.accent),
+                                   ("active", palette.surface_alt),
+                                   ("!selected", palette.surface)])
 
     # borderwidth=0 on the notebook itself: clam draws a sunken frame around
     # the page area, and a 3D bevel around flat content is the other half of
@@ -310,14 +447,22 @@ def apply(root, mode: str = SYSTEM) -> Palette:
                     foreground=palette.text_muted, padding=(16, 9),
                     bordercolor=palette.window, borderwidth=0,
                     lightcolor=palette.window, darkcolor=palette.window)
+    # clam maps padding to "6 4 6 2" when selected against a base of
+    # "6 2 6 2" — two extra pixels on top, which shifts the selected tab's
+    # label down and makes the strip look misaligned as you click along it.
+    # Only the colour should change, so padding is mapped back to the same
+    # value it has unselected. Mapping `expand` instead does nothing: clam
+    # leaves that map empty and never consults it.
+    tab_padding = (16, 9, 16, 9)
+    style.configure("TNotebook.Tab", padding=tab_padding)
     style.map("TNotebook.Tab",
+              padding=[("selected", tab_padding), ("active", tab_padding)],
               background=[("selected", palette.surface),
                           ("active", palette.surface_alt)],
               foreground=[("selected", palette.text),
                           ("active", palette.text)],
               lightcolor=[("selected", palette.surface)],
-              darkcolor=[("selected", palette.surface)],
-              expand=[("selected", (0, 0, 0, 0))])
+              darkcolor=[("selected", palette.surface)])
 
     style.configure("TSeparator", background=palette.border)
 
