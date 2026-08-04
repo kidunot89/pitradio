@@ -130,6 +130,9 @@ class SdlJoysticks:
 
     version = "SDL2"
 
+    #: Whether to take a Steam Controller away from Steam.
+    steam_hidapi = False
+
     def __init__(self) -> None:
         self._lib: ctypes.CDLL | None = None
         self._lock = threading.Lock()
@@ -153,8 +156,13 @@ class SdlJoysticks:
 
             try:
                 self._declare(lib)
-                for hint in (HINT_BACKGROUND_EVENTS, HINT_HIDAPI, HINT_HIDAPI_STEAM):
+                for hint in (HINT_BACKGROUND_EVENTS, HINT_HIDAPI):
                     lib.SDL_SetHint(hint, b"1")
+                # See sdl3input.HINT_HIDAPI_STEAM: taking the controller away
+                # from Steam breaks its desktop shortcuts and surfaces sensor
+                # "buttons" nobody wants.
+                lib.SDL_SetHint(HINT_HIDAPI_STEAM,
+                                b"1" if self.steam_hidapi else b"0")
                 if lib.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0:
                     self._failure = self._error(lib)
                     return False

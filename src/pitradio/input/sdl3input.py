@@ -38,8 +38,17 @@ SDL_INIT_GAMEPAD = 0x00002000
 # Without this SDL discards joystick input whenever its process is not focused.
 # PitRadio is unfocused by definition while you are driving.
 HINT_BACKGROUND_EVENTS = b"SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"
-# The HIDAPI drivers are what read a Steam Controller directly.
 HINT_HIDAPI = b"SDL_JOYSTICK_HIDAPI"
+
+# Reading a Steam Controller directly over HIDAPI, instead of through whatever
+# Steam presents. Off by default, because it takes the device away from Steam:
+# its desktop keyboard/mouse shortcuts stop working while PitRadio is running,
+# and the raw device exposes touchpads and grip sensors as buttons that sit
+# active or chatter — 20 and 22 on a real one — which is noise nobody asked for.
+#
+# Seizing a user's controller to read a button is the wrong trade. With this
+# off, SDL sees the virtual pad Steam already publishes, which is what every
+# other application sees.
 HINT_HIDAPI_STEAM = b"SDL_JOYSTICK_HIDAPI_STEAM"
 # Not optional, and the least obvious of the four. SDL only re-scans for
 # devices when its device-change window receives WM_DEVICECHANGE, and with this
@@ -116,6 +125,10 @@ class Sdl3Joysticks:
 
     version = "SDL3"
 
+    #: Whether to take a Steam Controller away from Steam. See
+    #: HINT_HIDAPI_STEAM; set from config before start().
+    steam_hidapi = False
+
     def __init__(self) -> None:
         self._lib: ctypes.CDLL | None = None
         self._lock = threading.Lock()
@@ -140,8 +153,10 @@ class Sdl3Joysticks:
             try:
                 self._declare(lib)
                 for hint in (HINT_BACKGROUND_EVENTS, HINT_HIDAPI,
-                             HINT_HIDAPI_STEAM, HINT_JOYSTICK_THREAD):
+                             HINT_JOYSTICK_THREAD):
                     lib.SDL_SetHint(hint, b"1")
+                lib.SDL_SetHint(HINT_HIDAPI_STEAM,
+                                b"1" if self.steam_hidapi else b"0")
                 # SDL3 returns true on success, where SDL2 returned 0.
                 if not lib.SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD):
                     self._failure = self._error(lib)

@@ -48,6 +48,17 @@ from pitradio.state import (  # noqa: F401  (re-exported for callers)
 log = logging.getLogger(__name__)
 
 POLL_SECONDS = 0.012
+
+# Capture settles for this long before it will accept anything, folding
+# everything seen during the window into the ignore set. A Steam Controller
+# reports its touchpads and grip sensors as buttons that sit active or chatter
+# — buttons 20 and 22 on one — and a single-frame snapshot only catches the
+# ones that happen to be active at that instant.
+CAPTURE_SETTLE_POLLS = 25          # ~300ms
+
+# And a press has to persist this long to count, so a one-frame blip from a
+# noisy sensor cannot win the binding. A deliberate press lasts far longer.
+CAPTURE_CONFIRM_POLLS = 3          # ~36ms
 MAX_DEVICES = 16
 
 # Backends in preference order. Every one of them sees hardware the others
@@ -72,16 +83,27 @@ _STARTED = False
 _preferred = "auto"
 
 
-def prefer(backend_name: str) -> None:
+#: Whether the SDL backends should take a Steam Controller away from Steam.
+_take_over_steam = False
+
+
+def prefer(backend_name: str, take_over_steam: bool = False) -> None:
     """Pin the backend, or "auto". Takes effect on the next start."""
-    global _preferred, _STARTED
-    if backend_name != _preferred:
+    global _preferred, _take_over_steam
+    if backend_name != _preferred or take_over_steam != _take_over_steam:
         _preferred = backend_name or "auto"
+        _take_over_steam = take_over_steam
         stop_all()
 
 
 def _candidates() -> list:
-    order = [sdl3input.Sdl3Joysticks(), sdlinput.SdlJoysticks()]
+    sdl3 = sdl3input.Sdl3Joysticks()
+    sdl2 = sdlinput.SdlJoysticks()
+    # Read-only unless explicitly told otherwise: reading a button state does
+    # not require owning the device, and taking it from whatever owns it breaks
+    # that application.
+    sdl3.steam_hidapi = sdl2.steam_hidapi = _take_over_steam
+    order = [sdl3, sdl2]
     if sys.platform == "win32":
         # Imported here, not at module scope: ctypes.wintypes raises off
         # Windows, and this module has to stay importable for the tests.
@@ -427,6 +449,9 @@ class JoystickWatcher(threading.Thread):
         self._press_state: dict[str, int] = {}
         self._capture: Callable[[Device, int], None] | None = None
         self._baseline: dict[str, int] | None = None
+        self._settled = 0
+        self._candidate: tuple[str, int] | None = None
+        self._candidate_polls = 0
         self._stop = threading.Event()
         self._missing_logged = False
 
@@ -534,11 +559,15 @@ class JoystickWatcher(threading.Thread):
         released and pressed again — see the module docstring.
         """
         self._baseline = None
+        self._settled = 0
+        self._candidate = None
         self._capture = on_captured
 
     def cancel_capture(self) -> None:
         self._capture = None
         self._baseline = None
+        self._settled = 0
+        self._candidate = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -658,30 +687,53 @@ class JoystickWatcher(threading.Thread):
                 continue
             snapshot[device.key] = (device, mask)
 
-        # First pass records what is already held, so a latched switch on the
-        # rim does not win the race against the button being pressed.
+        # Settling window. Everything seen active at any point during it is
+        # folded into the ignore set — not just what was active on the first
+        # frame. Rims and button boxes carry latched switches, and a Steam
+        # Controller reports touchpads and grip sensors as buttons that sit on
+        # or flicker. Any of them would otherwise win the binding before the
+        # user has pressed anything.
         if self._baseline is None:
-            self._baseline = {key: mask for key, (_, mask) in snapshot.items()}
+            self._baseline = {}
+        if self._settled < CAPTURE_SETTLE_POLLS:
+            for key, (_device, mask) in snapshot.items():
+                self._baseline[key] = self._baseline.get(key, 0) | mask
+            self._settled += 1
             return
 
         for key, (device, mask) in snapshot.items():
             fresh = mask & ~self._baseline.get(key, 0)
             if not fresh:
                 continue
-            # Lowest set bit wins if several arrive in the same poll, so the
-            # result is stable rather than dependent on iteration order.
+            # Lowest set bit wins if several arrive together, so the result is
+            # stable rather than dependent on iteration order.
             button = (fresh & -fresh).bit_length()
+
+            # Held across consecutive polls before it counts. A sensor that
+            # blips for one frame cannot take the binding from a real press.
+            if self._candidate != (key, button):
+                self._candidate = (key, button)
+                self._candidate_polls = 1
+                return
+            self._candidate_polls += 1
+            if self._candidate_polls < CAPTURE_CONFIRM_POLLS:
+                return
+
             callback, self._capture = self._capture, None
             self._baseline = None
+            self._candidate = None
             try:
                 callback(device, button)
             except Exception:
                 log.exception("joystick capture callback failed")
             return
 
-        # Released buttons stop counting as held, so a switch can be bound by
-        # flicking it off and on again.
-        for key, (_, mask) in snapshot.items():
+        # Nothing fresh this poll: a candidate that vanished was a blip.
+        self._candidate = None
+
+        # Released buttons stop counting as held, so a switch can still be
+        # bound by flicking it off and on again.
+        for key, (_device, mask) in snapshot.items():
             self._baseline[key] = self._baseline.get(key, 0) & mask
 
     def _post(self, kind: str) -> None:

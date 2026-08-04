@@ -92,6 +92,12 @@ class JoystickConfig:
     # device. "auto" takes the first that loads, which is almost always right;
     # this exists for when it is not.
     backend: str = "auto"
+    # Whether to read a Steam Controller directly, taking it away from Steam.
+    # Off, and it should stay off: PitRadio only needs to *read* button state,
+    # and seizing the device stops Steam's own desktop shortcuts working and
+    # surfaces touchpad and grip sensors as buttons that sit active or chatter.
+    # Here only so someone whose controller is invisible any other way can try.
+    take_over_steam_controller: bool = False
 
 
 @dataclass
@@ -304,6 +310,9 @@ class Config:
             keys.parse_trigger(self.trigger_key)
         except keys.KeyNameError as exc:
             problems.append(f"trigger_key: {exc}")
+
+        if not isinstance(self.joystick.take_over_steam_controller, bool):
+            problems.append("joystick.take_over_steam_controller must be true or false")
 
         if not isinstance(self.joystick.backend, str) or not self.joystick.backend:
             problems.append('joystick.backend must be "auto" or a backend name')

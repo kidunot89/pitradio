@@ -505,7 +505,8 @@ def run(args) -> int:
         trigger_vk, events, lambda: app_state.enabled, trigger_mods)
     # A wheel button feeds the same queue, so the worker never learns which
     # input fired -- and does not need to.
-    joystick_mod.prefer(cfg.joystick.backend)
+    joystick_mod.prefer(cfg.joystick.backend,
+                        cfg.joystick.take_over_steam_controller)
     joystick = joystick_mod.JoystickWatcher(
         events, lambda: app_state.enabled,
         cfg.joystick.device, cfg.joystick.button, cfg.joystick.guid,

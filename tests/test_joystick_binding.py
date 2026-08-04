@@ -46,6 +46,23 @@ def watcher(module, **kwargs):
     return module.JoystickWatcher(queue.Queue(), lambda: True, **kwargs)
 
 
+def settle(module, w):
+    """Poll out the capture settling window.
+
+    Capture ignores everything active during it, which is what stops a Steam
+    Controller's touchpad and grip sensors — permanently active buttons 20 and
+    22 on a real one — from taking the binding before a key is pressed.
+    """
+    for _ in range(module.CAPTURE_SETTLE_POLLS):
+        w._poll_capture()
+
+
+def confirm(module, w):
+    """Poll long enough for a held press to be confirmed."""
+    for _ in range(module.CAPTURE_CONFIRM_POLLS):
+        w._poll_capture()
+
+
 def drain(events):
     return [events.get_nowait()[0] for _ in range(events.qsize())]
 
@@ -141,13 +158,11 @@ def test_capture_ignores_a_switch_that_is_already_held(joystick, pad):
     w = watcher(joystick)
     w.start_capture(lambda dev, button: captured.append(button))
 
-    w._poll_capture()                      # snapshot it
-    assert captured == []
-    w._poll_capture()
+    settle(joystick, w)                    # fold the latched switch into noise
     assert captured == []
 
     device.press(4)                        # a real press
-    w._poll_capture()
+    confirm(joystick, w)
     assert captured == [5]
 
 
@@ -160,9 +175,9 @@ def test_capture_takes_a_press_on_any_device(joystick, pad):
     w = watcher(joystick)
     w.start_capture(lambda dev, button: captured.append((dev.name, button)))
 
-    w._poll_capture()
+    settle(joystick, w)
     box.press(12)
-    w._poll_capture()
+    confirm(joystick, w)
 
     assert captured == [("Button Box", 13)]
 
@@ -177,9 +192,9 @@ def test_a_hat_can_be_captured(joystick, pad):
     w = watcher(joystick)
     w.start_capture(lambda dev, button: captured.append(button))
 
-    w._poll_capture()
+    settle(joystick, w)
     device.hat(0, sdl3input.SDL_HAT_UP)
-    w._poll_capture()
+    confirm(joystick, w)
 
     assert captured == [11]                # first input after the 10 buttons
 
@@ -193,11 +208,11 @@ def test_a_released_switch_can_be_bound_by_flicking_it(joystick, pad):
     w = watcher(joystick)
     w.start_capture(lambda dev, button: captured.append(button))
 
-    w._poll_capture()                      # held
+    settle(joystick, w)                    # held
     device.press(0, down=False)
     w._poll_capture()                      # released — stops counting as held
     device.press(0)
-    w._poll_capture()                      # pressed again
+    confirm(joystick, w)                   # pressed again
 
     assert captured == [1]
 
@@ -209,9 +224,9 @@ def test_capture_fires_once(joystick, pad):
     w = watcher(joystick)
     w.start_capture(lambda dev, button: captured.append(button))
 
-    w._poll_capture()
+    settle(joystick, w)
     device.press(0)
-    for _ in range(3):
+    for _ in range(10):
         w._poll_capture()
 
     assert captured == [1]
@@ -698,3 +713,76 @@ def test_a_held_button_is_logged_once(joystick, pad, caplog):
 
     logged = [r for r in caplog.records if "controller press" in r.getMessage()]
     assert len(logged) == 1
+
+
+def test_capture_ignores_a_sensor_that_chatters(joystick, pad):
+    """A Steam Controller's touchpads and grip sensors report as buttons.
+
+    On a real one, 20 and 22 come and go on their own. A single-frame baseline
+    only excludes what happened to be active at that instant, so the next blip
+    read as a fresh press and took the binding — leaving a binding to a phantom
+    that never fires when a real button is pressed.
+    """
+    device = pad(name="Steam Controller", buttons=26)
+
+    captured = []
+    w = watcher(joystick)
+    w.start_capture(lambda dev, button: captured.append(button))
+
+    # Chattering through the settling window: on, off, on, off...
+    for poll in range(joystick.CAPTURE_SETTLE_POLLS):
+        device.press(21, down=poll % 2 == 0)
+        w._poll_capture()
+
+    # It keeps chattering; none of it may be taken as a press.
+    for poll in range(20):
+        device.press(21, down=poll % 2 == 0)
+        w._poll_capture()
+    assert captured == []
+
+    # A real, sustained press still wins.
+    device.press(4)
+    confirm(joystick, w)
+    assert captured == [5]
+
+
+def test_a_single_frame_blip_cannot_take_the_binding(joystick, pad):
+    """One poll of noise is not a press; a deliberate one lasts far longer."""
+    device = pad(name="Steam Controller", buttons=26)
+
+    captured = []
+    w = watcher(joystick)
+    w.start_capture(lambda dev, button: captured.append(button))
+    settle(joystick, w)
+
+    device.press(9)
+    w._poll_capture()          # seen once
+    device.press(9, down=False)
+    w._poll_capture()          # gone again
+    assert captured == []
+
+
+# -- reading, not owning ---------------------------------------------------
+
+
+def test_the_sdl_backends_do_not_take_a_controller_by_default(joystick):
+    """Reading a button state does not require owning the device.
+
+    SDL's HIDAPI Steam driver opens a Steam Controller directly, which takes it
+    from Steam: its desktop keyboard and mouse shortcuts stop working, and the
+    raw device reports touchpads and grip sensors as buttons that sit active or
+    chatter. Breaking another application to read a button is the wrong trade.
+    """
+    joystick._take_over_steam = False
+    for backend in joystick._candidates():
+        if backend.version.startswith("SDL"):
+            assert backend.steam_hidapi is False
+
+
+def test_it_can_be_turned_on_for_a_controller_nothing_else_sees(joystick):
+    joystick.prefer("auto", True)
+    try:
+        sdl = [b for b in joystick._candidates() if b.version.startswith("SDL")]
+        assert sdl and all(b.steam_hidapi is True for b in sdl)
+    finally:
+        joystick.prefer("auto", False)
