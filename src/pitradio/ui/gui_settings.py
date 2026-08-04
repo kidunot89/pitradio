@@ -481,8 +481,16 @@ def _tick_input_monitor(app) -> None:
     lines = []
     try:
         for device, held in app.joystick.snapshot():
-            pressed = ", ".join(str(b) for b in held) if held else "—"
-            lines.append(f"[{device.api}] {device.name}: {pressed}")
+            if held is None:
+                # Enumerated but unreadable. Completely different from "you are
+                # not pressing anything", and they used to print the same.
+                state = t("COULD NOT READ — another application may have it")
+            elif held:
+                state = ", ".join(str(b) for b in held)
+            else:
+                state = t("nothing pressed")
+            lines.append(f"[{device.api}] {device.name} "
+                         f"({device.buttons} inputs): {state}")
         if not lines:
             lines.append(t("no controllers visible"))
 

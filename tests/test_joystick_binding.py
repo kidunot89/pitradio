@@ -520,6 +520,18 @@ def test_the_monitor_reports_which_buttons_are_held(joystick, pad):
     assert held == [1, 5]
 
 
+def test_an_unreadable_device_is_not_reported_as_idle(joystick, monkeypatch):
+    """A device that enumerates and then cannot be read looks exactly like one
+    nobody is touching, and those need entirely different investigation."""
+    backend = StubBackend("SDL3", {0: ("FANATEC Wheel", 79, "wheel-guid")})
+    backend.button_mask = lambda native: None
+    monkeypatch.setattr(joystick, "_BACKENDS", [backend])
+    monkeypatch.setattr(joystick, "_STARTED", True)
+
+    (_device, held), = joystick.snapshot()
+    assert held is None, "unreadable must not collapse into empty"
+
+
 def test_the_monitor_says_when_a_binding_resolves_to_nothing(joystick, pad):
     """The failure that is otherwise completely silent.
 

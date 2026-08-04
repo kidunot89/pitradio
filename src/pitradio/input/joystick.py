@@ -372,20 +372,21 @@ def diagnose() -> list[str]:
     return lines
 
 
-def held_buttons(device: Device) -> list[int]:
+def held_buttons(device: Device) -> list[int] | None:
     """Which of a device's buttons are down right now, 1-based.
 
-    For the live readout. The trigger path cannot report this — it only ever
-    asks about the one bit it is bound to, so when a binding is wrong it has
-    nothing to say beyond "no".
+    **None means the read failed**, which is a different thing from an empty
+    list and has to stay distinguishable. A device that enumerates with 79
+    inputs and then cannot be read looks identical to one nobody is touching,
+    and those two need entirely different investigation.
     """
     mask = _mask(device)
-    if not mask:
-        return []
+    if mask is None:
+        return None
     return [bit + 1 for bit in range(device.buttons or 128) if mask & (1 << bit)]
 
 
-def snapshot() -> list[tuple[Device, list[int]]]:
+def snapshot() -> list[tuple[Device, list[int] | None]]:
     """Every attached device with the buttons currently held on it."""
     return [(device, held_buttons(device)) for device in devices()]
 
