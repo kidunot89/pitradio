@@ -147,14 +147,7 @@ between a tap and a hold.
 
 ## Using PitRadio
 
-> **Screenshots are not in the repository yet.** Generate them on Windows with
-> `python packaging/screenshots.py` — each is cropped to the control being
-> described, so they stay correct as the layout moves. The markers below say
-> where each one goes.
-
 ### The Status tab — is it actually listening?
-
-<!-- screenshot: status — add ![Status](docs/images/status.png) once generated -->
 
 Everything you need to answer "why did nothing happen?" is here.
 
@@ -170,14 +163,10 @@ Everything you need to answer "why did nothing happen?" is here.
 
 Below it, the live log:
 
-<!-- screenshot: log — add ![Log](docs/images/log.png) once generated -->
-
 `pre-keys sent` means the chat box was asked to open. `transcribed` shows what
 Whisper heard, before any mention matching. `sent N chars` closes the cycle.
 
 ### Settings → Trigger
-
-<!-- screenshot: trigger — add ![Trigger](docs/images/trigger.png) once generated -->
 
 Four bindings, each taking a key and/or a controller button. They work
 alongside each other — either fires.
@@ -201,13 +190,9 @@ is a driver or Steam problem rather than anything PitRadio can fix.
 
 ### Settings → Appearance
 
-<!-- screenshot: appearance — add ![Appearance](docs/images/appearance.png) once generated -->
-
 Light, dark, or follow the desktop. Applies on the next start.
 
 ### Profiles — one per sim
-
-<!-- screenshot: profiles — add ![Profiles](docs/images/profiles.png) once generated -->
 
 The setting that matters most is **Chat open delay**: the chat box needs a few
 frames to open and take focus, and typing too early loses the opening
@@ -221,8 +206,6 @@ and become mentions. Leave it on *automatic* unless you have a reason.
 
 ### Language
 
-<!-- screenshot: language — add ![Language](docs/images/language.png) once generated -->
-
 PitRadio picks your desktop's language the first time it runs. Whisper has no
 per-language models — the `.en` builds are English-only and the rest are
 multilingual — so choosing a language and a size here derives the model for
@@ -230,16 +213,12 @@ you. Changing it downloads the new model on save.
 
 ### Audio
 
-<!-- screenshot: audio — add ![Audio](docs/images/audio.png) once generated -->
-
 Pick the microphone, then **Record 4s and transcribe**. Nothing is typed
 anywhere; it only proves the mic and the model work. If the level bar barely
 moves while you speak, raise **Microphone gain** — the bar shows the signal
 *after* gain, which is what Whisper actually receives.
 
 ### History
-
-<!-- screenshot: history — add ![History](docs/images/history.png) once generated -->
 
 Every message, with what was heard and what was typed. **Re-send** retypes one
 after a three-second countdown, which is there so you can focus the game first

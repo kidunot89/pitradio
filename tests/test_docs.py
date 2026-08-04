@@ -57,19 +57,3 @@ def test_the_readme_shows_the_logo():
     text = _rendered("README.md")
     assert "docs/images/logo.png" in text
     assert (ROOT / "docs" / "images" / "logo.png").exists()
-
-
-def test_the_screenshot_markers_name_shots_the_tool_can_take():
-    """A marker for a shot that packaging/screenshots.py cannot produce would
-    sit in the README forever waiting for an image nobody can generate."""
-    import sys
-
-    sys.path.insert(0, str(ROOT / "packaging"))
-    import screenshots
-
-    raw = (ROOT / "README.md").read_text(encoding="utf-8")
-    markers = set(re.findall(r"<!-- screenshot: (\S+)", raw))
-    assert markers, "the usage section has no screenshot markers"
-
-    unknown = sorted(markers - set(screenshots.SHOTS))
-    assert not unknown, f"no such shot in screenshots.py: {unknown}"
