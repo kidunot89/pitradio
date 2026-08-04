@@ -637,9 +637,13 @@ def test_pinning_something_unknown_falls_back_to_automatic(joystick, monkeypatch
 
 
 def test_a_device_with_no_inputs_is_not_listed(joystick, monkeypatch):
-    """The Windows legacy interface reports a phantom "Microsoft PC-joystick
-    driver" with 0 inputs. It cannot be bound, so listing it only invites
-    someone to try."""
+    """Real hardware the legacy interface cannot describe.
+
+    A Fanatec wheel appears through the Windows multimedia API as the generic
+    "Microsoft PC-joystick driver" with 0 usable inputs — the same wheel SDL3
+    and SDL2 were also both holding open. Nothing can be bound on it, so
+    listing it only invites someone to try.
+    """
     monkeypatch.setattr(joystick, "_BACKENDS", [
         StubBackend("Windows legacy", {
             0: ("Microsoft PC-joystick driver", 0, "legacy:phantom"),

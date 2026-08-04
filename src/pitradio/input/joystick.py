@@ -252,9 +252,13 @@ def devices() -> list[Device]:
             if identity in seen:
                 continue
             # A device with nothing to press cannot be bound, and listing it
-            # only invites someone to try. The Windows legacy interface
-            # reports a phantom "Microsoft PC-joystick driver" with 0 inputs
-            # on machines that have none.
+            # only invites someone to try.
+            #
+            # This is not a phantom: the Windows legacy interface reports real
+            # hardware it cannot describe under the generic name "Microsoft
+            # PC-joystick driver" with 0 usable inputs — a Fanatec wheel turns
+            # up exactly that way, as a *third* view of a device SDL3 and SDL2
+            # were already both holding open.
             if not buttons:
                 continue
             seen.add(identity)
