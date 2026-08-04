@@ -514,3 +514,20 @@ def test_the_self_test_covers_every_module_in_the_package():
         f"--self-test does not import: {missing}. Add them, or packaging will "
         f"not notice when one goes missing from the build."
     )
+
+
+# Compiled for nothing: none of these can run in the shipped app, and together
+# they were most of a thousand modules of C compilation.
+DEAD_WEIGHT = ("pygments", "pip", "setuptools", "pytest", "unittest")
+
+
+@pytest.mark.parametrize("package", DEAD_WEIGHT)
+def test_test_and_packaging_tooling_is_not_compiled(package, args):
+    """A cold build was ~48 minutes and a third of it was unreachable code.
+
+    pygments arrives through pytest, setuptools and httpx; pip brings its
+    whole vendored tree. Neither is importable from anything the app does at
+    runtime, and `--self-test` imports every module that is — so if one of
+    these turns out to be needed, that is where it will say so.
+    """
+    assert f"--nofollow-import-to={package}" in args

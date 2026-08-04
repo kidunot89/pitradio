@@ -13,6 +13,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Whether this commit can possibly affect the built binary. A README edit
+  # cannot, and a ~50-minute Windows compile for one is most of the reason CI
+  # felt slow — several of today's runs were documentation only.
+  #
+  # Computed here rather than with a workflow-level `paths` filter, because
+  # that would skip the Linux tests too — and those are two minutes and do
+  # check the docs.
+  scope:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"   # always for PRs, always on demand
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^ HEAD || echo "everything")
+          echo "changed files:"; echo "$changed" | sed 's/^/  /'
+          if echo "$changed" | grep -qvE '^(docs/|.*\.md$|LICENSE$)'; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "documentation only — skipping the Windows build"
+          fi
+
   test:
     name: Lint and test
     runs-on: ubuntu-latest
@@ -43,8 +75,10 @@ jobs:
 
   build:
     name: Windows build smoke test
-    # Don't spend 40 minutes compiling for a commit whose tests already fail.
-    needs: test
+    # Don't spend the compile on a commit whose tests already fail, or on one
+    # that cannot change the binary.
+    needs: [scope, test]
+    if: needs.scope.outputs.build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

@@ -160,6 +160,19 @@ def nuitka_args(version: str) -> list[str]:
         "--include-data-files="
         f"{ROOT / 'config.default.json'}=config.default.json",
         # Native payloads standalone mode misses on its own.
+        # Nothing the app uses at runtime, all of it dragged in by test and
+        # packaging tooling: pygments alone is 339 modules (via pytest,
+        # setuptools and httpx) and pip is another 404. They were being
+        # compiled — the Scons failure that broke three builds was on
+        # `module.pygments.lexers.q.obj` — for code that can never run.
+        "--nofollow-import-to=pygments",
+        "--nofollow-import-to=pip",
+        "--nofollow-import-to=setuptools",
+        "--nofollow-import-to=pytest",
+        "--nofollow-import-to=_pytest",
+        "--nofollow-import-to=unittest",
+        "--nofollow-import-to=pydoc",
+        "--nofollow-import-to=doctest",
         "--include-package=faster_whisper",
         "--include-package-data=faster_whisper",
         "--include-package=ctranslate2",
