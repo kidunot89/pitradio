@@ -106,7 +106,7 @@ def test_entry_point_is_last(args):
     """Nuitka takes the script as a positional argument."""
     # Compared as a Path, not a string: the same assertion spelled with
     # forward slashes passes everywhere except the one platform that ships.
-    assert Path(args[-1]).parts[-3:] == ("src", "pitradio", "__main__.py")
+    assert Path(args[-1]).parts[-2:] == ("src", "pitradio")
 
 
 # -- version ------------------------------------------------------------
@@ -430,4 +430,20 @@ def test_the_pinned_sdl3_download_is_what_we_extracted():
     assert fetch_sdl3.target().exists()
     assert (fetch_sdl3.RUNTIME / "SDL3-LICENSE.txt").exists(), (
         "SDL3 is zlib-licensed and its licence must ship with the binary"
+    )
+
+
+def test_the_package_is_compiled_rather_than_its_main_module(args):
+    """Nuitka names the dist directory after whatever it is handed.
+
+    Pointing it at `__main__.py` built `build\\__main__.dist`, so the Inno
+    script and nine CI steps all referenced a `build\\pitradio.dist` that no
+    longer existed — and the only symptom was "expected ... to exist after the
+    build", after a fifty-minute compile that had actually succeeded.
+    """
+    assert "--python-flag=-m" in args, (
+        "compiling a package without -m does not give it __main__ semantics"
+    )
+    assert not args[-1].endswith(".py"), (
+        "hand Nuitka the package directory, or the dist directory is renamed"
     )

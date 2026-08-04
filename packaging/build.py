@@ -139,6 +139,13 @@ def nuitka_args(version: str) -> list[str]:
     args = [
         sys.executable, "-m", "nuitka",
         "--standalone",
+        # Compile the package, not its __main__ module. Nuitka names the dist
+        # directory after whatever it was handed, so pointing at __main__.py
+        # produced build\__main__.dist and every reference to
+        # build\pitradio.dist — the installer script and nine CI steps —
+        # silently pointed at nothing. Nuitka warns about this; the warning is
+        # correct. -m makes it behave like `python -m pitradio`.
+        "--python-flag=-m",
         "--assume-yes-for-downloads",
         "--enable-plugin=tk-inter",
         # "attach", not "disable": double-clicking still shows no console, but
@@ -182,7 +189,7 @@ def nuitka_args(version: str) -> list[str]:
         "--copyright=MIT licensed",
         f"--output-dir={BUILD_DIR}",
         "--output-filename=pitradio.exe",
-        str(SRC / "pitradio" / "__main__.py"),
+        str(SRC / "pitradio"),
     ]
 
     for name in av_extension_modules():
@@ -316,7 +323,15 @@ def build() -> int:
     dist = BUILD_DIR / "pitradio.dist"
     exe = dist / "pitradio.exe"
     if not exe.exists():
+        # Name what *did* get built. Nuitka derives this directory from the
+        # entry point, so when it moves the failure is "expected X to exist"
+        # with no hint that Y is sitting right beside it.
+        built = sorted(path.name for path in BUILD_DIR.glob("*.dist"))
         print(f"error: expected {exe} to exist after the build", file=sys.stderr)
+        if built:
+            print(f"       the build produced: {', '.join(built)}", file=sys.stderr)
+            print("       Nuitka names this after the entry point — check "
+                  "nuitka_args()", file=sys.stderr)
         return 1
 
     print(f"built {exe}")
