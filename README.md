@@ -1,6 +1,10 @@
+<img src="docs/images/logo.png" alt="" width="96" align="left">
+
 # PitRadio
 
 Push-to-talk voice dictation into sim racing chat boxes.
+
+<br clear="left">
 
 Hold a key, say what you want, let go. PitRadio opens the game's chat box,
 transcribes what you said, types it, and sends it — without you taking a hand
@@ -143,13 +147,14 @@ between a tap and a hold.
 
 ## Using PitRadio
 
-> **Screenshots** are generated from the running app by
-> `python packaging/screenshots.py`, cropped to the control being described.
-> Run it on Windows to refresh them after a UI change.
+> **Screenshots are not in the repository yet.** Generate them on Windows with
+> `python packaging/screenshots.py` — each is cropped to the control being
+> described, so they stay correct as the layout moves. The markers below say
+> where each one goes.
 
 ### The Status tab — is it actually listening?
 
-![Status](docs/images/status.png)
+<!-- screenshot: status — add ![Status](docs/images/status.png) once generated -->
 
 Everything you need to answer "why did nothing happen?" is here.
 
@@ -165,14 +170,14 @@ Everything you need to answer "why did nothing happen?" is here.
 
 Below it, the live log:
 
-![Log](docs/images/log.png)
+<!-- screenshot: log — add ![Log](docs/images/log.png) once generated -->
 
 `pre-keys sent` means the chat box was asked to open. `transcribed` shows what
 Whisper heard, before any mention matching. `sent N chars` closes the cycle.
 
 ### Settings → Trigger
 
-![Trigger](docs/images/trigger.png)
+<!-- screenshot: trigger — add ![Trigger](docs/images/trigger.png) once generated -->
 
 Four bindings, each taking a key and/or a controller button. They work
 alongside each other — either fires.
@@ -196,13 +201,13 @@ is a driver or Steam problem rather than anything PitRadio can fix.
 
 ### Settings → Appearance
 
-![Appearance](docs/images/appearance.png)
+<!-- screenshot: appearance — add ![Appearance](docs/images/appearance.png) once generated -->
 
 Light, dark, or follow the desktop. Applies on the next start.
 
 ### Profiles — one per sim
 
-![Profiles](docs/images/profiles.png)
+<!-- screenshot: profiles — add ![Profiles](docs/images/profiles.png) once generated -->
 
 The setting that matters most is **Chat open delay**: the chat box needs a few
 frames to open and take focus, and typing too early loses the opening
@@ -216,7 +221,7 @@ and become mentions. Leave it on *automatic* unless you have a reason.
 
 ### Language
 
-![Language](docs/images/language.png)
+<!-- screenshot: language — add ![Language](docs/images/language.png) once generated -->
 
 PitRadio picks your desktop's language the first time it runs. Whisper has no
 per-language models — the `.en` builds are English-only and the rest are
@@ -225,7 +230,7 @@ you. Changing it downloads the new model on save.
 
 ### Audio
 
-![Audio](docs/images/audio.png)
+<!-- screenshot: audio — add ![Audio](docs/images/audio.png) once generated -->
 
 Pick the microphone, then **Record 4s and transcribe**. Nothing is typed
 anywhere; it only proves the mic and the model work. If the level bar barely
@@ -234,7 +239,7 @@ moves while you speak, raise **Microphone gain** — the bar shows the signal
 
 ### History
 
-![History](docs/images/history.png)
+<!-- screenshot: history — add ![History](docs/images/history.png) once generated -->
 
 Every message, with what was heard and what was typed. **Re-send** retypes one
 after a three-second countdown, which is there so you can focus the game first
@@ -352,7 +357,7 @@ configured differently for two games.
 
 Plugins are compiled into the app — there's no way to add one after installing.
 Adding a sim means a pull request, and it's two small steps: see
-[plugins/README.md](plugins/README.md).
+[plugins/README.md](src/pitradio/plugins/README.md).
 
 ---
 
