@@ -798,3 +798,43 @@ def test_it_can_be_turned_on_for_a_controller_nothing_else_sees(joystick):
         assert sdl and all(b.steam_hidapi is True for b in sdl)
     finally:
         joystick.prefer("auto", False)
+
+
+def test_a_real_press_wins_through_intermittent_noise(joystick, pad):
+    """A Steam Controller's gyro flags fire whenever the controller moves —
+    and it moves while you press a button.
+
+    Tracking one candidate and resetting it whenever a different input appears
+    meant that noise never won the binding but stopped anything else winning
+    either: the real press could not accumulate enough consecutive polls.
+    """
+    device = pad(name="Steam Controller", buttons=26)
+
+    captured = []
+    w = watcher(joystick)
+    w.start_capture(lambda dev, button: captured.append(button))
+    settle(joystick, w)
+
+    # A real press held down, while a gyro flag blinks alongside it.
+    device.press(3)
+    for poll in range(joystick.CAPTURE_CONFIRM_POLLS + 2):
+        device.press(21, down=poll % 2 == 0)
+        w._poll_capture()
+
+    assert captured == [4], "the deliberate press should have been taken"
+
+
+def test_noise_alone_still_cannot_bind(joystick, pad):
+    """Counting every input must not make chatter easier to capture."""
+    device = pad(name="Steam Controller", buttons=26)
+
+    captured = []
+    w = watcher(joystick)
+    w.start_capture(lambda dev, button: captured.append(button))
+    settle(joystick, w)
+
+    for poll in range(40):
+        device.press(21, down=poll % 2 == 0)
+        w._poll_capture()
+
+    assert captured == []

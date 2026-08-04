@@ -451,8 +451,8 @@ class JoystickWatcher(threading.Thread):
         self._capture: Callable[[Device, int], None] | None = None
         self._baseline: dict[str, int] | None = None
         self._settled = 0
-        self._candidate: tuple[str, int] | None = None
-        self._candidate_polls = 0
+        # (device key, button) -> consecutive polls held.
+        self._candidates: dict[tuple[str, int], int] = {}
         self._stop = threading.Event()
         self._missing_logged = False
 
@@ -561,14 +561,14 @@ class JoystickWatcher(threading.Thread):
         """
         self._baseline = None
         self._settled = 0
-        self._candidate = None
+        self._candidates = {}
         self._capture = on_captured
 
     def cancel_capture(self) -> None:
         self._capture = None
         self._baseline = None
         self._settled = 0
-        self._candidate = None
+        self._candidates = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -702,32 +702,38 @@ class JoystickWatcher(threading.Thread):
             self._settled += 1
             return
 
+        # Count how long each fresh input has been held, not just the newest
+        # one. Tracking a single candidate and resetting it whenever a
+        # different input appears means intermittent noise — a Steam
+        # Controller's gyro flags fire whenever the controller moves, and it
+        # moves while you press a button — keeps resetting the count, so the
+        # real press never reaches confirmation and nothing can be bound.
+        seen_now = set()
         for key, (device, mask) in snapshot.items():
             fresh = mask & ~self._baseline.get(key, 0)
-            if not fresh:
-                continue
-            # Lowest set bit wins if several arrive together, so the result is
-            # stable rather than dependent on iteration order.
-            button = (fresh & -fresh).bit_length()
+            while fresh:
+                bit = fresh & -fresh
+                fresh ^= bit
+                candidate = (key, bit.bit_length())
+                seen_now.add(candidate)
+                self._candidates[candidate] = self._candidates.get(candidate, 0) + 1
 
-            # Held across consecutive polls before it counts. A sensor that
-            # blips for one frame cannot take the binding from a real press.
-            if self._candidate != (key, button):
-                self._candidate = (key, button)
-                self._candidate_polls = 1
-                return
-            self._candidate_polls += 1
-            if self._candidate_polls < CAPTURE_CONFIRM_POLLS:
+                if self._candidates[candidate] < CAPTURE_CONFIRM_POLLS:
+                    continue
+
+                callback, self._capture = self._capture, None
+                self._baseline = None
+                self._candidates = {}
+                try:
+                    callback(device, candidate[1])
+                except Exception:
+                    log.exception("joystick capture callback failed")
                 return
 
-            callback, self._capture = self._capture, None
-            self._baseline = None
-            self._candidate = None
-            try:
-                callback(device, button)
-            except Exception:
-                log.exception("joystick capture callback failed")
-            return
+        # Anything that stopped being held starts again from zero, so a flag
+        # that blinks on and off never accumulates its way to a binding.
+        self._candidates = {c: n for c, n in self._candidates.items()
+                            if c in seen_now}
 
         # Nothing fresh this poll: a candidate that vanished was a blip.
         self._candidate = None
