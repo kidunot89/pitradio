@@ -5,4 +5,4 @@ updater can read it without importing the CLI, which pulls in tkinter and the
 speech stack.
 """
 
-__version__ = "0.1.27"
+__version__ = "0.1.28"
