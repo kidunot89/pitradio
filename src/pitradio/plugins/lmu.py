@@ -16,12 +16,22 @@ update that moves the layout must cost a feature, never a trigger.
 from __future__ import annotations
 
 import ctypes
+import json
 import logging
 import sys
 import threading
+import time
+import urllib.request
 from pathlib import Path
 
-from pitradio.plugins.base import PluginSetting, SessionPlugin
+from pitradio import voice
+from pitradio.plugins.base import (
+    Car,
+    PluginSetting,
+    SessionInfo,
+    SessionPlugin,
+    Standings,
+)
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +44,64 @@ if str(_VENDOR) not in sys.path:
 
 # Read-only view of an existing mapping.
 FILE_MAP_READ = 0x0004
+
+#: Roughly the car behind and the one you are catching. Named here rather than
+#: written into the setting so the number has somewhere to be explained.
+DEFAULT_PROXIMITY_METRES = 200
+
+# -- which car is on screen ----------------------------------------------
+#
+# The shared memory block does not say, and the obvious candidates do not
+# either — all checked against a live spectated session rather than assumed:
+#
+#   * `telemetry.playerVehicleIdx` is the *player's* vehicle and stays pointed
+#     at their parked car while they watch somebody else.
+#   * `appInfo.mOptionsLocation` reads 0 throughout.
+#   * `$rFactor2SMMP_Graphics$` is published but never populated — the whole
+#     buffer is zeros apart from its version counter, because LMU does not call
+#     the graphics callback the rF2 plugin fills it from.
+#
+# LMU's own overlays read this instead: a local HTTP API, part of the game
+# rather than any plugin, whose standings carry `hasFocus` on the car being
+# watched. `slotID` there is the same number as `mID` in shared memory.
+
+LMU_STANDINGS_URL = "http://127.0.0.1:6397/rest/watch/standings"
+
+#: Short, because this runs on the trigger cycle. The game is on the same
+#: machine; if it has not answered in this long it is busy loading and the
+#: answer would be stale anyway.
+FOCUS_TIMEOUT_SECONDS = 0.4
+
+#: The camera does not move between cars every frame, and the response is ~16KB.
+FOCUS_CACHE_SECONDS = 1.0
+
+
+def _fetch_standings(timeout: float):
+    """The game's own standings, as it hands them to its overlays.
+
+    A seam, so the focus logic can be tested without a running game.
+    """
+    with urllib.request.urlopen(LMU_STANDINGS_URL, timeout=timeout) as response:
+        return json.load(response)
+
+
+def focus_slot(standings) -> int | None:
+    """The slot of the car being watched, or None.
+
+    Pure, because it is the part worth testing. `hasFocus` is what LMU's own
+    overlays key on; `focus` sits beside it and has always agreed, so either
+    will do and neither is worth preferring on a guess.
+    """
+    if not isinstance(standings, list):
+        return None
+    for entry in standings:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("hasFocus") or entry.get("focus"):
+            slot = entry.get("slotID")
+            # Slot 0 is a real slot; None is not.
+            return int(slot) if isinstance(slot, int) else None
+    return None
 
 
 def _open_existing_mapping(name: str, size: int):
@@ -70,6 +138,15 @@ def _open_existing_mapping(name: str, size: int):
     return handle, view
 
 
+def _text(raw: bytes) -> str:
+    """A fixed-width field from the block as a string.
+
+    `replace` rather than `strict`: a mangled byte in somebody's name must cost
+    that character, not the whole driver list.
+    """
+    return raw.decode("utf-8", "replace").strip("\x00").strip()
+
+
 def _close_mapping(handle, view) -> None:
     try:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -95,8 +172,26 @@ class LeMansUltimatePlugin(SessionPlugin):
             label="Recognise standings positions",
             kind="bool",
             default=True,
-            help=('say "P3" and it sends that driver\'s name — useful when you '
-                  "cannot pronounce it or did not catch it"),
+            help=('say "P3" and it sends that driver\'s name, or "GT3 P3" for '
+                  "the one in that class — useful when you cannot pronounce "
+                  "it or did not catch it"),
+        ),
+        PluginSetting(
+            key="proximity_only",
+            label="Proximity voice only",
+            kind="bool",
+            default=False,
+            help=("only hear racers near you on track. Off, you hear the whole "
+                  "session — which is what you want in practice and on a "
+                  "formation lap"),
+        ),
+        PluginSetting(
+            key="proximity_metres",
+            label="Proximity range (metres)",
+            kind="int",
+            default=DEFAULT_PROXIMITY_METRES,
+            help=("how near counts. 200m is roughly the car behind you and the "
+                  "one you are catching; a lap of Daytona is 5,700m"),
         ),
     )
 
@@ -107,6 +202,8 @@ class LeMansUltimatePlugin(SessionPlugin):
         self._lock = threading.Lock()
         self._failure: str | None = None
         self._logged_failure = False
+        #: (when it was read, the slot) — see _focus_slot.
+        self._focus: tuple[float, int | None] = (float("-inf"), None)
 
     # -- lifecycle -------------------------------------------------------
 
@@ -184,50 +281,136 @@ class LeMansUltimatePlugin(SessionPlugin):
     # -- data ------------------------------------------------------------
 
     def drivers(self) -> list[str]:
+        return [car.driver for car in self._cars()]
+
+    def classes(self) -> list[str]:
+        """The car classes on this grid, in the order the block lists them.
+
+        Worth having on its own: they go into Whisper's vocabulary, and a class
+        Whisper has never heard of comes back as something else entirely — at
+        which point "GT3 P3" cannot resolve no matter how good the matching is.
+        """
+        return list(dict.fromkeys(car.vehicle_class for car in self._cars()
+                                  if car.vehicle_class))
+
+    def vocabulary(self) -> list[str]:
+        """Driver names, with the class names in front of them.
+
+        In front because the hint is capped: a 60-car entry list would push the
+        three words that make "GT3 P3" work off the end of it.
+        """
+        return self.classes() + self.drivers()
+
+    def standings(self) -> Standings:
+        """The overall order and the order within each class.
+
+        **In-class places are derived, not read.** The scoring block carries an
+        overall `mPlace` and a class name per car and nothing that combines
+        them, so class order is the class's members sorted on their overall
+        place. That is the same thing the timing screen shows, and it holds
+        whatever LMU decides to call its classes.
+        """
+        cars = [car for car in self._cars() if car.place > 0]
+        if not cars:
+            return Standings()
+
+        overall = {car.place: car.driver for car in cars}
+
+        by_class: dict[str, dict[int, str]] = {}
+        for name in dict.fromkeys(car.vehicle_class for car in cars if car.vehicle_class):
+            members = sorted(
+                (car.place, car.driver) for car in cars if car.vehicle_class == name)
+            by_class[name] = {
+                rank: driver for rank, (_place, driver) in enumerate(members, 1)}
+        return Standings(overall, by_class)
+
+    def session(self) -> SessionInfo:
+        """The room this session belongs to, and where everybody is.
+
+        The key comes from the *game server*, not the track: an event that moves
+        to the next circuit is still the same set of people, and a room that
+        dissolved underneath them would be a worse room. No server — offline, or
+        single player — means no key and no room.
+        """
+        cars = self._cars()
         with self._lock:
-            if not self._connect():
-                return []
+            if self._data is None:
+                return SessionInfo()
             try:
-                scoring = self._data.scoring
-                count = int(scoring.scoringInfo.mNumVehicles)
+                info = self._data.scoring.scoringInfo
+                address = int(info.mServerPublicIP)
+                port = int(info.mServerPort)
+                track = _text(info.mTrackName)
             except (AttributeError, ValueError) as exc:
-                self._fail(f"could not read the scoring block: {exc}")
-                self._release()
-                return []
+                self._fail(f"could not read the session block: {exc}")
+                return SessionInfo()
 
-            # A stale or unpublished block can hold nonsense; clamp rather than
-            # trusting it, so a bad read cannot walk off the end of the array.
-            count = max(0, min(count, len(scoring.vehScoringInfo)))
+        return SessionInfo(
+            key=voice.session_key(address, port), track=track, cars=tuple(cars),
+            focus_slot=self._focus_slot())
 
-            names = []
-            for index in range(count):
-                raw = scoring.vehScoringInfo[index].mDriverName
-                name = raw.decode("utf-8", "replace").strip("\x00").strip()
-                if name:
-                    names.append(name)
-            return names
+    def _focus_slot(self) -> int | None:
+        """Which car the camera is on, from the game's own HTTP API.
 
-    def positions(self) -> dict[int, str]:
-        """Place -> driver name, from the same scoring block as the names."""
+        Cached and short-timeout, because it is called from the trigger cycle
+        and a dictation app must never wait on a game that is mid-load. Every
+        failure is None, which `listener` reads as "cannot tell" and therefore
+        as audible — the sim being closed, the API having moved, a request
+        timing out: all normal, none of them worth a silent radio.
+        """
+        now = time.monotonic()
+        cached_at, slot = self._focus
+        if now - cached_at < FOCUS_CACHE_SECONDS:
+            return slot
+
+        try:
+            found = focus_slot(_fetch_standings(FOCUS_TIMEOUT_SECONDS))
+        except Exception:
+            # Cached as a miss too, so a game that is not answering is asked
+            # once a second rather than on every single trigger.
+            log.debug("could not read the focused car", exc_info=True)
+            found = None
+
+        self._focus = (now, found)
+        return found
+
+    def _cars(self) -> list[Car]:
+        """Every scored car, from one read of the block.
+
+        Everything that depends on where people are — the overall order, the
+        class orders, proximity — comes through here, so they can never disagree
+        about which frame they came from. The block updates many times a second
+        and reading it twice is reading two different races.
+        """
         with self._lock:
             if not self._connect():
-                return {}
+                return []
             try:
                 scoring = self._data.scoring
                 count = int(scoring.scoringInfo.mNumVehicles)
             except (AttributeError, ValueError):
-                return {}
+                return []
 
             count = max(0, min(count, len(scoring.vehScoringInfo)))
-            standings: dict[int, str] = {}
+            cars: list[Car] = []
             for index in range(count):
                 vehicle = scoring.vehScoringInfo[index]
-                name = vehicle.mDriverName.decode("utf-8", "replace").strip("\x00").strip()
-                place = int(vehicle.mPlace)
-                # Place 0 means unclassified, not "leader".
-                if name and place > 0:
-                    standings[place] = name
-            return standings
+                name = _text(vehicle.mDriverName)
+                if not name:
+                    continue
+                cars.append(Car(
+                    slot=int(vehicle.mID),
+                    driver=name,
+                    # Place 0 means unclassified, not "leader"; kept as 0 so
+                    # the car still exists for proximity, which does not care.
+                    place=max(0, int(vehicle.mPlace)),
+                    vehicle_class=_text(vehicle.mVehicleClass),
+                    control=int(vehicle.mControl),
+                    position=(float(vehicle.mPos.x), float(vehicle.mPos.y),
+                              float(vehicle.mPos.z)),
+                    is_player=bool(vehicle.mIsPlayer),
+                ))
+            return cars
 
     def status(self) -> str:
         if not self.is_connected():

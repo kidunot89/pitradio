@@ -4,3 +4,6 @@ numpy>=1.26
 pystray>=0.19.5
 Pillow>=10.0
 pysdl2-dll>=2.28
+# Voice chat's transport. Pure Python, so it costs the build nothing; imported
+# lazily so a build without it runs with voice unavailable rather than failing.
+websocket-client>=1.7

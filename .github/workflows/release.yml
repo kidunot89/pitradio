@@ -82,6 +82,33 @@ jobs:
             throw "tag $tag does not match __version__ $ver in src/pitradio/__init__.py"
           }
 
+      # The relay address is not in this repository — it is public and the
+      # relay is not. src/pitradio/endpoints.py ships empty, which is a working
+      # state: a source checkout simply has voice unavailable. A *release* has
+      # to have one written in, or every installed build ships with voice off
+      # and nothing saying why.
+      - name: Point this build at the relay
+        run: |
+          $relay = "${{ secrets.PITRADIO_RELAY }}"
+          if (-not $relay) {
+            throw "PITRADIO_RELAY is not set; a release build would ship with no relay"
+          }
+          if ($relay -notmatch '^wss://') {
+            throw "PITRADIO_RELAY is '$relay'; it must be a wss:// URL"
+          }
+          $path = "src/pitradio/endpoints.py"
+          $text = Get-Content $path -Raw
+          $updated = $text -replace '(?m)^RELAY = ""$', "RELAY = `"$relay`""
+          if ($updated -eq $text) {
+            throw "could not find the RELAY line in $path"
+          }
+          Set-Content $path $updated -Encoding utf8
+          # The value is a secret; confirm it was written without printing it.
+          if ((Select-String -Path $path -Pattern '^RELAY = "wss://').Count -ne 1) {
+            throw "endpoints.py was not updated"
+          }
+          Write-Output "endpoints.py now names a relay"
+
       - name: Build with Nuitka
         run: python packaging/build.py
 

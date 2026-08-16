@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from pitradio import config
+from pitradio import config, endpoints
 
 
 def _base() -> dict:
@@ -176,6 +176,100 @@ def test_negative_delay_is_rejected():
 def test_bad_update_repo_is_rejected():
     problems = _problems(lambda r: r["updates"].update(repo="justaname"))
     assert any("owner/name" in p for p in problems)
+
+
+# -- voice ---------------------------------------------------------------
+
+
+def _voice(**overrides) -> list[str]:
+    return _problems(lambda r: r.setdefault("voice", {}).update(overrides))
+
+
+def test_voice_is_off_until_it_is_switched_on():
+    """A dictation app that quietly opened the microphone to twenty strangers
+    would be a betrayal, however good the feature is."""
+    assert config.Config().voice.enabled is False
+
+
+def test_a_source_build_ships_with_no_relay():
+    """This repository is public and the relay is not, so the address is
+    written in at build time. A checkout has none, and that is a working state
+    — voice is unavailable, rather than aimed at a server nobody chose."""
+    assert config.Config().voice.relay == ""
+    assert _voice() == []
+
+
+def test_an_absent_relay_is_only_a_problem_once_voice_is_on():
+    """Otherwise --check-config fails for everyone working on the app."""
+    assert _voice(enabled=False, relay="") == []
+    assert any("no default relay" in p for p in _voice(enabled=True, relay=""))
+
+
+def test_plaintext_to_a_remote_relay_is_rejected():
+    """The relay is somebody else's machine and the payload is a recording of
+    your voice. ws:// keeps working, which is exactly the problem."""
+    problems = _voice(relay="ws://relay.example.com")
+    assert any("in the clear" in p for p in problems)
+
+
+def test_plaintext_to_localhost_is_allowed():
+    """The one reasonable case: a relay you are running yourself."""
+    assert _voice(relay="ws://localhost:8080") == []
+
+
+def test_a_hostname_that_merely_starts_with_localhost_is_not_loopback():
+    problems = _voice(relay="ws://localhost.example.com/chat")
+    assert any("in the clear" in p for p in problems)
+
+
+def test_a_relay_that_is_not_a_websocket_url_is_rejected():
+    problems = _voice(relay="https://relay.example.com")
+    assert any("ws://" in p for p in problems)
+
+
+def test_voice_is_validated_even_when_it_is_off():
+    """Otherwise a bad setting is found the first time somebody presses the
+    button in a race, which is the worst possible moment."""
+    problems = _voice(enabled=False, relay="ws://relay.example.com")
+    assert any("in the clear" in p for p in problems)
+
+
+@pytest.mark.parametrize("volume", [-0.1, 1.5])
+def test_volume_outside_the_range_is_rejected(volume):
+    assert any("voice.volume" in p for p in _voice(volume=volume))
+
+
+def test_a_zero_clip_age_is_rejected():
+    """Every clip would be too old to play and voice would silently do nothing."""
+    assert any("max_age_seconds" in p for p in _voice(max_age_seconds=0))
+
+
+def test_voice_survives_a_round_trip(tmp_path):
+    cfg = config.Config()
+    cfg.voice.enabled = True
+    cfg.voice.volume = 0.35
+    cfg.voice.display_name = "Geoff"
+
+    path = tmp_path / "config.json"
+    config.save(path, cfg)
+    reloaded = config.load(path)
+
+    assert reloaded.voice.enabled is True
+    assert reloaded.voice.volume == 0.35
+    assert reloaded.voice.display_name == "Geoff"
+
+
+def test_a_config_written_before_voice_existed_still_loads():
+    """Config files are never overwritten on update, so every existing install
+    has no voice section at all."""
+    raw = _base()
+    raw.pop("voice", None)
+    cfg = config.Config.from_dict(raw)
+
+    assert cfg.voice.enabled is False
+    # Whatever this build was given, which in a checkout is nothing.
+    assert cfg.voice.relay == endpoints.default_relay()
+    assert cfg.validate() == []
 
 
 # -- persistence and reload ----------------------------------------------

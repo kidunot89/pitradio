@@ -14,7 +14,12 @@ from __future__ import annotations
 
 import logging
 
-from pitradio.plugins.base import PluginSetting, SessionPlugin
+from pitradio.plugins.base import (
+    PluginSetting,
+    SessionInfo,
+    SessionPlugin,
+    Standings,
+)
 from pitradio.plugins.lmu import LeMansUltimatePlugin
 
 log = logging.getLogger(__name__)
@@ -108,16 +113,66 @@ class PluginRegistry:
             log.exception("plugin %s failed while reading vocabulary", plugin.name)
             return []
 
-    def positions_for(self, plugin_id: str | None) -> dict[int, str]:
-        """Standings from the profile's plugin, or empty."""
+    def standings_for(self, plugin_id: str | None) -> Standings:
+        """Who is in which place, per the profile's plugin, or empty.
+
+        Falls back to `positions()` when `standings()` has nothing: a plugin
+        that only implements the overall order — which is all the base class
+        documented before multi-class existed — would otherwise have its data
+        silently dropped, with the override still sitting there looking correct.
+        """
         plugin = self.by_id(plugin_id)
         if plugin is None:
-            return {}
+            return Standings()
         try:
-            return plugin.positions()
+            result = plugin.standings()
+        except Exception:
+            log.exception("plugin %s failed while reading standings", plugin.name)
+            return Standings()
+        if result:
+            return result
+        try:
+            return Standings(overall=plugin.positions() or {})
         except Exception:
             log.exception("plugin %s failed while reading positions", plugin.name)
-            return {}
+            return Standings()
+
+    def session_for(self, plugin_id: str | None) -> SessionInfo:
+        """Which session this is and who is in it, or empty.
+
+        Called from the voice thread as well as the trigger cycle, so it
+        swallows everything for the same reason the rest do.
+        """
+        plugin = self.by_id(plugin_id)
+        if plugin is None:
+            return SessionInfo()
+        try:
+            return plugin.session()
+        except Exception:
+            log.exception("plugin %s failed while reading the session", plugin.name)
+            return SessionInfo()
+
+    def any_session(self) -> tuple[str, SessionInfo]:
+        """(plugin id, session) for whichever sim is actually in one.
+
+        Voice runs on its own thread, with no idea which window is focused and
+        no business asking — that would drag Win32 into a module that has to
+        stay portable. A session only exists while a sim is publishing one, so
+        "whoever has one" is both sufficient and honest.
+        """
+        for plugin in self.plugins:
+            try:
+                session = plugin.session()
+            except Exception:
+                log.exception("plugin %s failed while reading the session", plugin.name)
+                continue
+            if session:
+                return plugin.id, session
+        return "", SessionInfo()
+
+    def positions_for(self, plugin_id: str | None) -> dict[int, str]:
+        """The overall order alone, for callers that want nothing else."""
+        return self.standings_for(plugin_id).overall
 
     def resolve(self, plugin_id: str | None, executable: str | None) -> str:
         """The plugin to use, falling back to whatever suits the executable.
@@ -171,5 +226,5 @@ class PluginRegistry:
 
 __all__ = [
     "BUILTIN", "LeMansUltimatePlugin", "PluginRegistry", "PluginSetting",
-    "SessionPlugin",
+    "SessionInfo", "SessionPlugin", "Standings",
 ]

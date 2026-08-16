@@ -34,6 +34,7 @@ COLLABORATORS = {
     "transcriber": ("src/pitradio/speech.py", "Transcriber"),
     "checker": ("src/pitradio/updater.py", "UpdateChecker"),
     "plugins": ("src/pitradio/plugins/__init__.py", "PluginRegistry"),
+    "voice": ("src/pitradio/net.py", "VoiceService"),
 }
 
 
@@ -302,6 +303,7 @@ PORTABLE = [
     "src/pitradio/languages.py",
     "src/pitradio/mentions.py",
     "src/pitradio/gestures.py",
+    "src/pitradio/voice.py",
     "src/pitradio/ui/gui.py",
     "src/pitradio/ui/gui_settings.py",
     "src/pitradio/ui/gui_language.py",

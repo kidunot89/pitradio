@@ -192,6 +192,13 @@ def nuitka_args(version: str) -> list[str]:
         args.insert(-1, "--include-package=onnxruntime")
         args.insert(-1, "--include-package-data=onnxruntime")
 
+    # Voice imports websocket-client *inside a function*, so that a build
+    # without it still runs with voice simply unavailable. Nuitka cannot follow
+    # an import it never sees at module scope, so naming it here is what puts
+    # it in the binary — the same trap that dropped onnxruntime and av.utils.
+    if _have("websocket"):
+        args.insert(-1, "--include-package=websocket")
+
     return args
 
 

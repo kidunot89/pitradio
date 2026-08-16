@@ -66,6 +66,7 @@ class App:
         transcriber=None,
         hook=None,
         plugins=None,
+        voice=None,
         use_tray: bool = True,
     ):
         self.root = root
@@ -78,6 +79,8 @@ class App:
         self.transcriber = transcriber
         self.hook = hook
         self.plugins = plugins
+        # None in --gui-only and in tests; every use site copes, like the rest.
+        self.voice = voice
         self.tray = None
         self._quitting = False
         self._log_lines = 0
@@ -188,6 +191,7 @@ class App:
         gui_language.build_language_tab(self)
         gui_settings.build_vocabulary_tab(self)
         gui_settings.build_audio_tab(self)
+        gui_settings.build_voice_tab(self)
         gui_settings.build_history_tab(self)
         gui_settings.build_updates_tab(self)
 
@@ -626,8 +630,8 @@ class App:
         except Exception:
             log.debug("could not persist window geometry", exc_info=True)
 
-        for component in (self.tray, self.checker, self.worker, self.hook,
-                          self.plugins):
+        for component in (self.tray, self.checker, self.worker, self.voice,
+                          self.hook, self.plugins):
             if component is None:
                 continue
             try:

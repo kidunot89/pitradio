@@ -182,6 +182,64 @@ def play_cue(cue_cfg, frequency: int) -> None:
         log.debug("cue playback failed: %s", exc)
 
 
+# -- voice clips ---------------------------------------------------------
+#
+# The wire carries 16-bit PCM: half the size of float32 for audio that was
+# captured from a microphone and is going to a headset, and the one encoding
+# every sound API on earth accepts without negotiation. Compression would be a
+# native dependency, and this build already fights those.
+
+
+def to_pcm16(audio: np.ndarray) -> bytes:
+    """float32 in -1..1 to little-endian 16-bit samples.
+
+    Clipped before scaling. Without that a loud passage wraps around on the
+    cast and arrives as a burst of noise rather than a loud voice — quiet
+    corruption of exactly the clips somebody most wanted heard.
+    """
+    if audio is None or audio.size == 0:
+        return b""
+    clipped = np.clip(np.asarray(audio, dtype=np.float32).ravel(), -1.0, 1.0)
+    return (clipped * 32767.0).astype("<i2").tobytes()
+
+
+def from_pcm16(payload: bytes) -> np.ndarray:
+    """The inverse. An odd trailing byte is dropped rather than raising.
+
+    This runs on audio from somebody else's machine: a truncated clip must cost
+    its last sample, not the playback thread.
+    """
+    if not payload:
+        return np.zeros(0, dtype=np.float32)
+    usable = len(payload) - (len(payload) % 2)
+    samples = np.frombuffer(payload[:usable], dtype="<i2")
+    return (samples.astype(np.float32) / 32767.0).copy()
+
+
+def play_clip(audio: np.ndarray, rate: int, voice_cfg) -> None:
+    """Play a received clip. Blocking, so callers give it its own thread.
+
+    Blocking on purpose: two clips played at once are unintelligible, and
+    queueing them is what makes a radio a radio. The caller owning the queue is
+    what keeps that decision out of here.
+    """
+    if audio is None or audio.size == 0:
+        return
+    try:
+        sd = _sd()
+        volume = min(1.0, max(0.0, float(voice_cfg.volume)))
+        sd.play(
+            (audio * volume).astype(np.float32),
+            int(rate) or 16000,
+            device=resolve_device(voice_cfg.output_device, "output"),
+        )
+        sd.wait()
+    except Exception as exc:
+        # A missing or busy output device must not end the playback thread;
+        # the next clip may well work.
+        log.debug("clip playback failed: %s", exc)
+
+
 # -- transcription -------------------------------------------------------
 
 

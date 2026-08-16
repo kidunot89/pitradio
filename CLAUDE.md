@@ -67,6 +67,13 @@ statically instead.
 When adding tests, keep them importable without `winapi` — a test that needs
 Windows can't run in the place most of this gets developed.
 
+Keep them independent of **what is running on the machine**, too. Two LMU tests
+asserted "not connected" without forcing it: off Windows that is the only
+possible outcome, so they looked fine, and on the one machine where the plugin
+can be exercised for real they failed the moment the sim was open. `lmu_absent`
+in [tests/test_plugins.py](tests/test_plugins.py) stubs the mapping instead. A
+suite that only passes when the sim is closed is no use to whoever is racing.
+
 ## Layout
 
 ```
@@ -368,11 +375,75 @@ setting never requires migrating configs.
 `PluginRegistry.drivers_for` swallows every exception: it runs inside the
 trigger cycle, and a plugin fault must cost session data, never the message.
 
+**Standings are multi-class.** Endurance grids run several classes at once, so
+"P3" has three answers and only one of them is the overall order. Plugins return
+a `Standings` — `overall` plus `by_class` — from a *single* read, because two
+calls would be two snapshots of a block that updates many times a second. LMU's
+block has no in-class field at all: class order is derived by sorting a class's
+members on their overall `mPlace`.
+
+The spoken class name is matched by `mentions.class_aliases`, which also strips
+a manufacturer prefix so "LMGT3" answers to "GT3" — but only when four or more
+characters remain, or "LMP2" would answer to "P2" and "LMP2 P4" would resolve
+the wrong driver entirely. An alias two classes share is dropped rather than
+guessed at. The class group in `_POSITION_RE` is **lazy**: greedy, "P1 and P2"
+matches once with the class group swallowing "P1 and", and the leader never
+resolves.
+
 `vendor/pylmusharedmemory` is TinyPedal's MIT-licensed LMU struct layout,
 vendored rather than depended on. A wrong field offset produces plausible
 garbage instead of an error, so the layout is worth taking from a maintained
 source — and it is pure Python, so vendoring costs no bundling risk. Pinned at
 commit `3968c15`.
+
+## Voice, and what is not in this repository
+
+Voice chat sends the push-to-talk clip to the other PitRadio users in your
+session. [docs/voice.md](docs/voice.md) is the design and the authority on why.
+
+Three things about the split, because getting them wrong leaks something:
+
+- **The relay server, its Terraform and its Ansible are in a private
+  repository.** This one is public. The Terraform/Ansible there provision a
+  *racer-provided* host, not the base one.
+- **The base relay address is written in at build time**, into
+  [endpoints.py](src/pitradio/endpoints.py), whose committed value is empty. A
+  source checkout therefore has no relay and voice is unavailable — a working
+  state, and far better than every fork aiming a microphone at a server nobody
+  volunteered. Nothing else may hardcode an address.
+- **`config.validate` treats an empty relay as a problem only when voice is
+  enabled.** Otherwise `--check-config` fails for everyone working from source.
+  A *malformed* relay is always reported, including plaintext `ws://` to
+  anything but localhost — the payload is a recording of somebody's voice
+  crossing a stranger's machine, and plaintext would keep working while doing
+  it in the clear.
+
+The relay never parses a clip: it checks the size, checks the room, and forwards
+opaque bytes. So the wire format (`encode_clip`/`decode_clip` in
+[voice.py](src/pitradio/voice.py)) is agreed between clients alone and changing
+it never needs the server redeployed. `decode_clip` returns `None` for
+everything malformed and raises for nothing — it parses bytes from a stranger's
+machine on the audio path.
+
+Proximity is **in-game distance**, decided on the listener's machine from the
+sim's own data, and nothing positional is ever published. It is per-sim, so it
+lives on the plugin (`proximity_only`), not in `VoiceConfig`.
+
+It is measured from **the car on screen**, which while spectating is not your
+own. LMU's shared memory does not say which that is — `playerVehicleIdx` stays
+on the player's parked car, `mOptionsLocation` reads 0, and
+`$rFactor2SMMP_Graphics$` is published but never populated (all zeros bar its
+version counter; LMU does not call the callback that fills it). All three were
+checked against a live spectated session. What does say is LMU's own HTTP API at
+`127.0.0.1:6397/rest/watch/standings`, whose `hasFocus` marks the watched car
+and whose `slotID` equals shared memory's `mID`. It is part of the game, not a
+plugin, so it needs nothing installed.
+
+That call is on the trigger cycle, so it is short-timeout and cached — including
+its **failures**, or a closed game costs a timeout on every press. Tests must
+stub `lmu._fetch_standings`; left alone it is answered for real on any machine
+with LMU running, and every focus assertion silently depends on what the person
+at that desk is watching.
 
 ## Languages and models
 

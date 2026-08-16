@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from pitradio import keys
+from pitradio import endpoints, keys
 from pitradio import languages as languages_mod
 
 CONFIG_VERSION = 1
@@ -156,6 +156,41 @@ class CueConfig:
 
 
 @dataclass
+class VoiceConfig:
+    """Sending the clip to the people you are racing, as well as typing it.
+
+    **Off until switched on, and there is no open-mic mode.** A dictation app
+    that quietly opened the microphone to twenty strangers would be a betrayal
+    however good the feature is, so the trigger key is the consent: nothing
+    leaves the machine that you did not hold a button to record.
+
+    Who you can *hear* is not here — it belongs to the sim, because it depends
+    on where the cars are, and only a plugin knows that. See the LMU plugin's
+    `proximity_only` setting.
+    """
+
+    enabled: bool = False
+    #: Where the room is coordinated. Supplied at build time — see
+    #: `endpoints.py` — because this repository is public and the relay is not.
+    #: Empty in a source checkout, which means voice is unavailable rather than
+    #: pointed at a server nobody chose.
+    relay: str = field(default_factory=endpoints.default_relay)
+    #: Play what other people send. Separate from `enabled` on purpose — muting
+    #: the session while still being heard is a normal thing to want mid-stint,
+    #: and it is the first thing anyone reaches for.
+    playback: bool = True
+    output_device: Any = None
+    volume: float = 0.8
+    #: Drop a clip that took longer than this to arrive. Racing information goes
+    #: stale: a warning about a car alongside is worse than useless once the
+    #: corner is over, and playing it is actively misleading.
+    max_age_seconds: float = 20.0
+    #: The name other racers see. Empty means the one the sim already shows
+    #: them, which is the right default — it is what is on their timing screen.
+    display_name: str = ""
+
+
+@dataclass
 class GuiConfig:
     start_minimized: bool = False
     geometry: str = ""
@@ -195,6 +230,7 @@ class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     cues: CueConfig = field(default_factory=CueConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     updates: UpdateConfig = field(default_factory=UpdateConfig)
     default_profile: Profile = field(default_factory=Profile)
@@ -214,6 +250,7 @@ class Config:
         cfg.audio = _section(AudioConfig, data.get("audio"))
         cfg.whisper = _section(WhisperConfig, data.get("whisper"))
         cfg.cues = _section(CueConfig, data.get("cues"))
+        cfg.voice = _section(VoiceConfig, data.get("voice"))
         cfg.gui = _section(GuiConfig, data.get("gui"))
         cfg.updates = _section(UpdateConfig, data.get("updates"))
 
@@ -239,6 +276,7 @@ class Config:
             "audio": asdict(self.audio),
             "whisper": asdict(self.whisper),
             "cues": asdict(self.cues),
+            "voice": asdict(self.voice),
             "gui": asdict(self.gui),
             "updates": asdict(self.updates),
             "default_profile": asdict(self.default_profile),
@@ -255,7 +293,64 @@ class Config:
                 return self.profiles[key], key
         return self.default_profile, "default"
 
+    def profile_for_plugin(self, plugin_id: str) -> Profile:
+        """The profile carrying a plugin's settings, found by the plugin.
+
+        Voice needs `proximity_only` without knowing which window is focused —
+        it runs on its own thread and asking would mean reaching for Win32 from
+        a portable module. Going the other way works because the settings
+        belong to the plugin's profile whichever game is in front.
+
+        The first match wins. A plugin assigned to two games with different
+        proximity settings is ambiguous by construction, and picking one beats
+        inventing a rule nobody asked for.
+        """
+        if plugin_id:
+            for profile in self.profiles.values():
+                if profile.plugin == plugin_id:
+                    return profile
+        return self.default_profile
+
     # -- validation ------------------------------------------------------
+
+    def _voice_problems(self) -> list[str]:
+        """Checked even when voice is off, so a bad setting is found on save.
+
+        Reporting it only once it is switched on means finding out at the worst
+        possible moment — the first time somebody presses the button in a race.
+        """
+        problems: list[str] = []
+        relay = (self.voice.relay or "").strip()
+
+        if not relay:
+            # Only a problem if you are trying to use it. A source build ships
+            # without an address on purpose, and reporting that as broken would
+            # make `--check-config` fail for everyone working on the app.
+            if self.voice.enabled:
+                problems.append(
+                    "voice.enabled is on but voice.relay is empty; this build "
+                    "has no default relay, so set one in Settings > Voice"
+                )
+        elif not relay.startswith(("ws://", "wss://")):
+            problems.append(
+                f"voice.relay is {relay!r}; it must be a ws:// or wss:// URL")
+        elif relay.startswith("ws://") and not _is_loopback(relay):
+            # The relay is somebody else's machine and the payload is a
+            # recording of your voice. Plaintext would be a silent downgrade —
+            # everything keeps working, and anyone on the path can listen.
+            problems.append(
+                f"voice.relay is {relay!r}; plaintext ws:// sends your voice in "
+                f"the clear. Use wss:// (ws:// is allowed only for localhost)"
+            )
+
+        if not 0.0 <= self.voice.volume <= 1.0:
+            problems.append("voice.volume must be between 0.0 and 1.0")
+        if self.voice.max_age_seconds <= 0:
+            problems.append(
+                "voice.max_age_seconds must be > 0, or every clip is too old "
+                "to play and voice silently does nothing"
+            )
+        return problems
 
     def validate(self) -> list[str]:
         """Everything wrong with this config, as human-readable lines.
@@ -314,6 +409,8 @@ class Config:
             problems.append("audio.min_clip_seconds must be >= 0")
         if self.audio.max_clip_seconds <= self.audio.min_clip_seconds:
             problems.append("audio.max_clip_seconds must exceed min_clip_seconds")
+
+        problems.extend(self._voice_problems())
 
         if self.whisper.device != "cpu":
             problems.append(
@@ -399,6 +496,22 @@ def _validate_profile(profile: Profile, label: str) -> list[str]:
         )
 
     return problems
+
+
+def _is_loopback(url: str) -> bool:
+    """Whether a ws:// URL points at this machine.
+
+    The one place plaintext is reasonable: a relay you are running yourself,
+    while developing it. Matched on the host alone, so "wss://localhost.evil.com"
+    is not mistaken for one.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"}
 
 
 def _section(cls, raw: Any):

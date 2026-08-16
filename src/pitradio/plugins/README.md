@@ -64,9 +64,38 @@ Read them with `registry.settings_for(profile.plugin, profile.plugin_settings)`.
 
 ### Standings
 
-Override `positions()` to return `{place: driver name}` and people can say "P3"
-instead of a name. Place numbering is 1-based; skip anything unclassified rather
-than reporting it as position zero.
+Override `standings()` to return a `Standings`, and people can say "P3" instead
+of a name:
+
+```python
+from pitradio.plugins.base import SessionPlugin, Standings
+
+
+class YourSimPlugin(SessionPlugin):
+    def standings(self) -> Standings:
+        return Standings(
+            overall={1: "Nick Tandy", 2: "Geoff Taylor"},
+            by_class={"LMGT3": {1: "Nick Tandy"}, "LMP2": {1: "Geoff Taylor"}},
+        )
+```
+
+Place numbering is 1-based in both; skip anything unclassified rather than
+reporting it as position zero. A single-class sim can leave `by_class` empty and
+`overall` answers everything.
+
+`by_class` is what makes multi-class racing work: in LMU there is a P3 in
+Hypercar, a P3 in LMP2 and a P3 in LMGT3, and they are three different people.
+"GT3 P3" resolves within the class, a bare "P3" stays overall. The spoken form
+does not have to be the class name — `mentions.class_aliases` drops a
+manufacturer prefix, so LMU's "LMGT3" also answers to "GT3" — and a form two
+classes both answer to is dropped rather than guessed at.
+
+Return **one** object rather than implementing two methods: taken separately the
+two orders would be two snapshots of a block that updates many times a second,
+and a name could resolve from a frame the other half never saw.
+
+`positions()` remains for the overall order alone, and a plugin that only
+implements *it* still works.
 
 **2. Register it.** Add the class to `BUILTIN` in `src/pitradio/plugins/__init__.py`.
 

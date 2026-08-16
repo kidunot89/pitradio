@@ -469,6 +469,14 @@ def run(args) -> int:
     worker.hook = hook
     worker.plugins = registry
 
+    # Built even when voice is switched off: the service reads the config on
+    # every loop, so turning it on in Settings takes effect without a restart.
+    # It is only ever a relay socket and a playback queue when there is a room.
+    from pitradio import net as net_mod
+
+    voice_service = net_mod.VoiceService(store, registry)
+    worker.voice = voice_service
+
     def is_busy() -> bool:
         """True when a sim is focused, so updates can wait."""
         try:
@@ -486,7 +494,7 @@ def run(args) -> int:
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
         transcriber=transcriber, hook=hook, plugins=registry,
-        use_tray=not args.no_tray,
+        voice=voice_service, use_tray=not args.no_tray,
     )
 
     if checker is not None:
@@ -495,6 +503,7 @@ def run(args) -> int:
         )
 
     worker.start()
+    voice_service.start()
     hook.start()
     if not hook.wait_until_ready(5.0):
         log.error("the keyboard hook did not come up; the trigger key will do nothing")

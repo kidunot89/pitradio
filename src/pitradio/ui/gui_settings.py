@@ -1113,6 +1113,134 @@ def _run_mic_test(app) -> None:
     threading.Thread(target=work, name="mic-test", daemon=True).start()
 
 
+# -- Voice ---------------------------------------------------------------
+
+
+def build_voice_tab(app) -> None:
+    """Sending the clip to the people you are racing, as well as typing it.
+
+    Who can *hear* you is not on this tab and should not be: it depends on where
+    the cars are, only a plugin knows that, and it is therefore per-sim. It
+    lives in the profile's plugin settings, next to the standings toggle. This
+    tab says so rather than leaving someone hunting for it.
+    """
+    frame, footer = scrolling_tab(app, t("Voice"))
+    cfg = app.store.config
+
+    # First, before any setting: who can hear you. A dictation app that quietly
+    # opened the microphone to twenty strangers would be a betrayal, so the
+    # window explains the deal before it offers the switch.
+    consent = ttk.LabelFrame(frame, text=t("Before you switch this on"), padding=10)
+    consent.pack(fill="x")
+    ttk.Label(
+        consent,
+        text=t(
+            "Voice sends the recording you just made to the other PitRadio "
+            "users in your session, who hear it out loud. Nothing is sent "
+            "unless you hold the trigger key — there is no open microphone, "
+            "and there is no way to turn one on."
+        ),
+        style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w")
+
+    sending = ttk.LabelFrame(frame, text=t("Sending"), padding=10)
+    sending.pack(fill="x", pady=(10, 0))
+
+    app.v_voice_enabled = tk.BooleanVar(value=cfg.voice.enabled)
+    _row(sending, 0, t("Send my voice"),
+         ttk.Checkbutton(sending, variable=app.v_voice_enabled),
+         t("off until you switch it on"))
+
+    app.v_voice_name = tk.StringVar(value=cfg.voice.display_name)
+    _row(sending, 1, t("Shown to others as"), _entry(sending, app.v_voice_name),
+         t("blank uses your name from the sim, which is what is already on "
+           "their timing screen"))
+
+    hearing = ttk.LabelFrame(frame, text=t("Hearing"), padding=10)
+    hearing.pack(fill="x", pady=(10, 0))
+
+    app.v_voice_playback = tk.BooleanVar(value=cfg.voice.playback)
+    _row(hearing, 0, t("Play what others send"),
+         ttk.Checkbutton(hearing, variable=app.v_voice_playback),
+         t("separate from sending, so you can go quiet without going deaf — "
+           "or the reverse"))
+
+    app.voice_devices = speech.list_devices("output")
+    app.v_voice_output = tk.StringVar(
+        value=_device_label(app.voice_devices, cfg.voice.output_device))
+    _row(hearing, 1, t("Output device"),
+         ttk.Combobox(hearing, textvariable=app.v_voice_output, state="readonly",
+                      values=["(system default)"]
+                             + [label for _i, label in app.voice_devices]),
+         t("your headset, not the sim's output"))
+
+    app.v_voice_volume = tk.DoubleVar(value=cfg.voice.volume)
+    app.v_voice_volume_label = tk.StringVar(value=_percent(cfg.voice.volume))
+    volume_row = ttk.Frame(hearing)
+    ttk.Scale(volume_row, from_=0.0, to=1.0, orient="horizontal", length=260,
+              variable=app.v_voice_volume,
+              command=lambda _v: app.v_voice_volume_label.set(
+                  _percent(app.v_voice_volume.get()))).pack(side="left")
+    ttk.Label(volume_row, textvariable=app.v_voice_volume_label,
+              width=6).pack(side="left", padx=6)
+    _row(hearing, 2, t("Volume"), volume_row)
+
+    app.v_voice_max_age = tk.StringVar(value=str(cfg.voice.max_age_seconds))
+    _row(hearing, 3, t("Ignore clips older than"),
+         _entry(hearing, app.v_voice_max_age, width=8),
+         t("seconds. Racing information goes stale — a warning about a car "
+           "alongside is misleading once the corner is over"))
+
+    # Named, not merely implied: someone looking for the proximity control will
+    # look here first, and "it is on another tab" is only useful if it says
+    # which one.
+    who = ttk.LabelFrame(frame, text=t("Who you hear"), padding=10)
+    who.pack(fill="x", pady=(10, 0))
+    ttk.Label(
+        who,
+        text=t(
+            "Hearing only the cars near you on track is a per-sim setting, "
+            "because it depends on where everyone is and only the sim knows "
+            "that. It is in Profiles, under the game's plugin settings, next "
+            "to \"Recognise standings positions\"."
+        ),
+        style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w")
+
+    relay = ttk.LabelFrame(frame, text=t("Relay"), padding=10)
+    relay.pack(fill="x", pady=(10, 0))
+    app.v_voice_relay = tk.StringVar(value=cfg.voice.relay)
+    _row(relay, 0, t("Server"), _entry(relay, app.v_voice_relay, width=40),
+         t("leave this alone unless you are running your own"))
+    ttk.Label(
+        relay,
+        text=t(
+            "The relay passes clips between everyone in your session. It is "
+            "told a hash of the game server you are on and nothing else — not "
+            "which server, not where any car is."
+        ),
+        style="Hint.TLabel", wraplength=640, justify="left").grid(
+        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+    ttk.Button(footer, text=t("Save"), command=lambda: _save_voice(app)).pack(anchor="e")
+
+
+def _percent(value: float) -> str:
+    return f"{round(float(value) * 100)}%"
+
+
+def _save_voice(app) -> None:
+    cfg = app.store.config
+    cfg.voice.enabled = bool(app.v_voice_enabled.get())
+    cfg.voice.playback = bool(app.v_voice_playback.get())
+    cfg.voice.display_name = app.v_voice_name.get().strip()
+    cfg.voice.output_device = _device_from_label(
+        app.voice_devices, app.v_voice_output.get())
+    cfg.voice.volume = min(1.0, max(0.0, round(float(app.v_voice_volume.get()), 2)))
+    cfg.voice.max_age_seconds = max(
+        0.1, _as_float(app.v_voice_max_age, cfg.voice.max_age_seconds))
+    cfg.voice.relay = app.v_voice_relay.get().strip()
+    app.save_config()
+
+
 # -- History -------------------------------------------------------------
 
 

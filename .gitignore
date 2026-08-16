@@ -26,3 +26,15 @@ pitradio.log*
 
 # Fetched by packaging/fetch_sdl3.py, verified by hash rather than committed.
 packaging/runtime/
+
+# Relay secrets. The OAuth client secret and anything like it lives in the
+# environment on the server, never in the tree — a secret in a public repo is
+# a secret that has already leaked.
+.env
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.terraform/

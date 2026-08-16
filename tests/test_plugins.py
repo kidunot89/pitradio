@@ -8,10 +8,16 @@ The rule that matters most: a plugin fault must cost session data, never the
 message. These tests mostly check that misbehaving plugins are contained.
 """
 
+from dataclasses import replace
+
 import pytest
 
-from pitradio import config, plugins
-from pitradio.plugins.base import SessionPlugin
+from pitradio import config, plugins, voice
+from pitradio.plugins.base import SessionInfo, SessionPlugin
+
+# rF2/LMU's mControl values, named where they are used.
+CONTROL_LOCAL_PLAYER = 0
+CONTROL_LOCAL_AI = 1
 
 
 class Working(SessionPlugin):
@@ -180,18 +186,39 @@ def test_plugin_choice_survives_a_round_trip(tmp_path):
 
 
 @pytest.fixture
-def lmu_with_data():
+def lmu_with_data(monkeypatch):
     """The real plugin against a zeroed struct, so field names are exercised.
 
     A wrong field name would otherwise be swallowed by the plugin's own error
     handling and show up as "no drivers, ever" on someone's machine.
+
+    The game's HTTP API is stubbed out as unreachable. Left alone it would be
+    *answered* on the machine LMU is installed on, and every focus assertion
+    below would quietly depend on what the person at that desk was watching.
     """
     lmu_data = pytest.importorskip(
         "pylmusharedmemory.lmu_data", reason="vendored reader unavailable")
 
+    def unreachable(_timeout):
+        raise OSError("no game here")
+
+    monkeypatch.setattr(plugins.lmu, "_fetch_standings", unreachable)
+
     plugin = plugins.LeMansUltimatePlugin()
     plugin._data = lmu_data.LMUObjectOut()
     return plugin
+
+
+@pytest.fixture
+def watching(monkeypatch):
+    """Point the game's API at a chosen slot."""
+    def focus_on(slot):
+        monkeypatch.setattr(
+            plugins.lmu, "_fetch_standings",
+            lambda _timeout: [
+                {"driverName": "Someone", "slotID": slot, "hasFocus": True}])
+
+    return focus_on
 
 
 def test_lmu_reads_driver_names(lmu_with_data):
@@ -223,7 +250,21 @@ def test_lmu_handles_a_negative_count(lmu_with_data):
     assert lmu_with_data.drivers() == []
 
 
-def test_lmu_reports_not_connected_without_the_sim():
+@pytest.fixture
+def lmu_absent(monkeypatch):
+    """The sim not running, whether or not it is.
+
+    Off Windows this is the only outcome there is, which is why it went
+    unnoticed: on the machine LMU is *installed* on — the one place the plugin
+    can be exercised for real — an open mapping made these fail, and a suite
+    that only passes when the sim is closed is no use to whoever is racing.
+    """
+    from pitradio.plugins import lmu
+
+    monkeypatch.setattr(lmu, "_open_existing_mapping", lambda name, size: None)
+
+
+def test_lmu_reports_not_connected_without_the_sim(lmu_absent):
     plugin = plugins.LeMansUltimatePlugin()
     assert plugin.drivers() == []
     assert "not connected" in plugin.status()
@@ -262,7 +303,7 @@ def test_the_lmu_plugin_never_creates_the_mapping():
     assert "OpenFileMappingW" in source, "should open an existing mapping only"
 
 
-def test_status_says_not_connected_when_lmu_is_absent():
+def test_status_says_not_connected_when_lmu_is_absent(lmu_absent):
     """The regression this replaced: it claimed to be connected to nothing."""
     plugin = plugins.LeMansUltimatePlugin()
     assert plugin.drivers() == []
@@ -369,11 +410,6 @@ def test_plugin_settings_survive_a_round_trip(tmp_path):
     assert config.load(path).profiles["game.exe"].plugin_settings == {"positions": False}
 
 
-def test_lmu_exposes_a_positions_toggle():
-    lmu = plugins.PluginRegistry().by_id("lmu")
-    assert [s.key for s in lmu.settings] == ["positions"]
-
-
 def test_lmu_reads_standings(lmu_with_data):
     lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 2
     lmu_with_data._data.scoring.vehScoringInfo[0].mDriverName = b"Geoff Taylor"
@@ -391,6 +427,361 @@ def test_lmu_skips_unclassified_entries(lmu_with_data):
     lmu_with_data._data.scoring.vehScoringInfo[0].mPlace = 0
 
     assert lmu_with_data.positions() == {}
+
+
+# -- multi-class standings -----------------------------------------------
+
+
+def _grid(plugin, cars):
+    """(name, overall place, class) for each car, into the scoring block."""
+    plugin._data.scoring.scoringInfo.mNumVehicles = len(cars)
+    for index, (name, place, vehicle_class) in enumerate(cars):
+        entry = plugin._data.scoring.vehScoringInfo[index]
+        entry.mDriverName = name
+        entry.mPlace = place
+        entry.mVehicleClass = vehicle_class
+    return plugin
+
+
+def test_lmu_derives_places_within_each_class(lmu_with_data):
+    """The block carries an overall place and a class name and nothing that
+    combines them, so class order is its members sorted on overall place."""
+    standings = _grid(lmu_with_data, [
+        (b"Max Verstappen", 1, b"Hypercar"),
+        (b"Nyck de Vries", 2, b"LMP2"),
+        (b"Geoff Taylor", 3, b"Hypercar"),
+        (b"Nick Tandy", 4, b"LMGT3"),
+        (b"Kamui Kobayashi", 5, b"LMGT3"),
+    ]).standings()
+
+    assert standings.by_class == {
+        "Hypercar": {1: "Max Verstappen", 2: "Geoff Taylor"},
+        "LMP2": {1: "Nyck de Vries"},
+        "LMGT3": {1: "Nick Tandy", 2: "Kamui Kobayashi"},
+    }
+
+
+def test_lmu_still_reports_the_overall_order(lmu_with_data):
+    """A bare "P3" means overall, which is the column the timing screen shows."""
+    standings = _grid(lmu_with_data, [
+        (b"Max Verstappen", 1, b"Hypercar"),
+        (b"Nyck de Vries", 2, b"LMP2"),
+        (b"Geoff Taylor", 3, b"Hypercar"),
+    ]).standings()
+
+    assert standings.overall == {
+        1: "Max Verstappen", 2: "Nyck de Vries", 3: "Geoff Taylor"}
+
+
+def test_class_order_does_not_depend_on_the_block_order(lmu_with_data):
+    """Cars are listed by slot, not by position."""
+    standings = _grid(lmu_with_data, [
+        (b"Kamui Kobayashi", 5, b"LMGT3"),
+        (b"Nick Tandy", 4, b"LMGT3"),
+    ]).standings()
+
+    assert standings.by_class["LMGT3"] == {1: "Nick Tandy", 2: "Kamui Kobayashi"}
+
+
+def test_an_unclassified_car_is_in_no_class_either(lmu_with_data):
+    standings = _grid(lmu_with_data, [
+        (b"Nick Tandy", 1, b"LMGT3"),
+        (b"Geoff Taylor", 0, b"LMGT3"),
+    ]).standings()
+
+    assert standings.by_class["LMGT3"] == {1: "Nick Tandy"}
+    assert standings.overall == {1: "Nick Tandy"}
+
+
+def test_a_car_with_no_class_is_still_in_the_overall_order(lmu_with_data):
+    """A blank class must cost the class order, never the driver."""
+    standings = _grid(lmu_with_data, [(b"Geoff Taylor", 1, b"")]).standings()
+
+    assert standings.overall == {1: "Geoff Taylor"}
+    assert standings.by_class == {}
+
+
+def test_lmu_lists_the_classes_on_the_grid(lmu_with_data):
+    assert _grid(lmu_with_data, [
+        (b"Max Verstappen", 1, b"Hypercar"),
+        (b"Geoff Taylor", 2, b"Hypercar"),
+        (b"Nick Tandy", 3, b"LMGT3"),
+    ]).classes() == ["Hypercar", "LMGT3"]
+
+
+def test_lmu_vocabulary_leads_with_the_class_names(lmu_with_data):
+    """The hint is capped, and a 60-car entry list would push the words that
+    make "GT3 P3" work off the end of it."""
+    assert _grid(lmu_with_data, [
+        (b"Max Verstappen", 1, b"Hypercar"),
+        (b"Nick Tandy", 2, b"LMGT3"),
+    ]).vocabulary() == ["Hypercar", "LMGT3", "Max Verstappen", "Nick Tandy"]
+
+
+def test_standings_are_empty_without_the_sim(lmu_absent):
+    assert not plugins.LeMansUltimatePlugin().standings()
+
+
+class OverallOnly(SessionPlugin):
+    """A plugin written against the contract before classes existed."""
+
+    id = "overall"
+    name = "Single Class Sim"
+
+    def positions(self):
+        return {1: "Geoff Taylor"}
+
+
+def test_a_positions_only_plugin_is_not_silently_dropped():
+    """Its override would otherwise sit there looking correct while the worker
+    read an empty `standings()` instead — a bug with no error message."""
+    registry = plugins.PluginRegistry((OverallOnly,))
+    standings = registry.standings_for("overall")
+
+    assert standings.overall == {1: "Geoff Taylor"}
+    assert standings.by_class == {}
+
+
+# -- the session, for voice ----------------------------------------------
+
+
+def test_lmu_reports_a_room_from_the_game_server(lmu_with_data):
+    """Two clients on the same server agree on the key without talking."""
+    info = lmu_with_data._data.scoring.scoringInfo
+    info.mServerPublicIP = 3156777263
+    info.mServerPort = 30852
+    info.mTrackName = b"Daytona International Speedway Road Course"
+
+    session = lmu_with_data.session()
+    assert session.key == voice.session_key(3156777263, 30852)
+    assert session.track == "Daytona International Speedway Road Course"
+    assert session
+
+
+def test_lmu_reports_no_room_offline(lmu_with_data):
+    """Single player has no server, so there is nobody to be in a room with."""
+    assert not lmu_with_data.session()
+
+
+def test_lmu_reports_where_every_car_is(lmu_with_data):
+    """Proximity is decided locally, which only works because the block carries
+    every car's position and not just the player's."""
+    lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 2
+    first = lmu_with_data._data.scoring.vehScoringInfo[0]
+    first.mDriverName = b"Nick Tandy"
+    first.mPos.x, first.mPos.y, first.mPos.z = 10.0, 2.0, -30.0
+    second = lmu_with_data._data.scoring.vehScoringInfo[1]
+    second.mDriverName = b"Geoff Taylor"
+    second.mIsPlayer = True
+
+    cars = lmu_with_data.session().cars
+    assert [car.driver for car in cars] == ["Nick Tandy", "Geoff Taylor"]
+    assert cars[0].position == (10.0, 2.0, -30.0)
+    assert lmu_with_data.session().player().driver == "Geoff Taylor"
+
+
+def test_a_session_with_no_player_car_has_no_player(lmu_with_data):
+    """Spectating, or the block not caught up yet. Must not raise."""
+    lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 1
+    lmu_with_data._data.scoring.vehScoringInfo[0].mDriverName = b"Nick Tandy"
+
+    assert lmu_with_data.session().player() is None
+
+
+def test_an_unclassified_car_still_has_a_position(lmu_with_data):
+    """It is out of the standings, not off the track — and proximity does not
+    care what place somebody is in."""
+    lmu_with_data._data.scoring.scoringInfo.mNumVehicles = 1
+    entry = lmu_with_data._data.scoring.vehScoringInfo[0]
+    entry.mDriverName = b"Nick Tandy"
+    entry.mPlace = 0
+    entry.mPos.x = 42.0
+
+    cars = lmu_with_data.session().cars
+    assert len(cars) == 1
+    assert cars[0].place == 0
+    assert cars[0].position[0] == 42.0
+
+
+def _own_car(plugin, *, control: int, others: int = 0):
+    data = plugin._data
+    data.scoring.scoringInfo.mNumVehicles = 1 + others
+    mine = data.scoring.vehScoringInfo[0]
+    mine.mDriverName = b"Geoff Taylor"
+    mine.mID = 41
+    mine.mIsPlayer = True
+    mine.mControl = control
+    mine.mPos.x = 0.0
+    for index in range(others):
+        other = data.scoring.vehScoringInfo[1 + index]
+        other.mDriverName = f"Driver {index}".encode()
+        other.mID = 100 + index
+        other.mControl = 2
+        other.mPos.x = 5000.0
+    return plugin
+
+
+def test_proximity_is_measured_from_your_own_car_while_driving(lmu_with_data):
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_PLAYER).session()
+
+    assert session.driving() is True
+    assert session.listener().driver == "Geoff Taylor"
+
+
+def test_handing_over_to_the_ai_counts_as_spectating(lmu_with_data):
+    """mControl is 0 for the local player and 1 once the AI has the car. It is
+    the only signal the block gives that somebody has stopped driving."""
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_AI).session()
+
+    assert session.driving() is False
+
+
+def test_spectating_with_no_answer_from_the_game_cannot_place_the_listener(lmu_with_data):
+    """The API unreachable, the game mid-load, the request timing out — all
+    normal. None means audible: keeping the parked car as the reference would
+    filter the session by somewhere nobody is looking, and the spectator would
+    have no way to tell that from the feature being broken."""
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_AI, others=1).session()
+
+    assert session.listener() is None
+    assert voice.audible(
+        voice.Speaker("Driver 0", (5000.0, 0.0, 0.0)),
+        None, proximity_only=True, metres=200)
+
+
+def test_the_car_the_camera_is_on_is_detected_not_asked_for(lmu_with_data, watching):
+    """Somebody racing cannot reach a dropdown, and somebody spectating should
+    not have to. LMU's own HTTP API says which car has focus."""
+    watching(100)
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_AI, others=1).session()
+
+    assert session.focus_slot == 100
+    assert session.listener().driver == "Driver 0"
+    assert session.listener().position[0] == 5000.0
+
+
+def test_the_focused_car_is_where_the_listener_is(lmu_with_data):
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_AI, others=1).session()
+    watching = replace(session, focus_slot=100)
+
+    assert watching.listener().driver == "Driver 0"
+    assert watching.listener().position[0] == 5000.0
+
+
+# -- reading the focus -----------------------------------------------------
+
+
+def test_focus_reads_the_slot_with_focus():
+    assert plugins.lmu.focus_slot([
+        {"driverName": "Geoff Taylor", "slotID": 48, "hasFocus": False, "player": True},
+        {"driverName": "Eran Kaufman", "slotID": 46, "hasFocus": True},
+    ]) == 46
+
+
+def test_focus_is_not_the_player():
+    """The distinction the whole thing rests on: while spectating, `player` is
+    the parked car and `hasFocus` is the one on screen."""
+    assert plugins.lmu.focus_slot([
+        {"slotID": 48, "player": True, "hasFocus": False},
+        {"slotID": 46, "player": False, "hasFocus": True},
+    ]) == 46
+
+
+def test_focus_accepts_either_flag():
+    """`focus` sits beside `hasFocus` and has always agreed; neither is worth
+    preferring on a guess."""
+    assert plugins.lmu.focus_slot([{"slotID": 7, "focus": True}]) == 7
+
+
+def test_slot_zero_is_a_real_slot():
+    assert plugins.lmu.focus_slot([{"slotID": 0, "hasFocus": True}]) == 0
+
+
+@pytest.mark.parametrize("standings", [
+    [], None, {}, "nope", [None], ["nope"], [{}],
+    [{"hasFocus": True}],                      # focused, but no slot
+    [{"slotID": "46", "hasFocus": True}],      # a slot that is not a number
+    [{"slotID": 46, "hasFocus": False}],       # nobody focused
+])
+def test_anything_unexpected_reads_as_no_focus(standings):
+    """It is parsed on the trigger cycle. Nothing here may raise."""
+    assert plugins.lmu.focus_slot(standings) is None
+
+
+def test_the_focus_is_cached_rather_than_fetched_every_trigger(lmu_with_data, monkeypatch):
+    """The response is ~16KB and the camera does not move between cars every
+    frame. This runs while somebody is holding the trigger down."""
+    calls = []
+
+    def counted(_timeout):
+        calls.append(1)
+        return [{"slotID": 100, "hasFocus": True}]
+
+    monkeypatch.setattr(plugins.lmu, "_fetch_standings", counted)
+    _own_car(lmu_with_data, control=CONTROL_LOCAL_AI, others=1)
+
+    for _ in range(5):
+        assert lmu_with_data.session().focus_slot == 100
+    assert len(calls) == 1
+
+
+def test_a_game_that_is_not_answering_is_not_asked_every_trigger(lmu_with_data, monkeypatch):
+    """A failure is cached too, or a closed game costs a timeout per press."""
+    calls = []
+
+    def failing(_timeout):
+        calls.append(1)
+        raise OSError("nothing listening")
+
+    monkeypatch.setattr(plugins.lmu, "_fetch_standings", failing)
+    _own_car(lmu_with_data, control=CONTROL_LOCAL_AI)
+
+    for _ in range(5):
+        assert lmu_with_data.session().focus_slot is None
+    assert len(calls) == 1
+
+
+def test_a_focus_on_a_car_that_has_left_falls_back_rather_than_misplacing(lmu_with_data):
+    """They disconnect mid-session and the slot stops existing."""
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_AI, others=1).session()
+
+    assert replace(session, focus_slot=999).listener() is None
+
+
+def test_the_focused_car_wins_even_while_driving(lmu_with_data):
+    """Watching somebody else from the pits with your own car parked."""
+    session = _own_car(lmu_with_data, control=CONTROL_LOCAL_PLAYER, others=1).session()
+
+    assert replace(session, focus_slot=100).listener().driver == "Driver 0"
+
+
+def test_no_session_at_all_places_nobody():
+    assert SessionInfo().listener() is None
+    assert SessionInfo().driving() is False
+
+
+def test_lmu_exposes_the_proximity_settings():
+    lmu = plugins.PluginRegistry().by_id("lmu")
+    assert [s.key for s in lmu.settings] == [
+        "positions", "proximity_only", "proximity_metres"]
+
+
+def test_proximity_is_off_until_it_is_switched_on():
+    """A dictation app that quietly opened the microphone to twenty strangers
+    would be a betrayal; but silence nobody asked for is its own bug, so the
+    filter starts off and the whole session is audible."""
+    defaults = plugins.PluginRegistry().settings_for("lmu")
+    assert defaults["proximity_only"] is False
+
+
+def test_a_plugin_that_raises_on_standings_costs_only_the_standings():
+    class Boom(SessionPlugin):
+        id = "boom"
+
+        def standings(self):
+            raise RuntimeError("standings blew up")
+
+    assert not plugins.PluginRegistry((Boom,)).standings_for("boom")
 
 
 # -- resolving an unset choice -------------------------------------------

@@ -49,6 +49,10 @@ class Worker(threading.Thread):
         self.transcriber = transcriber
         self.hook: hook_mod.KeyboardHook | None = None
         self.plugins = None
+        #: Set by the app when voice is available. None everywhere else — in
+        #: `--gui-only`, in tests, and in any build without the websocket
+        #: package — and every use site copes with that.
+        self.voice = None
 
         self._active: dict | None = None
         # A message typed but not sent, waiting on a gesture. Only ever set
@@ -140,8 +144,11 @@ class Worker(threading.Thread):
         # matter are the ones from when they started.
         drivers: list[str] = []
         plugin_id = ""
-        if self.plugins is not None and cfg.mentions.enabled:
+        # Resolved whatever mentions are set to: voice needs the session even
+        # when nobody's name is being marked up.
+        if self.plugins is not None:
             plugin_id = self.plugins.resolve(profile.plugin, exe)
+        if plugin_id and cfg.mentions.enabled:
             drivers = self.plugins.drivers_for(plugin_id)
             if drivers:
                 # Named, not just counted: whether a mention works comes down to
@@ -162,13 +169,55 @@ class Worker(threading.Thread):
                 self.plugins.vocabulary_for(plugin_id)
                 if drivers and cfg.mentions.add_names_to_vocabulary else []
             ),
-            "positions": (
-                self.plugins.positions_for(plugin_id)
+            "standings": (
+                self.plugins.standings_for(plugin_id)
                 if drivers and self.plugins.settings_for(
                     plugin_id, profile.plugin_settings).get("positions")
-                else {}
+                else None
+            ),
+            # Where this driver was when they started talking, so the clip can
+            # say so. Read now for the same reason the drivers are.
+            "session": (
+                self.plugins.session_for(plugin_id)
+                if plugin_id and cfg.voice.enabled else None
             ),
         }
+
+    def _send_voice(self, active: dict, audio) -> None:
+        """Hand the clip to the relay, if voice is on and there is a room.
+
+        Wrapped whole, and deliberately: this is the newest and least proven
+        thing in the trigger cycle, and it sits between somebody's recording
+        and their message reaching the chat box. A relay problem must cost the
+        audio and nothing else.
+        """
+        client = self.voice
+        cfg = self.store.config
+        session = active.get("session")
+        if client is None or not cfg.voice.enabled or session is None or not session.key:
+            return
+
+        try:
+            from pitradio import voice as voice_mod
+
+            me = session.player()
+            # Their own name from the sim, which is what everyone else already
+            # sees on their timing screen.
+            name = cfg.voice.display_name.strip() or (me.driver if me else "")
+            if not name:
+                log.info("voice: no name to send under; skipping the clip")
+                return
+
+            frame = voice_mod.encode_clip(
+                voice_mod.Speaker(name, me.position if me else (0.0, 0.0, 0.0)),
+                speech.to_pcm16(audio),
+                sent_at=time.time(),
+                rate=cfg.audio.samplerate,
+            )
+            client.send(frame)
+            log.info("voice: sent %d bytes as %r", len(frame), name)
+        except Exception:
+            log.exception("sending the voice clip failed")
 
     def _on_up(self, released_at: float) -> None:
         if self._pending is not None:
@@ -192,6 +241,10 @@ class Worker(threading.Thread):
             self._abort(active, profile, "", 0.0)
             return
 
+        # Before transcription, not after: the clip is ready now, and Whisper
+        # takes a second or more. Nothing about sending it depends on the text.
+        self._send_voice(active, audio)
+
         self.state.set_status(state_mod.STATUS_TRANSCRIBING)
         transcribe_started = time.perf_counter()
         drivers = active.get("drivers") or []
@@ -205,12 +258,13 @@ class Worker(threading.Thread):
 
         text = speech.sanitize(raw, profile.max_chars)
 
-        positions = active.get("positions") or {}
-        if text and positions and cfg.mentions.enabled:
+        standings = active.get("standings")
+        if text and standings and cfg.mentions.enabled:
             # Before name matching: "P3" is unambiguous, and resolving it first
             # means the resulting name is not re-matched.
             spoken = mentions_mod.apply_positions(
-                text, positions, prefix=cfg.mentions.prefix)
+                text, standings.overall, classes=standings.by_class,
+                prefix=cfg.mentions.prefix)
             if spoken != text:
                 log.info("resolved standings: %r", spoken)
                 text = spoken
