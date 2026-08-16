@@ -224,6 +224,9 @@ def cmd_self_test() -> int:
         # The heavy native stack. faster_whisper pulls av in eagerly, and av's
         # extension modules import av.utils from inside compiled code.
         "av", "av.utils", "ctranslate2", "onnxruntime", "faster_whisper",
+        # Voice chat's transport. Imported lazily by `net`, so a build that
+        # dropped it would run perfectly until somebody pressed the trigger.
+        "websocket",
         # The app itself. These were still listed under their pre-restructure
         # names — "winapi", "gui", "plugins" — so every one of them reported
         # ModuleNotFoundError and the real modules were never checked at all.
@@ -236,6 +239,10 @@ def cmd_self_test() -> int:
         "pitradio.ui.theme", "pitradio.ui.logo", "pitradio.ui.tray",
         "pitradio.input", "pitradio.ui",
         "pitradio.plugins", "pitradio.plugins.base", "pitradio.plugins.lmu",
+        # Voice. `net` imports websocket-client lazily so a build without it
+        # still runs, which means nothing at module scope proves it was
+        # bundled — exactly how av.utils went missing from v0.1.0.
+        "pitradio.voice", "pitradio.net", "pitradio.endpoints",
     ]
 
     failures: list[tuple[str, str]] = []
