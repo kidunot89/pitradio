@@ -290,23 +290,105 @@ def _already_mentioned(text: str, begin: int, prefix: str) -> bool:
     return text[max(0, index - len(prefix)):index] == prefix
 
 
-# "P3", "p 3", "P-3". Whisper renders a spoken "P three" inconsistently, and
-# an optional space or hyphen covers most of what it produces.
-_POSITION = re.compile(r"\bP\s?-?\s?(\d{1,2})\b", re.IGNORECASE)
-
 # Spelled-out ordinals, which Whisper produces at least as often as digits.
 _ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
     "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
 }
-_ORDINAL_PLACE = re.compile(
-    r"\b(" + "|".join(_ORDINALS) + r")\s+place\b", re.IGNORECASE)
+
+# The place itself: "P3", "p 3", "P-3", or "third place". Whisper renders a
+# spoken "P three" inconsistently, and an optional space or hyphen covers most
+# of what it produces.
+_PLACE = (
+    r"\b(?:P\s?-?\s?(?P<num>\d{1,2})"
+    r"|(?P<ord>" + "|".join(_ORDINALS) + r")\s+place)\b"
+)
+
+# Up to three words in front of a place, which *might* name a class: "GT3 P3",
+# "LMP 2 P4", "Hyper car first place". Whether they do is decided against the
+# session's actual classes, not by the pattern — anything else here is ordinary
+# speech ("tell P3 to move over") and must survive untouched.
+#
+# The group is **lazy**, and that is load-bearing. Greedy, "P1 and P2 are
+# fighting" matches once with the class group swallowing "P1 and", leaving the
+# leader unresolved. Lazy, each place is tried on its own first and only reaches
+# backwards when it has to.
+_SPOKEN_CLASS = r"[A-Za-z][A-Za-z0-9]*(?:[\s.-]+[A-Za-z0-9]+){0,2}"
+
+_POSITION_RE = re.compile(
+    rf"(?:(?P<cls>{_SPOKEN_CLASS})[\s,.-]+)??(?P<place>{_PLACE})",
+    re.IGNORECASE,
+)
+
+_ALNUM = re.compile(r"[A-Za-z0-9]+")
+
+
+def _squash(text: str) -> str:
+    """"LM GT3" and "lmgt3" alike -> "lmgt3", for comparing class names.
+
+    Whisper decides on its own whether a class is one word or two, and whether
+    the digits are digits, so anything that survives the join is noise.
+    """
+    return "".join(_ALNUM.findall(_normalise(text)))
+
+
+def class_aliases(name: str) -> set[str]:
+    """The squashed forms of a class name worth answering to.
+
+    LMU calls its GT class "LMGT3" and every driver on the radio calls it
+    "GT3", so the manufacturer prefix is dropped as well as kept. Only when
+    what remains is three characters or more: "LMP2" would otherwise answer to
+    "P2", which is a *position*, and "LMP2 P4" would resolve the wrong thing.
+    """
+    squashed = _squash(name)
+    if not squashed:
+        return set()
+    aliases = {squashed}
+    if squashed.startswith("lm") and len(squashed) >= 5:
+        aliases.add(squashed[2:])
+    return aliases
+
+
+def _alias_map(classes: dict[str, dict[int, str]]) -> dict[str, str]:
+    """alias -> class name, with anything ambiguous dropped.
+
+    Two classes answering to the same spoken form is a coin toss, and resolving
+    it wrongly puts someone else's name in the message. Dropping the alias
+    leaves the words alone instead, which is recoverable.
+    """
+    mapping: dict[str, str] = {}
+    clashes: set[str] = set()
+    for name in classes:
+        for alias in class_aliases(name):
+            if alias in mapping and mapping[alias] != name:
+                clashes.add(alias)
+            mapping[alias] = name
+    for alias in clashes:
+        mapping.pop(alias, None)
+    return mapping
+
+
+def _named_class(spoken: str, aliases: dict[str, str]) -> tuple[int, str] | None:
+    """(where the class name starts, which class) in the words before a place.
+
+    Tried longest-first and from the right, so "tell the GT3 P3" finds "GT3"
+    without "tell the" costing the match — and without those words being eaten
+    by the replacement.
+    """
+    words = list(_ALNUM.finditer(spoken))
+    for start in range(len(words)):
+        joined = "".join(word.group() for word in words[start:])
+        name = aliases.get(_squash(joined))
+        if name is not None:
+            return words[start].start(), name
+    return None
 
 
 def apply_positions(
     text: str,
     positions: dict[int, str],
     *,
+    classes: dict[str, dict[int, str]] | None = None,
     prefix: str = "@",
 ) -> str:
     """Replace a standings reference with the driver in that place.
@@ -315,22 +397,50 @@ def apply_positions(
     most names are ones you cannot pronounce or did not catch, and a position is
     something you can always read off the timing screen.
 
+    **Multi-class racing means a bare position is not enough.** In LMU there is
+    a P3 in Hypercar, a P3 in LMP2 and a P3 in LMGT3, and they are three
+    different people. Naming the class picks the one meant — "GT3 P3 you are an
+    idiot" resolves within LMGT3 — and a bare "P3" stays overall, because that
+    is what the timing screen shows by default.
+
     A position with nobody in it is left alone rather than blanked: saying "P40"
     in a twenty-car race means nothing, and silently deleting it would be worse
-    than leaving the words.
+    than leaving the words. That holds for a named class too — once the class is
+    recognised it decides, and falling back to the overall order would answer a
+    question nobody asked.
     """
-    if not text or not positions:
+    if not text or not (positions or classes):
         return text
 
-    def replace_digits(match: re.Match) -> str:
-        name = positions.get(int(match.group(1)))
-        return f"{prefix}{display_name(name)}" if name else match.group(0)
+    aliases = _alias_map(classes or {})
 
-    def replace_ordinal(match: re.Match) -> str:
-        name = positions.get(_ORDINALS[match.group(1).lower()])
-        return f"{prefix}{display_name(name)}" if name else match.group(0)
+    def replace(match: re.Match) -> str:
+        if match.group("num"):
+            place = int(match.group("num"))
+        else:
+            place = _ORDINALS[match.group("ord").lower()]
 
-    return _ORDINAL_PLACE.sub(replace_ordinal, _POSITION.sub(replace_digits, text))
+        # Everything before the place — the words the class group swallowed.
+        kept = match.group(0)[:match.start("place") - match.start(0)]
+
+        spoken_class = match.group("cls")
+        if spoken_class and aliases:
+            found = _named_class(spoken_class, aliases)
+            if found is not None:
+                offset, name = found
+                # Words in front of the class name were not part of it.
+                before = kept[:offset]
+                driver = (classes or {}).get(name, {}).get(place)
+                if not driver:
+                    return match.group(0)
+                return f"{before}{prefix}{display_name(driver)}"
+
+        driver = positions.get(place)
+        if not driver:
+            return match.group(0)
+        return f"{kept}{prefix}{display_name(driver)}"
+
+    return _POSITION_RE.sub(replace, text)
 
 
 def vocabulary_hint(drivers: list[str], limit: int = 40) -> str:

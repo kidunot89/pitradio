@@ -365,3 +365,109 @@ def test_a_word_starting_with_p_is_not_a_position():
 def test_several_positions_in_one_message():
     assert mentions.apply_positions("P1 and P2 are fighting", STANDINGS) == (
         "@M.Verstappen and @G.Taylor are fighting")
+
+
+# -- multi-class standings -----------------------------------------------
+#
+# Endurance racing runs several classes at once, so "P3" has more than one
+# answer and only one of them is the overall order.
+
+OVERALL = {
+    1: "Max Verstappen", 2: "Geoff Taylor", 3: "Nyck de Vries",
+    4: "Nick Tandy", 5: "José María López", 6: "Kamui Kobayashi",
+}
+CLASSES = {
+    "Hypercar": {1: "Max Verstappen", 2: "Geoff Taylor"},
+    "LMP2": {1: "Nyck de Vries"},
+    "LMGT3": {1: "Nick Tandy", 2: "José María López", 3: "Kamui Kobayashi"},
+}
+
+
+@pytest.mark.parametrize(
+    ("said", "expected"),
+    [
+        # The class picks whose P3 is meant. Overall P3 is de Vries.
+        ("GT3 P3 your an idiot", "@K.Kobayashi your an idiot"),
+        ("LMGT3 P1 is holding me up", "@N.Tandy is holding me up"),
+        ("Hypercar P2 pitted", "@G.Taylor pitted"),
+        ("LMP2 P1 is quick", "@N.de Vries is quick"),
+        # Whisper decides on its own whether a class is one word or two.
+        ("hyper car P2 pitted", "@G.Taylor pitted"),
+        ("GT 3 P1 is holding me up", "@N.Tandy is holding me up"),
+        ("GT3 third place is quick", "@K.Kobayashi is quick"),
+        # No class named: the overall order, as the timing screen shows it.
+        ("P3 is holding me up", "@N.de Vries is holding me up"),
+    ],
+)
+def test_a_class_picks_which_position_is_meant(said, expected):
+    assert mentions.apply_positions(said, OVERALL, classes=CLASSES) == expected
+
+
+def test_words_in_front_of_the_class_survive():
+    """Only the class name is consumed, not whatever led up to it."""
+    assert mentions.apply_positions(
+        "tell the GT3 P1 to move over", OVERALL, classes=CLASSES) == (
+        "tell the @N.Tandy to move over")
+
+
+def test_a_word_that_is_not_a_class_falls_back_to_overall():
+    assert mentions.apply_positions(
+        "Porsche P3 is slow", OVERALL, classes=CLASSES) == (
+        "Porsche @N.de Vries is slow")
+
+
+def test_an_empty_place_in_a_named_class_is_left_alone():
+    """Once the class is recognised it decides. Falling back to the overall
+    order would answer a question nobody asked — LMP2 has no P4."""
+    assert mentions.apply_positions(
+        "LMP2 P4 is nobody", OVERALL, classes=CLASSES) == "LMP2 P4 is nobody"
+
+
+def test_two_positions_still_resolve_when_classes_are_known():
+    """The regression the lazy class group exists for: greedy, the class
+    pattern swallows "P1 and" and the leader never resolves."""
+    assert mentions.apply_positions(
+        "P1 and P2 are fighting", OVERALL, classes=CLASSES) == (
+        "@M.Verstappen and @G.Taylor are fighting")
+
+
+def test_classes_alone_are_enough():
+    assert mentions.apply_positions("GT3 P1 is quick", {}, classes=CLASSES) == (
+        "@N.Tandy is quick")
+
+
+def test_positions_still_work_with_no_classes_at_all():
+    """A single-class grid, or a plugin that only knows the overall order."""
+    assert mentions.apply_positions("P1 is quick", OVERALL, classes={}) == (
+        "@M.Verstappen is quick")
+
+
+# -- what a class answers to ---------------------------------------------
+
+
+def test_the_manufacturer_prefix_is_optional():
+    """LMU calls it LMGT3; every driver on the radio calls it GT3."""
+    assert mentions.class_aliases("LMGT3") == {"lmgt3", "gt3"}
+
+
+def test_a_short_class_keeps_its_prefix():
+    """Stripping LMP2 to "P2" would make it a *position*, and "LMP2 P4" would
+    then resolve the wrong thing entirely."""
+    assert mentions.class_aliases("LMP2") == {"lmp2"}
+
+
+def test_spelling_and_case_do_not_matter():
+    assert mentions.class_aliases("Hyper Car") == {"hypercar"}
+
+
+def test_an_ambiguous_alias_is_dropped_rather_than_guessed():
+    """Two classes answering to the same spoken form is a coin toss, and
+    guessing puts someone else's name in the message."""
+    classes = {
+        "GT3": {1: "Geoff Taylor"},
+        "LMGT3": {1: "Nick Tandy"},
+    }
+    # "LMGT3" also answers to "gt3", which "GT3" owns outright — so neither
+    # gets it, and the words are left for a human to sort out.
+    assert mentions.apply_positions("GT3 P1 is quick", OVERALL, classes=classes) == (
+        "GT3 @M.Verstappen is quick")
