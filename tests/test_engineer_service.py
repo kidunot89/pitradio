@@ -13,7 +13,7 @@ otherwise vanish.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
@@ -680,6 +680,55 @@ def test_the_reason_a_behaviour_is_quiet_is_said_once(engineer, caplog):
             if "does not publish" in line and "Spotter" in line]
     assert len(said) == 1
     assert "positions" in said[0]
+
+
+def test_a_sim_that_does_its_own_spotting_needs_no_positions(engineer):
+    """iRacing publishes no other-car world positions at all — only how far
+    round the lap each one is, which cannot answer "who is beside me" on a
+    circuit that doubles back. It publishes its own left/right call instead,
+    and that is a better answer than any geometry."""
+    engineer.plugins.provides = frozenset({base.PROVIDES_SPOTTER})
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    # Everybody at the origin: geometry could say nothing here.
+    engineer.plugins.session = SessionInfo(
+        track="Watkins", track_length=TRACK,
+        cars=(car("Me", player=True),), alongside={"left": 1})
+    engineer._tick()
+
+    assert "car left" in engineer.speaker.spoken()
+
+
+def test_the_sim_s_own_count_reaches_the_call(engineer):
+    """Two cars stacked down one side is a different problem from one, and the
+    moment they arrive is when that matters most."""
+    engineer.plugins.provides = frozenset({base.PROVIDES_SPOTTER})
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    engineer.plugins.session = SessionInfo(
+        track="Watkins", track_length=TRACK,
+        cars=(car("Me", player=True),), alongside={"right": 2})
+    engineer._tick()
+
+    assert "two cars right" in engineer.speaker.spoken()
+
+
+def test_the_sim_s_spotter_clears_a_side_like_any_other(engineer):
+    engineer.plugins.provides = frozenset({base.PROVIDES_SPOTTER})
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    empty = SessionInfo(track="Watkins", track_length=TRACK,
+                        cars=(car("Me", player=True),))
+    engineer.plugins.session = replace(empty, alongside={"left": 1})
+    engineer._tick()
+    engineer.speaker.said.clear()
+
+    engineer.plugins.session = replace(empty, alongside={})
+    engineer._tick()
+    assert "clear left" in engineer.speaker.spoken()
 
 
 # -- per-sim overrides ----------------------------------------------------

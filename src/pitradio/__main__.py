@@ -239,6 +239,8 @@ def cmd_self_test() -> int:
         "pitradio.ui.theme", "pitradio.ui.logo", "pitradio.ui.tray",
         "pitradio.input", "pitradio.ui",
         "pitradio.plugins", "pitradio.plugins.base", "pitradio.plugins.lmu",
+        "pitradio.plugins.iracing", "pitradio.plugins.irsdk",
+        "pitradio.plugins.shared_memory",
         # Voice. `net` imports websocket-client lazily so a build without it
         # still runs, which means nothing at module scope proves it was
         # bundled — exactly how av.utils went missing from v0.1.0.

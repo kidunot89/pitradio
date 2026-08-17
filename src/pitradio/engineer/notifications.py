@@ -87,6 +87,15 @@ class Notification:
             return True
         return all(need in provided for need in self.requires)
 
+    def missing(self, provided) -> str:
+        """What this sim lacks, for the log line.
+
+        A method rather than a subtraction at the call site, because a
+        notification that overrides `supported` — one that can work more than
+        one way — knows what it wanted and the runner does not.
+        """
+        return ", ".join(sorted(set(self.requires) - set(provided or ())))
+
     def reset(self) -> None:
         """Forget everything. A new session, or the notification being switched
         off and on again."""
@@ -154,7 +163,7 @@ class Runner:
                     log.info(
                         "%s is on but this sim does not publish %s; it will "
                         "stay quiet", notification.name,
-                        ", ".join(sorted(set(notification.requires) - set(provided or ()))))
+                        notification.missing(provided))
                 continue
             try:
                 calls = notification.check(context)
@@ -196,11 +205,24 @@ class SpotterNotification(Notification):
     default_repeat = 3.0
     default_enabled = False
     repeat_help = "how often it repeats while a car is still there"
-    # Every car's world position. A sim that only says how far round the lap
-    # each car is — iRacing — cannot answer "who is beside me" from that, and
-    # guessing from lap distance alone would put cars on the wrong side of the
-    # track on any circuit that doubles back.
-    requires = (base.PROVIDES_POSITIONS,)
+
+    def supported(self, provided) -> bool:
+        """Either route will do, so this cannot use a plain `requires`.
+
+        Most sims hand over every car's world position and the geometry works
+        it out. iRacing hands over none — only how far round the lap each car
+        is, which cannot answer "who is beside me" on a circuit that doubles
+        back — but publishes its own left/right call, which is a *better*
+        answer than any geometry because it comes from the real car bodies
+        rather than from a point and an assumed width.
+        """
+        if provided is None:
+            return True
+        return (base.PROVIDES_POSITIONS in provided
+                or base.PROVIDES_SPOTTER in provided)
+
+    def missing(self, provided) -> str:
+        return f"{base.PROVIDES_POSITIONS} or {base.PROVIDES_SPOTTER}"
 
     def __init__(self) -> None:
         self._previous: tuple[float, float, float] | None = None
@@ -216,25 +238,12 @@ class SpotterNotification(Notification):
             self.reset()
             return []
 
-        previous, self._previous = self._previous, own.position
-        facing = spotter.heading(previous, own.position)
-        if facing is None:
+        tally = self._tally(context, own)
+        if tally is None:
             return []
 
-        others = {name: position
-                  for name, position in context.session.positions().items()
-                  if name != own.driver}
-        neighbours = spotter.alongside(
-            own.position, facing, others,
-            # Per-sim, from the plugin's settings: a prototype and a GT car are
-            # different lengths, and sims disagree about where a car's origin
-            # sits, so a number that suits one game is wrong in the next.
-            metres=context.alongside_metres,
-            width=context.width_metres,
-            swap=context.swap_sides)
-
-        now = spotter.occupied(neighbours)
-        changes = spotter.calls(now, self._sides)
+        now = frozenset(tally)
+        changes = spotter.calls(tally, self._sides)
         self._sides = now
 
         calls = [
@@ -247,10 +256,40 @@ class SpotterNotification(Notification):
         for side in sorted(now):
             if any(call.key.startswith(f"{side}:") for call in calls):
                 continue
-            text = spotter.warning(side, neighbours)
+            text = spotter.warning(side, tally.get(side, 1))
             calls.append(Call(f"{side}:{text}",
                               context.script.spotter_call(text), urgent=True))
         return calls
+
+    def _tally(self, context, own) -> dict[str, int] | None:
+        """side -> how many cars, from whichever route this sim supports.
+
+        None means "cannot say this tick" — no heading yet, on the geometry
+        route — which is different from an empty tally, which means the sides
+        are genuinely clear and is a call in its own right.
+        """
+        said = context.session.alongside
+        if said is not None:
+            # The sim did its own spotting. Nothing to compute and nothing to
+            # get the handedness of wrong.
+            return dict(said)
+
+        previous, self._previous = self._previous, own.position
+        facing = spotter.heading(previous, own.position)
+        if facing is None:
+            return None
+
+        others = {name: position
+                  for name, position in context.session.positions().items()
+                  if name != own.driver}
+        return spotter.counts(spotter.alongside(
+            own.position, facing, others,
+            # Per-sim, from the plugin's settings: a prototype and a GT car are
+            # different lengths, and sims disagree about where a car's origin
+            # sits, so a number that suits one game is wrong in the next.
+            metres=context.alongside_metres,
+            width=context.width_metres,
+            swap=context.swap_sides))
 
 
 class LapTimeNotification(Notification):

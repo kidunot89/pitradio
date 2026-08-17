@@ -152,6 +152,16 @@ class SessionInfo:
     #: session came off the same clock, and the sim's own is the only one that
     #: is true for the cars as well as for us.
     elapsed: float = 0.0
+    #: Which sides have cars on them right now, as **the sim itself says**:
+    #: side name -> how many. None means "the sim does not do this", and the
+    #: spotter works it out from world positions instead.
+    #:
+    #: This exists for iRacing, which publishes no other-car world positions at
+    #: all — only how far round the lap each one is — and so cannot be given a
+    #: geometric spotter. It does publish `CarLeftRight`, which is a better
+    #: answer than any geometry: it is the sim's own, computed from the real
+    #: car bodies rather than from a point and a guessed width.
+    alongside: dict[str, int] | None = None
 
     def player(self) -> Car | None:
         """The car belonging to this installation, driven or not."""

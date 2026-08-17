@@ -364,11 +364,47 @@ pins the two together.
 
 ## Sim plugins
 
-`plugins/` supplies per-sim session data; today just the driver list.
+`plugins/` supplies per-sim session data: the driver list, the standings, and
+everything the engineer reads.
 **Registration is static** (`BUILTIN` in `plugins/__init__.py`) because Nuitka
 cannot follow a runtime-discovered import — a build that scanned a directory
 would ship with no plugins and no error. Adding a sim is one module plus one
 line; see [plugins/README.md](plugins/README.md).
+
+**Opening the block goes through `shared_memory.open_existing`, never
+`mmap.mmap(tagname=…)`.** On Windows mmap *creates* the mapping when it is
+absent, which fabricates a page-file block of zeros under the game's own name —
+so the plugin reports itself connected to a session that does not exist. One
+shared helper because the rule is silent when broken and two copies of it would
+drift; `test_the_lmu_plugin_never_creates_the_mapping` walks every plugin's AST
+for `tagname=`.
+
+**Sims differ more than they look, and a plugin says so.** LMU publishes every
+car's world position; **iRacing publishes none** — only `CarIdxLapDistPct`, how
+far round the lap each car is — so a geometric spotter cannot be built for it
+at all. It publishes `CarLeftRight` instead, its own call from the real car
+bodies, which is a better answer than the geometry rather than a worse one.
+That is why `SessionInfo.alongside` exists and why `SpotterNotification`
+overrides `supported` to accept either route.
+
+iRacing also publishes **no speed for any car but the player's**, so
+`iracing.Speeds` derives it from lap distance over the session clock. The guard
+there is a *speed* check, not a distance one: a car sent to the pits jumps
+hundreds of metres between reads and comes out of the subtraction as a
+well-formed enormous speed — a teleport from 4000m to 100m wrapped to 1100m and
+read as 1100 m/s.
+
+**iRacing sector times are not implemented**, and the plugin does not claim
+`PROVIDES_SECTORS`. `SplitTimeInfo` gives the boundaries but iRacing publishes
+no per-car splits, so they would have to be timed in the plugin. Until then the
+sector behaviours are skipped with a line in the log, which is the whole point
+of the capability gate.
+
+The iRacing session string is YAML and is parsed by hand in `irsdk.py` rather
+than with a dependency. It has one shape a flat stack-based parser gets wrong,
+and it is the one the driver list is in: iRacing indents a list **level with
+the key that introduced it**, so "less indented, close the block" would drop
+every driver.
 
 Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
 can serve several games. `executables` on the plugin only pre-fills the picker.

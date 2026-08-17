@@ -20,12 +20,13 @@ from pitradio.plugins.base import (
     SessionPlugin,
     Standings,
 )
+from pitradio.plugins.iracing import IRacingPlugin
 from pitradio.plugins.lmu import LeMansUltimatePlugin
 
 log = logging.getLogger(__name__)
 
 #: Every plugin that ships. Add new sims here.
-BUILTIN: tuple[type[SessionPlugin], ...] = (LeMansUltimatePlugin,)
+BUILTIN: tuple[type[SessionPlugin], ...] = (LeMansUltimatePlugin, IRacingPlugin)
 
 
 class PluginRegistry:

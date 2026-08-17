@@ -25,6 +25,7 @@ import urllib.request
 from pathlib import Path
 
 from pitradio import voice
+from pitradio.plugins import shared_memory
 from pitradio.plugins.base import (
     PROVIDES_LAPS,
     PROVIDES_POSITIONS,
@@ -118,35 +119,12 @@ def focus_slot(standings) -> int | None:
 def _open_existing_mapping(name: str, size: int):
     """Open a shared memory block only if something else already published it.
 
-    Deliberately not mmap.mmap(fileno=0, tagname=...): on Windows that calls
-    CreateFileMapping, which *creates* the block when it is absent. With LMU
-    closed that fabricated a page-file-backed block named LMU_Data full of
-    zeros, so the plugin reported itself connected to a session that did not
-    exist — and left a phantom mapping under the game's own name.
-
-    OpenFileMappingW only ever opens; it fails when the game is not running,
-    which is the answer we actually want.
+    The implementation moved to `shared_memory` the moment a second sim needed
+    it, along with the explanation of why it must never be `mmap.mmap` — a rule
+    that is silent when broken, and so is exactly the wrong thing to have two
+    copies of.
     """
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenFileMappingW.argtypes = (
-        wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
-    kernel32.OpenFileMappingW.restype = wintypes.HANDLE
-    kernel32.MapViewOfFile.argtypes = (
-        wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
-        ctypes.c_size_t)
-    kernel32.MapViewOfFile.restype = ctypes.c_void_p
-
-    handle = kernel32.OpenFileMappingW(FILE_MAP_READ, False, name)
-    if not handle:
-        return None
-
-    view = kernel32.MapViewOfFile(handle, FILE_MAP_READ, 0, 0, size)
-    if not view:
-        kernel32.CloseHandle(handle)
-        return None
-    return handle, view
+    return shared_memory.open_existing(name, size)
 
 
 def _text(raw: bytes) -> str:
@@ -174,14 +152,7 @@ def _speed(local_velocity) -> float:
 
 
 def _close_mapping(handle, view) -> None:
-    try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        if view:
-            kernel32.UnmapViewOfFile(ctypes.c_void_p(view))
-        if handle:
-            kernel32.CloseHandle(handle)
-    except Exception:
-        log.debug("releasing the LMU mapping failed", exc_info=True)
+    shared_memory.close(handle, view)
 
 
 class LeMansUltimatePlugin(SessionPlugin):

@@ -158,9 +158,15 @@ def occupied(neighbours: list[Alongside]) -> frozenset[str]:
 
 
 def calls(
-    now: frozenset[str], before: frozenset[str]
+    now: dict[str, int] | frozenset[str], before: frozenset[str]
 ) -> list[tuple[str, str, bool]]:
     """(side, what to say, whether it is urgent), for what changed.
+
+    `now` is side -> how many cars, so an arrival says how many rather than
+    always "car left": two cars stacked down one side is a different problem
+    from one, and the moment they arrive is when that matters most. A bare set
+    is accepted as "one car each", which is what a caller that cannot count
+    means.
 
     **Both directions.** A spotter that only says "car left" leaves the driver
     holding a line they no longer need to hold, waiting for a call that never
@@ -175,21 +181,34 @@ def calls(
     while a car is still there is a *timer*, not a state change, and belongs to
     the notification that owns the repeat interval.
     """
+    tally = now if isinstance(now, dict) else {side: 1 for side in now}
     changed: list[tuple[str, str, bool]] = []
     for side in (LEFT, RIGHT):
-        was, is_now = side in before, side in now
+        was, is_now = side in before, side in tally
         if is_now and not was:
-            changed.append((side, f"car {side}", True))
+            changed.append((side, warning(side, tally.get(side, 1)), True))
         elif was and not is_now:
             changed.append((side, f"clear {side}", False))
     return changed
 
 
-def warning(side: str, neighbours: list[Alongside]) -> str:
+def counts(neighbours: list[Alongside]) -> dict[str, int]:
+    """side -> how many cars are on it.
+
+    The same shape a sim that does its own spotting reports in, so both routes
+    hand the notification one thing and it never has to know which sim it is
+    talking to.
+    """
+    tally: dict[str, int] = {}
+    for car in neighbours:
+        tally[car.side] = tally.get(car.side, 0) + 1
+    return tally
+
+
+def warning(side: str, count: int) -> str:
     """The standing call for a side that still has somebody on it.
 
     What the repeat timer re-says. Counts them, because two cars stacked down
     one side is a different problem from one.
     """
-    count = sum(1 for car in neighbours if car.side == side)
     return f"two cars {side}" if count > 1 else f"car {side}"
