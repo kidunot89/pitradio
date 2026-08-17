@@ -6,6 +6,8 @@ like a session where nobody else is running PitRadio; a proximity test that is
 subtly wrong silences somebody you are racing. Neither raises anything.
 """
 
+import hashlib
+
 import pytest
 
 from pitradio import voice
@@ -253,3 +255,45 @@ def test_a_clip_from_the_future_is_not_infinitely_fresh():
     clip = voice.Clip(voice.Speaker("Nick Tandy"), b"x", sent_at=500.0)
     assert clip.age(100.0) == 0.0
     assert clip.age(520.0) == 20.0
+
+
+# -- pinning a host's certificate ------------------------------------------
+#
+# A racer-owned host has no DNS name and no public certificate. It serves one
+# the coordinator generated and named to us over a connection we already
+# trust, so accepting that one and nothing else *is* the trust decision.
+
+
+def _der(seed: bytes = b"cert") -> bytes:
+    return seed * 40
+
+
+def test_the_named_certificate_is_accepted():
+    der = _der()
+    assert voice.certificate_matches(der, hashlib.sha256(der).hexdigest())
+
+
+def test_punctuation_is_not_identity():
+    """Tools print fingerprints as AB:CD:… and as abcd… interchangeably. A
+    difference of formatting must never read as a different machine."""
+    digest = hashlib.sha256(_der()).hexdigest()
+    spaced = ":".join(digest[i:i + 2] for i in range(0, len(digest), 2)).upper()
+    assert voice.certificate_matches(_der(), spaced)
+
+
+def test_any_other_certificate_is_refused():
+    assert not voice.certificate_matches(
+        _der(b"real"), hashlib.sha256(_der(b"impostor")).hexdigest())
+
+
+@pytest.mark.parametrize("expected", ["", None, "nope", "ab" * 31, "ab" * 33])
+def test_a_fingerprint_that_is_not_one_never_matches(expected):
+    """It decides whether to trust a stranger's machine, so anything malformed
+    is a refusal — never an accident that passes."""
+    assert not voice.certificate_matches(_der(), expected)
+
+
+def test_no_certificate_never_matches():
+    """A handshake that produced nothing to check is not a match."""
+    assert not voice.certificate_matches(b"", hashlib.sha256(b"").hexdigest())
+    assert not voice.certificate_matches(None, "ab" * 32)

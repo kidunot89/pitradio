@@ -109,7 +109,7 @@ def received():
 def run_client(socket, received, url=f"wss://relay.example.com/chat/{KEY}",
                *, wait=True):
     """Start a client against one fake socket and stop it again."""
-    client = net.RelayClient(received.put, connect=lambda _url: socket)
+    client = net.RelayClient(received.put, connect=lambda _url, _pin="": socket)
     client.start()
     client.set_room(url)
     if wait:
@@ -155,7 +155,7 @@ def test_a_handler_that_raises_does_not_end_the_connection(received):
         raise RuntimeError("handler blew up")
 
     socket = FakeSocket([clip(audio=b"one"), clip(audio=b"two")])
-    client = net.RelayClient(explode, connect=lambda _url: socket)
+    client = net.RelayClient(explode, connect=lambda _url, _pin="": socket)
     client.start()
     client.set_room(f"wss://relay.example.com/chat/{KEY}")
     try:
@@ -185,7 +185,7 @@ def test_a_queued_clip_is_sent(received):
 def test_sending_with_no_room_is_discarded():
     """Not queued for later: by the time there is a room it is a different
     session, and delivering it there would be worse than losing it."""
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: FakeSocket())
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": FakeSocket())
     client.send(b"a clip")
     assert client._outbox.qsize() == 0
 
@@ -193,7 +193,7 @@ def test_sending_with_no_room_is_discarded():
 def test_a_full_queue_drops_the_oldest():
     """The newest thing said is the one worth hearing, and a full queue means
     the relay is not draining anyway."""
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client._url = "wss://relay.example.com/chat/x"
 
     for index in range(net.SEND_QUEUE + 2):
@@ -207,7 +207,7 @@ def test_a_full_queue_drops_the_oldest():
 
 def test_sending_never_raises_even_with_a_broken_relay():
     """It is called from the worker with somebody's trigger cycle waiting."""
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client._url = "wss://relay.example.com/chat/x"
     for _ in range(50):
         client.send(b"x")
@@ -219,7 +219,7 @@ def test_sending_never_raises_even_with_a_broken_relay():
 def test_leaving_a_room_discards_what_was_queued_for_it():
     """Staying in the previous room would keep sending somebody's voice to a
     session they have left, which is the worst failure this component has."""
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client._url = "wss://relay.example.com/chat/one"
     client.send(b"for the old room")
 
@@ -228,7 +228,7 @@ def test_leaving_a_room_discards_what_was_queued_for_it():
 
 
 def test_setting_the_same_room_again_changes_nothing():
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client.set_room("wss://relay.example.com/chat/one")
     client.send(b"queued")
 
@@ -241,7 +241,7 @@ def test_setting_the_same_room_again_changes_nothing():
 
 def test_a_relay_that_cannot_be_reached_does_not_stop_the_client():
     """No exception escapes, and the thread stays alive to retry."""
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client.start()
     client.set_room(f"wss://relay.example.com/chat/{KEY}")
     threading.Event().wait(0.3)
@@ -286,7 +286,7 @@ def test_the_room_is_polled_rather_than_pushed(received):
     socket = FakeSocket([clip()])
     url = f"wss://relay.example.com/chat/{KEY}"
     client = net.RelayClient(
-        received.put, connect=lambda _url: socket, room=lambda: url)
+        received.put, connect=lambda _url, _pin="": socket, room=lambda: url)
     client.start()
     try:
         assert received.get(timeout=2.0) is not None
@@ -301,7 +301,7 @@ def test_a_room_provider_that_raises_does_not_end_the_thread():
         raise RuntimeError("sim went away")
 
     client = net.RelayClient(
-        lambda _clip: None, connect=lambda _url: None, room=explode)
+        lambda _clip: None, connect=lambda _url, _pin="": None, room=explode)
     client.start()
     threading.Event().wait(0.3)
 
@@ -349,7 +349,7 @@ def service(session, settings=None, *, cfg=None, played=None):
     configuration.voice.relay = "wss://relay.example.com"
     return net.VoiceService(
         Store(configuration), FakePlugins(session, settings),
-        connect=lambda _url: None,
+        connect=lambda _url, _pin="": None,
         play=(lambda clip, _cfg: played.append(clip.audio)) if played else None,
     )
 
@@ -556,7 +556,7 @@ def test_stopping_playback_that_never_started_is_not_an_error():
 
 
 def test_starting_twice_makes_one_thread():
-    client = net.RelayClient(lambda _clip: None, connect=lambda _url: None)
+    client = net.RelayClient(lambda _clip: None, connect=lambda _url, _pin="": None)
     client.start()
     first = client._thread
     client.start()

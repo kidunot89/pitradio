@@ -16,6 +16,7 @@ chat box; every failure path here ends in a log line and a retry.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -95,6 +96,8 @@ class RelayClient:
         self._outbox: queue.Queue[bytes] = queue.Queue(maxsize=SEND_QUEUE)
         self._lock = threading.Lock()
         self._url: str | None = None
+        #: Certificate to pin for this room, when it has no public name.
+        self._fingerprint = ""
         self._wake = threading.Event()
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
@@ -123,7 +126,7 @@ class RelayClient:
 
     # -- what room -------------------------------------------------------
 
-    def set_room(self, url: str | None) -> None:
+    def set_room(self, url: str | None, fingerprint: str = "") -> None:
         """Point at a room, or at nothing.
 
         Changing it drops the current connection: staying in the previous room
@@ -131,9 +134,10 @@ class RelayClient:
         is the worst failure this component has.
         """
         with self._lock:
-            if url == self._url:
+            if url == self._url and fingerprint == self._fingerprint:
                 return
             self._url = url
+            self._fingerprint = fingerprint
         log.info("voice room: %s", "none" if url is None else "changed")
         self._drain()
         self._wake.set()
@@ -177,7 +181,13 @@ class RelayClient:
         if self._room is None:
             return
         try:
-            self.set_room(self._room())
+            answer = self._room()
+            # A provider may answer with a url alone, or with the
+            # certificate to pin alongside it.
+            if isinstance(answer, tuple):
+                self.set_room(answer[0], answer[1] or "")
+            else:
+                self.set_room(answer)
         except Exception:
             log.debug("could not work out the voice room", exc_info=True)
 
@@ -210,7 +220,7 @@ class RelayClient:
 
     def _session(self, url: str) -> bool:
         """One connection, until it ends. True if it was ever established."""
-        socket = self._connect(url)
+        socket = self._connect(url, self._fingerprint)
         if socket is None:
             return False
 
@@ -447,19 +457,56 @@ def _now() -> float:
 _CLOSED = object()
 
 
-def _connect(url: str):
-    """The real socket. Imported here so a build without voice never loads it."""
+def _connect(url: str, fingerprint: str = ""):
+    """The real socket. Imported here so a build without voice never loads it.
+
+    A racer-owned host has no name and no public certificate: it serves one the
+    coordinator made, and named to us over a connection we already trust. So
+    the usual check is replaced by a **pin** — this exact certificate or
+    nothing. That is stricter than the default, not looser: the ordinary check
+    would only establish that some authority vouched for a name, and there is
+    no name here to vouch for.
+    """
     try:
         import websocket
     except ImportError:
         log.info("voice needs the websocket-client package, which is not installed")
         return None
 
+    options = {}
+    if fingerprint:
+        import ssl
+
+        # Verification is turned off so the handshake completes against a
+        # certificate no CA signed — and then the certificate is checked by
+        # hand, below. Skipping that second half would leave this trusting
+        # anything at all, which is why they are never separated.
+        options = {"cert_reqs": ssl.CERT_NONE, "check_hostname": False}
+
     try:
-        return _Socket(websocket.create_connection(url, timeout=RECV_TIMEOUT))
+        connection = websocket.create_connection(
+            url, timeout=RECV_TIMEOUT, sslopt=options or None)
     except Exception as exc:
         log.debug("could not reach the relay: %s", exc)
         return None
+
+    if fingerprint and not _pinned(connection, fingerprint):
+        log.warning("voice: the relay presented an unexpected certificate; "
+                    "refusing to connect")
+        with contextlib.suppress(Exception):
+            connection.close()
+        return None
+    return _Socket(connection)
+
+
+def _pinned(connection, fingerprint: str) -> bool:
+    """Whether the peer really is the host the coordinator named."""
+    try:
+        der = connection.sock.getpeercert(binary_form=True)
+    except Exception:
+        log.debug("could not read the relay's certificate", exc_info=True)
+        return False
+    return voice.certificate_matches(der, fingerprint)
 
 
 class _Socket:
