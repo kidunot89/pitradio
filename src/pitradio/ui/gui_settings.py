@@ -1322,7 +1322,8 @@ def build_engineer_tab(app) -> None:
 
     app.v_eng_rate = tk.StringVar(value="" if cfg.rate is None else str(cfg.rate))
     _row(sound, 2, t("Pace"), _entry(sound, app.v_eng_rate, width=8),
-         t("-10 to 10; blank keeps the engineer's own"))
+         t("-10 to 10 for the fallback voice; blank is the default of "
+           "3, which is brisk. A voice pack is recorded and cannot be sped up"))
 
     # Same as voice: the device is the app's, set once on the Audio tab.
     ttk.Label(sound, text=t("Speaks on the output device set in the Audio tab."),

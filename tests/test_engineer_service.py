@@ -207,6 +207,22 @@ def test_the_spotter_phrases_are_rendered_up_front(engineer):
     assert any("car left" in phrase for phrase in engineer.speaker.primed)
 
 
+def test_the_fallback_voice_speaks_briskly_by_default(engineer):
+    """A synthesiser's natural pace is tuned for reading prose to somebody
+    sitting still; a race call competes with an engine and expires in corners."""
+    from pitradio.engineer import tts
+
+    engineer.refresh_voice(force=True)
+    assert engineer.speaker.settings.rate == tts.DEFAULT_RATE
+    assert tts.DEFAULT_RATE > 0
+
+
+def test_a_chosen_pace_wins_over_the_default(engineer):
+    engineer.store.config.engineer.rate = -2
+    engineer.refresh_voice(force=True)
+    assert engineer.speaker.settings.rate == -2
+
+
 def test_a_disabled_routine_stops_answering(engineer):
     engineer.store.config.engineer.routines = {
         "hot_lap_trainer": config_mod.RoutineConfig(enabled=False)}

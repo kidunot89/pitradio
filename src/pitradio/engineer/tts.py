@@ -45,9 +45,21 @@ log = logging.getLogger(__name__)
 #: engineer's queue open indefinitely.
 REPLY_TIMEOUT = 15.0
 
-#: Windows' own range. 0 is the voice's natural pace; racing calls want a
-#: little quicker, which is what the config defaults to.
+#: Windows' own range. 0 is the voice's natural pace.
 MIN_RATE, MAX_RATE = -10, 10
+
+#: And what the engineer uses unless told otherwise.
+#:
+#: Well above natural, because a synthesiser's default pace is tuned for
+#: reading prose to somebody sitting still, and a race call competes with an
+#: engine. Measured on "turn four, Tandy was faster on the exit, two tenths":
+#: 4.9s at rate 0, 3.6s at 4, 2.7s at 5.
+#:
+#: Four rather than higher is a judgement about *clarity*, and one nobody here
+#: has verified by ear — it is set where the wins are still large and left
+#: adjustable on the Engineer tab, because how fast is too fast is a thing the
+#: person listening decides.
+DEFAULT_RATE = 4
 
 #: Don't let a long session's cache grow without bound. Fragments repeat
 #: heavily, so this is far more than a stint ever needs.

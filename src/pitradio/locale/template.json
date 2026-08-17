@@ -128,7 +128,7 @@
   "used only for driver names, which no pack can contain": "",
   "a recorded voice pack — the only thing that sounds like a person": "",
   "Pace": "",
-  "-10 to 10; blank keeps the engineer's own": "",
+  "-10 to 10 for the fallback voice; blank is the default of 3, which is brisk. A voice pack is recorded and cannot be sped up": "",
   "Trigger": "",
   "Default profile": "",
   "Audio cues": "",

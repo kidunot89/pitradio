@@ -178,7 +178,7 @@ class EngineerService:
         else:
             log.info("engineer has no voice pack; using the Windows voice")
 
-        rate = 0 if cfg.rate is None else int(cfg.rate)
+        rate = tts.DEFAULT_RATE if cfg.rate is None else int(cfg.rate)
         voice = (cfg.fallback_voice or "").strip()
         self._prime_urgent = True
         self.speaker.configure(speaking.VoiceSettings(voice, rate, pack))

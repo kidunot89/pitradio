@@ -267,7 +267,11 @@ class EngineerConfig:
     #: The Windows voice used for anything the pack has never heard — driver
     #: names, and everything if no pack is installed. Empty lets Windows pick.
     fallback_voice: str = ""
-    #: Windows' own -10..10, for that fallback voice only.
+    #: Windows' own -10..10, for that fallback voice only — a voice pack is a
+    #: set of recordings and cannot be sped up. Empty means the engineer's own
+    #: default, which is well above the synthesiser's natural pace: that pace
+    #: is tuned for reading prose to somebody sitting still, and a race call
+    #: competes with an engine.
     rate: int | None = None
     #: Whether it drops the lead-in: "Tandy, faster exit, two tenths" rather
     #: than "turn four, Tandy was faster on the exit, two tenths". The same
