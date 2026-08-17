@@ -94,8 +94,12 @@ class PluginRegistry:
         return plugin.id if plugin else ""
 
     def choices(self) -> list[tuple[str, str]]:
-        """(id, name) for the profile editor's plugin picker."""
-        return [("", "(automatic)")] + [(p.id, p.name) for p in self.plugins]
+        """(id, label) for the profile editor's plugin picker.
+
+        The label, not the name: a plugin nobody has been able to run against
+        its game says so here, which is the one place somebody is choosing it.
+        """
+        return [("", "(automatic)")] + [(p.id, p.label()) for p in self.plugins]
 
     def drivers_for(self, plugin_id: str | None) -> list[str]:
         """Driver names from the profile's plugin, or an empty list.
@@ -254,13 +258,16 @@ class PluginRegistry:
         return rows
 
     def describe(self) -> list[tuple[str, str]]:
-        """(name, status) for the GUI's plugin list."""
+        """(label, status) for the GUI's plugin list."""
         rows = []
         for plugin in self.plugins:
             try:
-                rows.append((plugin.name, plugin.status()))
+                status = plugin.status()
             except Exception as exc:
-                rows.append((plugin.name, f"error: {type(exc).__name__}: {exc}"))
+                status = f"error: {type(exc).__name__}: {exc}"
+            if plugin.experimental and plugin.experimental_note:
+                status = f"{status} — {plugin.experimental_note}"
+            rows.append((plugin.label(), status))
         return rows
 
 

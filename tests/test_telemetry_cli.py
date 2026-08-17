@@ -77,6 +77,11 @@ class Registry:
     class _Plugin:
         name = "Stub"
         provides = frozenset({"laps", "positions", "sectors"})
+        experimental = False
+        experimental_note = ""
+
+        def label(self):
+            return self.name
 
         def status(self):
             return "connected"

@@ -120,6 +120,15 @@ class IRacingPlugin(SessionPlugin):
     #: either — see the module docstring. Claiming what is not there is how a
     #: behaviour ends up switched on and permanently silent.
     provides = frozenset({PROVIDES_LAPS, PROVIDES_SPOTTER, PROVIDES_FIELD})
+    #: **Nobody working on PitRadio has a copy of iRacing.** Every other reader
+    #: here will get run against its game sooner or later; this one will not,
+    #: unless somebody who has it reports back. The layout is checked against a
+    #: block built by hand, which proves the offsets are self-consistent and
+    #: proves nothing about whether `CarIdxTrackSurface` really reads -1 in the
+    #: garage or `CarLeftRight` really uses the values mapped above.
+    experimental = True
+    experimental_note = (
+        "never run against the real game — please report what you find")
     settings = (
         PluginSetting(
             key="positions",

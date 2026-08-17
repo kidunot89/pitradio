@@ -287,9 +287,24 @@ class SessionPlugin:
     #: Empty by default, so a plugin that says nothing gets no behaviours
     #: rather than behaviours that quietly do nothing.
     provides: frozenset[str] = frozenset()
+    #: Whether nobody has been able to run this against the game it reads.
+    #:
+    #: A stronger statement than "not tested yet". Every reader here is checked
+    #: against a block built by hand, which catches a wrong width or a bad
+    #: sentinel and cannot catch a wrong *assumption* about what a sim puts in
+    #: a field — and only a copy of the game settles that. A plugin nobody
+    #: working on this owns is one where that will not happen on its own, so it
+    #: says so in the picker rather than looking like the others.
+    experimental: bool = False
+    #: Why, in one line, shown beside the label.
+    experimental_note: str = ""
 
     def defaults(self) -> dict[str, Any]:
         return {setting.key: setting.default for setting in self.settings}
+
+    def label(self) -> str:
+        """How the plugin is named in the profile editor."""
+        return f"{self.name} (experimental)" if self.experimental else self.name
 
     def serves(self, executable: str | None) -> bool:
         return (executable or "").strip().lower() in self.executables

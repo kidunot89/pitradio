@@ -386,11 +386,13 @@ def cmd_telemetry(seconds: float, interval: float) -> int:
     registry = plugins_mod.PluginRegistry()
     registry.start_all()
 
-    out(f"plugins: {', '.join(p.name for p in registry.plugins) or '(none)'}")
+    out(f"plugins: {', '.join(p.label() for p in registry.plugins) or '(none)'}")
     for plugin in registry.plugins:
         supplies = ", ".join(sorted(plugin.provides)) or "(nothing declared)"
-        out(f"  {plugin.name}: {plugin.status()}")
+        out(f"  {plugin.label()}: {plugin.status()}")
         out(f"    provides: {supplies}")
+        if plugin.experimental and plugin.experimental_note:
+            out(f"    note: {plugin.experimental_note}")
     out()
 
     deadline = time.monotonic() + max(0.0, seconds)

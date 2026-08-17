@@ -367,6 +367,13 @@ wrong assumption about what the sim puts where. Run `--telemetry` with the game
 on track before trusting any of them, and Assetto Corsa Evo especially, which
 is still early access and may move its layout.
 
+**iRacing is marked experimental**, and shows as such in the profile picker.
+Not because it is worse code than the others, but because nobody working on
+PitRadio owns a copy — so unlike the rest, it will not get checked against the
+real thing unless somebody who has it runs `--telemetry` and says what came
+back. If that is you, please do; the note in the plugin list asks for exactly
+that.
+
 ## Per-sim settings
 
 Three of the engineer's numbers live on the **profile**, under the game's

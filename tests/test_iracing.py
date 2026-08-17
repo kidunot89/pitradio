@@ -366,6 +366,25 @@ def test_what_it_claims_to_provide_matches_what_it_has():
     assert base.PROVIDES_SECTORS not in plugin.provides
 
 
+def test_it_says_it_is_experimental():
+    """Nobody working on PitRadio has a copy of iRacing, so unlike every other
+    reader here this one will not get run against its game unless somebody who
+    has it reports back. That is a different thing from "not tested yet" and
+    the picker says so."""
+    made = IRacingPlugin()
+    assert made.experimental is True
+    assert made.experimental_note
+    assert "experimental" in made.label()
+
+
+def test_the_other_plugins_do_not_claim_to_be_experimental():
+    """The flag has to mean something, so it cannot be on everything."""
+    from pitradio import plugins
+
+    flagged = [p.id for p in plugins.PluginRegistry().plugins if p.experimental]
+    assert flagged == ["iracing"]
+
+
 def test_nothing_readable_costs_the_data_not_the_app(monkeypatch):
     made = IRacingPlugin()
     monkeypatch.setattr(made, "_read", lambda: None)
