@@ -174,7 +174,20 @@ class VoiceConfig:
     #: `endpoints.py` — because this repository is public and the relay is not.
     #: Empty in a source checkout, which means voice is unavailable rather than
     #: pointed at a server nobody chose.
+    #:
+    #: **Never shown in the window.** It is not a setting anybody chooses; a
+    #: field for it invites people to type something that will not work, and
+    #: publishes the base host's address into a public application.
     relay: str = field(default_factory=endpoints.default_relay)
+    #: A host this racer provisioned for themselves, which takes precedence.
+    #: Also never shown: the window offers a lifecycle — create it, reset it,
+    #: stop it, destroy it — and an address is not part of that.
+    host_url: str = ""
+    #: Credential for managing that host. Worth nothing anywhere but the
+    #: relay, and specifically not a DigitalOcean token — the server holds
+    #: that, because an app which self-elevates to administrator is a poor
+    #: place for something that can spend money.
+    host_token: str = ""
     #: Play what other people send. Separate from `enabled` on purpose — muting
     #: the session while still being heard is a normal thing to want mid-stint,
     #: and it is the first thing anyone reaches for.
@@ -188,6 +201,15 @@ class VoiceConfig:
     #: The name other racers see. Empty means the one the sim already shows
     #: them, which is the right default — it is what is on their timing screen.
     display_name: str = ""
+
+    def effective_relay(self) -> str:
+        """Where this install actually connects.
+
+        A racer's own host wins over the base one. Everything that opens a
+        socket goes through here, so there is one answer to "which relay am I
+        on" rather than two places that can disagree.
+        """
+        return (self.host_url or self.relay or "").strip()
 
 
 @dataclass
@@ -320,7 +342,7 @@ class Config:
         possible moment — the first time somebody presses the button in a race.
         """
         problems: list[str] = []
-        relay = (self.voice.relay or "").strip()
+        relay = self.voice.effective_relay()
 
         if not relay:
             # Only a problem if you are trying to use it. A source build ships

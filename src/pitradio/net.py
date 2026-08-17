@@ -286,7 +286,7 @@ class VoiceService:
         if not (cfg.voice.enabled or cfg.voice.playback):
             return None
         _plugin_id, session = self.plugins.any_session()
-        return room_url(cfg.voice.relay, session.key)
+        return room_url(cfg.voice.effective_relay(), session.key)
 
     def _on_clip(self, clip) -> None:
         cfg = self.store.config
@@ -305,9 +305,11 @@ class VoiceService:
             metres=int(settings.get("proximity_metres") or 0),
             positions=session.positions(),
         ):
-            log.debug("clip from %r was out of range", clip.speaker.driver)
+            log.info("voice: %r is out of range; not playing", clip.speaker.driver)
             return
 
+        log.info("voice: received %d bytes from %r",
+                 len(clip.audio), clip.speaker.driver)
         self.playback.offer(clip)
 
 
@@ -376,7 +378,10 @@ class Playback:
                 continue
 
             try:
-                self._play(clip, self._config().voice)
+                voice_cfg = self._config().voice
+                log.info("voice: playing %r on device %r",
+                         clip.speaker.driver, voice_cfg.output_device or "(system default)")
+                self._play(clip, voice_cfg)
             except Exception:
                 log.exception("playing a clip failed")
 

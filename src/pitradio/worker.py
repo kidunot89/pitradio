@@ -208,9 +208,12 @@ class Worker(threading.Thread):
                 log.info("voice: no name to send under; skipping the clip")
                 return
 
+            # Levelled for ears, not for Whisper — which gets the untouched
+            # array a few lines later and has never needed the help. See
+            # speech.normalise_voice.
             frame = voice_mod.encode_clip(
                 voice_mod.Speaker(name, me.position if me else (0.0, 0.0, 0.0)),
-                speech.to_pcm16(audio),
+                speech.to_pcm16(speech.normalise_voice(audio)),
                 sent_at=time.time(),
                 rate=cfg.audio.samplerate,
             )

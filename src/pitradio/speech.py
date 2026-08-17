@@ -47,12 +47,23 @@ def _sd():
 
 
 def list_devices(kind: str = "input") -> list[tuple[int, str]]:
-    """(index, label) for every device with channels of the requested kind."""
+    """(index, label) for every device with channels of the requested kind.
+
+    **The host API is part of the label, and has to be.** Windows exposes the
+    same physical device once per API — MME, DirectSound, WASAPI, WDM-KS — so a
+    single headset appears four times under one name. Without the API in the
+    label the picker shows four identical rows, choosing between them is a coin
+    toss, and matching one back by name always lands on the first. They are not
+    interchangeable either: WASAPI refuses a 16kHz clip on an HDMI output that
+    MME plays without complaint.
+    """
     try:
         sd = _sd()
         field = "max_input_channels" if kind == "input" else "max_output_channels"
+        apis = {index: api["name"] for index, api in enumerate(sd.query_hostapis())}
         return [
-            (index, f"{info['name']} ({info[field]}ch)")
+            (index,
+             f"{info['name']} ({info[field]}ch, {apis.get(info['hostapi'], '?')})")
             for index, info in enumerate(sd.query_devices())
             if info[field] > 0
         ]
@@ -190,6 +201,51 @@ def play_cue(cue_cfg, frequency: int) -> None:
 # native dependency, and this build already fights those.
 
 
+#: What a normalised clip should peak at. Short of 1.0 so that the loudest
+#: syllable has somewhere to go rather than clipping.
+VOICE_TARGET_PEAK = 0.7
+
+#: Never amplify by more than this. A clip of near-silence has a peak made of
+#: room noise, and normalising that to speech level produces a burst of hiss in
+#: somebody's headset — the opposite of the problem being solved.
+VOICE_MAX_GAIN = 32.0
+
+#: Below this **RMS** the clip is silence, not quiet speech, and is left alone.
+#:
+#: RMS rather than peak, because peak cannot tell them apart: room noise
+#: routinely peaks above any floor low enough to admit a quiet voice, and
+#: normalising on that produces a burst of hiss. Speech carries far more energy
+#: for the same peak, so its RMS separates cleanly.
+VOICE_NOISE_FLOOR_RMS = 0.001
+
+
+def normalise_voice(audio: np.ndarray) -> np.ndarray:
+    """Bring a clip up to a level a human can hear.
+
+    **Transcription and voice need different things from the same recording,
+    and only one of them has ever complained.** Whisper normalises internally,
+    so PitRadio has always worked at any capture level; a clip peaking at 0.015
+    transcribes perfectly and is inaudible over a headset. Every existing user
+    has `audio.gain` at its default for exactly that reason — nothing ever gave
+    them a reason to touch it.
+
+    So the clip that goes on the wire is levelled here, and the array handed to
+    Whisper is left alone.
+    """
+    if audio is None or audio.size == 0:
+        return audio
+
+    peak = float(np.abs(audio).max())
+    rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64))))
+    if rms < VOICE_NOISE_FLOOR_RMS or peak <= 0.0 or peak >= VOICE_TARGET_PEAK:
+        # Silence, or already loud enough. Amplifying the first is hiss; the
+        # second only risks clipping.
+        return audio
+
+    gain = min(VOICE_TARGET_PEAK / peak, VOICE_MAX_GAIN)
+    return audio * gain
+
+
 def to_pcm16(audio: np.ndarray) -> bytes:
     """float32 in -1..1 to little-endian 16-bit samples.
 
@@ -216,6 +272,33 @@ def from_pcm16(payload: bytes) -> np.ndarray:
     return (samples.astype(np.float32) / 32767.0).copy()
 
 
+def _device_samplerate(sd, device) -> int:
+    """The rate a device actually wants, or 0 if it will not say."""
+    try:
+        index = device if device is not None else sd.default.device[1]
+        return int(sd.query_devices(index)["default_samplerate"])
+    except Exception:
+        return 0
+
+
+def _resample(audio: np.ndarray, source: int, target: int) -> np.ndarray:
+    """Linear resampling, which is ample for speech.
+
+    Deliberately numpy rather than a resampler library: this is a fallback for
+    an output device being fussy, not an audio pipeline, and adding a native
+    dependency to a build that already fights them would be a poor trade for
+    quality nobody can hear on a headset.
+    """
+    if source == target or audio.size == 0:
+        return audio
+    count = round(audio.size * target / source)
+    if count <= 0:
+        return audio
+    source_points = np.linspace(0.0, 1.0, audio.size, endpoint=False)
+    target_points = np.linspace(0.0, 1.0, count, endpoint=False)
+    return np.interp(target_points, source_points, audio).astype(np.float32)
+
+
 def play_clip(audio: np.ndarray, rate: int, voice_cfg) -> None:
     """Play a received clip. Blocking, so callers give it its own thread.
 
@@ -228,16 +311,37 @@ def play_clip(audio: np.ndarray, rate: int, voice_cfg) -> None:
     try:
         sd = _sd()
         volume = min(1.0, max(0.0, float(voice_cfg.volume)))
-        sd.play(
-            (audio * volume).astype(np.float32),
-            int(rate) or 16000,
-            device=resolve_device(voice_cfg.output_device, "output"),
-        )
+        device = resolve_device(voice_cfg.output_device, "output")
+        samples = (audio * volume).astype(np.float32)
+        rate = int(rate) or 16000
+
+        try:
+            sd.play(samples, rate, device=device)
+        except Exception:
+            # **HDMI outputs generally accept only 48kHz.** A sim rig sending
+            # sound to a TV is the common case, and on WASAPI the device
+            # refuses a 16kHz clip outright rather than resampling it. Falling
+            # back to the device's own rate is the difference between a driver
+            # hearing their team mate and hearing nothing, with the failure
+            # looking identical to nobody having spoken.
+            native = _device_samplerate(sd, device)
+            if not native or native == rate:
+                raise
+            log.info("voice: device refused %dHz; resampling to %dHz", rate, native)
+            sd.play(_resample(samples, rate, native), native, device=device)
         sd.wait()
     except Exception as exc:
         # A missing or busy output device must not end the playback thread;
         # the next clip may well work.
-        log.debug("clip playback failed: %s", exc)
+        #
+        # **Warning, not debug.** At debug this is invisible, and a device that
+        # refuses the clip is then indistinguishable from one playing it into a
+        # room nobody is in — which is exactly how an afternoon gets spent
+        # changing settings instead of reading one line. HDMI outputs are the
+        # common case: they generally accept only 48kHz and reject a 16kHz clip
+        # outright on WASAPI.
+        log.warning("voice: playback failed on device %r: %s",
+                    voice_cfg.output_device or "(system default)", exc)
 
 
 # -- transcription -------------------------------------------------------

@@ -243,6 +243,7 @@ def cmd_self_test() -> int:
         # still runs, which means nothing at module scope proves it was
         # bundled — exactly how av.utils went missing from v0.1.0.
         "pitradio.voice", "pitradio.net", "pitradio.endpoints",
+        "pitradio.hostapi",
     ]
 
     failures: list[tuple[str, str]] = []
