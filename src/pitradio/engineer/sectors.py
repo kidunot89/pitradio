@@ -47,6 +47,12 @@ class SectorTime:
     session_best: bool = False
     #: What it beat, or what it fell short of. Zero when there was no previous.
     previous: float = 0.0
+    #: Which class the driver is racing in, empty when the sim has none.
+    vehicle_class: str = ""
+    #: Whether it beat everybody *in that class*. On a single-class grid this
+    #: is the same as `session_best`; on an endurance one it is the one that
+    #: matters to the driver hearing it.
+    class_best: bool = False
 
     @property
     def delta(self) -> float:
@@ -72,6 +78,11 @@ class SectorBook:
     #: boundaries are, and every car on the circuit crosses the same ones — so
     #: they are observed rather than configured, exactly as corners are.
     boundaries: dict[int, float] = field(default_factory=dict)
+    #: (class, sector) -> (driver, time), for a grid where the overall best is
+    #: somebody in a faster category and therefore not your business.
+    class_best: dict[tuple[str, int], tuple[str, float]] = field(default_factory=dict)
+    #: driver -> the class they are racing in.
+    classes: dict[str, str] = field(default_factory=dict)
     #: driver -> the sector index they were last seen in.
     _seen: dict[str, int] = field(default_factory=dict)
 
@@ -79,6 +90,8 @@ class SectorBook:
         """A new track means none of these numbers mean anything any more."""
         self.best.clear()
         self.session_best.clear()
+        self.class_best.clear()
+        self.classes.clear()
         self.boundaries.clear()
         self._seen.clear()
 
@@ -107,6 +120,10 @@ class SectorBook:
         driver = getattr(car, "driver", "") or ""
         if not driver:
             return None
+
+        vehicle_class = str(getattr(car, "vehicle_class", "") or "")
+        if vehicle_class:
+            self.classes[driver] = vehicle_class
 
         index = int(getattr(car, "sector", 0) or 0)
         previous = self._seen.get(driver)
@@ -163,10 +180,23 @@ class SectorBook:
         if session:
             self.session_best[sector] = (driver, seconds)
 
-        return SectorTime(driver, sector, seconds, personal, session, previous)
+        vehicle_class = self.classes.get(driver, "")
+        in_class = session
+        if vehicle_class:
+            key = (vehicle_class, sector)
+            standing = self.class_best.get(key)
+            in_class = standing is None or seconds < standing[1]
+            if in_class:
+                self.class_best[key] = (driver, seconds)
+
+        return SectorTime(driver, sector, seconds, personal, session, previous,
+                          vehicle_class, in_class)
 
     def best_for(self, driver: str, sector: int) -> float:
         return self.best.get(driver, {}).get(sector, 0.0)
 
-    def fastest(self, sector: int) -> tuple[str, float] | None:
+    def fastest(self, sector: int, vehicle_class: str = "") -> tuple[str, float] | None:
+        """The best time in a sector, overall or within one class."""
+        if vehicle_class:
+            return self.class_best.get((vehicle_class, sector))
         return self.session_best.get(sector)

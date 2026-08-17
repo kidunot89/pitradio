@@ -77,10 +77,16 @@ class Context:
 
     #: Which side is which, per the sim's axes — see spotter.py.
     swap_sides: bool = False
-    #: How far apart along the track two cars can be and still be alongside.
+    #: How far apart along the track two cars can be and still be alongside,
+    #: once they already are.
     alongside_metres: float = spotter.DEFAULT_ALONGSIDE_METRES
+    #: And how close they must come before the call is made at all.
+    overlap_metres: float = spotter.DEFAULT_OVERLAP_METRES
     #: How far to the side still counts as beside you rather than elsewhere.
     width_metres: float = spotter.DEFAULT_WIDTH_METRES
+
+    #: Whether calls about other cars are limited to the player's own class.
+    own_class_only: bool = True
 
     #: Corner and sector deltas below this are not worth a call.
     threshold: float = DEFAULT_THRESHOLD
@@ -93,6 +99,18 @@ class Context:
 
     def driver_names(self) -> list[str]:
         return [car.driver for car in self.session.cars if car.driver]
+
+    def my_class(self) -> str:
+        """The class to judge other cars against, or "" for the whole field.
+
+        Empty when the sim has no classes, when the player's car is not in the
+        block, or when the driver has asked for the overall picture — all of
+        which mean the same thing to a caller: do not filter.
+        """
+        if not self.own_class_only:
+            return ""
+        own = self.session.player()
+        return str(getattr(own, "vehicle_class", "") or "") if own else ""
 
     def own_car(self):
         """The car being driven from this machine, or None.

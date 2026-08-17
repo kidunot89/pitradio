@@ -363,6 +363,10 @@ class EngineerService:
                 settings.get("spotter_metres") or spotter.DEFAULT_ALONGSIDE_METRES),
             width_metres=float(
                 settings.get("spotter_width_metres") or spotter.DEFAULT_WIDTH_METRES),
+            overlap_metres=float(
+                settings.get("spotter_overlap_metres")
+                or spotter.DEFAULT_OVERLAP_METRES),
+            own_class_only=bool(self.config.own_class_only),
             threshold=float(self.config.coach_threshold),
             sector_threshold=float(self.config.sector_threshold),
             say=self.say, **extra)

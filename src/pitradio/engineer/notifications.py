@@ -299,7 +299,11 @@ class SpotterNotification(Notification):
             # sits, so a number that suits one game is wrong in the next.
             metres=context.alongside_metres,
             width=context.width_metres,
-            swap=context.swap_sides))
+            swap=context.swap_sides,
+            overlap=context.overlap_metres,
+            # What is already being called. A car keeps its call out to the
+            # wider range; a new one has to come properly alongside first.
+            holding=self._sides))
 
 
 class LapTimeNotification(Notification):
@@ -352,7 +356,7 @@ class FastestLapNotification(Notification):
         self._holder, self._time = "", 0.0
 
     def check(self, context) -> list[Call]:
-        fastest = context.book.fastest()
+        fastest = context.book.fastest(context.my_class())
         if fastest is None or fastest.lap_time <= 0:
             return []
         if self._time and fastest.lap_time >= self._time:
@@ -398,9 +402,13 @@ class FastestSectorNotification(Notification):
         self._seen.clear()
 
     def check(self, context) -> list[Call]:
+        wanted = context.my_class()
         calls: list[Call] = []
         for finished in context.finished_sectors:
-            if not finished.session_best:
+            # In your class if that is what was asked for, overall otherwise.
+            if not (finished.class_best if wanted else finished.session_best):
+                continue
+            if wanted and finished.vehicle_class != wanted:
                 continue
             # As with the fastest lap: the first time anybody sets a sector it
             # is the only time, not a record being taken.

@@ -351,6 +351,10 @@ class LapBook:
         #: next lap starts.
         self._tainted: set[str] = set()
         self._laps: dict[str, int] = {}
+        #: driver -> the class they are racing in. Kept because "the fastest
+        #: lap" means something different on a multi-class grid: a GT3 driver
+        #: is not racing the Hypercars and their lap time is not news.
+        self.classes: dict[str, str] = {}
 
     def reset(self, track_length: float = 0.0) -> None:
         """Start again — a new track, or a new session on the same one.
@@ -364,6 +368,7 @@ class LapBook:
         self.best.clear()
         self._tainted.clear()
         self._laps.clear()
+        self.classes.clear()
 
     def observe(self, car, elapsed: float) -> LapTrace | None:
         """Record where a car is. Returns the lap it just finished, if it did.
@@ -374,6 +379,10 @@ class LapBook:
         driver = getattr(car, "driver", "") or ""
         if not driver:
             return None
+
+        vehicle_class = str(getattr(car, "vehicle_class", "") or "")
+        if vehicle_class:
+            self.classes[driver] = vehicle_class
 
         laps = int(getattr(car, "laps", 0) or 0)
         previous = self._laps.get(driver)
@@ -416,7 +425,18 @@ class LapBook:
     def best_for(self, driver: str) -> LapTrace | None:
         return self.best.get(driver)
 
-    def fastest(self) -> LapTrace | None:
-        """Whoever has the quickest lap on record, for "target the fastest"."""
-        laps = [trace for trace in self.best.values() if trace.lap_time > 0]
+    def fastest(self, vehicle_class: str = "") -> LapTrace | None:
+        """The quickest lap on record, optionally within one class.
+
+        A class filter rather than always overall, because on an endurance grid
+        the two are different facts and only one of them is about your race.
+        Naming a class nobody is in yields nothing rather than falling back to
+        overall — a wrong answer stated confidently is worse than no answer.
+        """
+        laps = [trace for driver, trace in self.best.items()
+                if trace.lap_time > 0
+                and (not vehicle_class or self.classes.get(driver) == vehicle_class)]
         return min(laps, key=lambda trace: trace.lap_time) if laps else None
+
+    def class_of(self, driver: str) -> str:
+        return self.classes.get(driver, "")

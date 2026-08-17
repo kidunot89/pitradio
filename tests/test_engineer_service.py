@@ -398,19 +398,27 @@ def test_a_slower_lap_takes_nothing(engineer):
     assert engineer.speaker.said == []
 
 
-def cross_sectors(engineer, driver="Me", *, times=(30.0, 35.0, 25.0), player=True):
-    """Take a car through all three sector boundaries with the given times."""
+def cross_sectors(engineer, driver="Me", *, times=(30.0, 35.0, 25.0), player=True,
+                  vehicle_class="", alongside_player=None):
+    """Take a car through all three sector boundaries with the given times.
+
+    `alongside_player` publishes the player's own car in every frame as well,
+    which is what the class filter reads the driver's own class from.
+    """
     first, second, third = times
     lap = first + second + third
+    extra = [alongside_player] if alongside_player is not None else []
+
+    def frame(**kwargs):
+        publish(engineer, car(driver, player=player, vehicle_class=vehicle_class,
+                              **kwargs), *extra)
+
     # In sector 1, then 2, then 3 (which the sim calls 0), then the line.
-    publish(engineer, car(driver, player=player, sector=1, distance=10.0))
-    publish(engineer, car(driver, player=player, sector=2, distance=400.0,
-                          cur1=first))
-    publish(engineer, car(driver, player=player, sector=0, distance=800.0,
-                          cur1=first, cur2=first + second))
-    publish(engineer, car(driver, player=player, sector=1, distance=10.0,
-                          laps=1, last_lap=lap,
-                          last1=first, last2=first + second))
+    frame(sector=1, distance=10.0)
+    frame(sector=2, distance=400.0, cur1=first)
+    frame(sector=0, distance=800.0, cur1=first, cur2=first + second)
+    frame(sector=1, distance=10.0, laps=1, last_lap=lap,
+          last1=first, last2=first + second)
 
 
 def test_sector_times_come_out_of_the_cumulative_splits(engineer):
@@ -601,9 +609,10 @@ def test_both_directions_are_calls():
     leaving = spotter.calls(frozenset(), frozenset({"left"}))
 
     assert arriving == [("left", "car left", True)]
-    # Not urgent: one of them means do not move and the other means you may,
-    # and only the first can arrive too late to matter.
-    assert leaving == [("left", "clear left", False)]
+    # Urgent too. A driver holding a line for a car that left two corners ago
+    # is giving up track they could be using, and they hold it until told
+    # otherwise — so the all-clear cannot queue behind a lap time either.
+    assert leaving == [("left", "clear left", True)]
 
 
 # -- track changes --------------------------------------------------------
@@ -743,6 +752,76 @@ def test_the_sim_s_spotter_clears_a_side_like_any_other(engineer):
     assert "clear left" in engineer.speaker.spoken()
 
 
+def test_only_your_own_class_is_worth_a_call(engineer):
+    """A GT3 driver is not racing the Hypercars, and being told one has taken
+    the fastest lap is noise at best and misleading at worst."""
+    enable(engineer, notifications.FASTEST_SECTOR)
+    disable(engineer, notifications.LAP_TIME)
+
+    me = car("Me", player=True, vehicle_class="LMGT3")
+
+    # A Hypercar taking a sector outright says nothing to a GT3 driver.
+    cross_sectors(engineer, "Hyper", player=False, vehicle_class="Hypercar",
+                  times=(20.0, 30.0, 20.0), alongside_player=me)
+    engineer.speaker.said.clear()
+    cross_sectors(engineer, "Hyper", player=False, vehicle_class="Hypercar",
+                  times=(18.0, 30.0, 20.0), alongside_player=me)
+    assert engineer.speaker.said == []
+
+
+def test_the_whole_field_is_used_when_the_filter_is_off(engineer):
+    engineer.store.config.engineer.own_class_only = False
+    enable(engineer, notifications.FASTEST_SECTOR)
+    disable(engineer, notifications.LAP_TIME)
+    me = car("Me", player=True, vehicle_class="LMGT3")
+
+    cross_sectors(engineer, "Hyper", player=False, vehicle_class="Hypercar",
+                  times=(20.0, 30.0, 20.0), alongside_player=me)
+    engineer.speaker.said.clear()
+    cross_sectors(engineer, "Hyper", player=False, vehicle_class="Hypercar",
+                  times=(18.0, 30.0, 20.0), alongside_player=me)
+    assert "has taken" in engineer.speaker.spoken()
+
+
+def test_a_sim_with_no_classes_is_unaffected(engineer):
+    """There is only one class to be in, so filtering by it filters nothing."""
+    enable(engineer, notifications.FASTEST_SECTOR)
+    disable(engineer, notifications.LAP_TIME)
+
+    cross_sectors(engineer, "Rival", player=False, times=(30.0, 35.0, 25.0))
+    engineer.speaker.said.clear()
+    cross_sectors(engineer, "Rival", player=False, times=(28.0, 35.0, 25.0))
+    assert "has taken" in engineer.speaker.spoken()
+
+
+def test_a_car_is_not_called_until_it_is_properly_alongside(engineer):
+    """Announcing at the outer range calls a car still most of a length back,
+    which the driver cannot see, does not believe, and learns to ignore."""
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0, gap=7.0)   # inside 9m, outside 4m
+    assert engineer.speaker.said == []
+
+    alongside(engineer, left=True, distance=20.0, gap=2.0)   # properly alongside
+    assert any("left" in line for line in engineer.speaker.lines())
+
+
+def test_a_call_is_held_out_to_the_wider_range(engineer):
+    """Or it would flicker on and off as two cars breathe."""
+    enable(engineer, notifications.SPOTTER, repeat=30.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0, gap=2.0)
+    engineer.speaker.said.clear()
+
+    # Drifted back past the enter range but still inside the leave range.
+    alongside(engineer, left=True, distance=20.0, gap=7.0)
+    assert "clear" not in engineer.speaker.spoken()
+
+
 # -- per-sim overrides ----------------------------------------------------
 
 
@@ -752,13 +831,14 @@ def test_the_spotter_range_comes_from_the_sim_s_plugin_settings(engineer):
     enable(engineer, notifications.SPOTTER, repeat=3.0)
     disable(engineer, notifications.LAP_TIME)
     # A car 20m up the road is not alongside by default...
-    engineer.plugins.settings = {"spotter_metres": 9}
+    engineer.plugins.settings = {"spotter_metres": 9, "spotter_overlap_metres": 4}
     alongside(engineer, distance=0.0)
     alongside(engineer, left=True, distance=10.0, gap=20.0)
     assert engineer.speaker.said == []
 
-    # ...but is if this sim is told to count that far.
-    engineer.plugins.settings = {"spotter_metres": 30}
+    # ...but is if this sim is told to count that far. Both ranges, because
+    # the call is only *made* inside the tighter one.
+    engineer.plugins.settings = {"spotter_metres": 30, "spotter_overlap_metres": 30}
     engineer.behaviours.reset()
     alongside(engineer, distance=40.0)
     alongside(engineer, left=True, distance=50.0, gap=20.0)

@@ -28,10 +28,20 @@ from dataclasses import dataclass
 LEFT = "left"
 RIGHT = "right"
 
-#: How far apart two cars may be along the track and still count as alongside.
-#: A prototype is about 5m long, so this is roughly overlapping bodywork plus
-#: the length of a car either way — the range where somebody is actually there.
+#: How far apart two cars may be along the track and still count as alongside
+#: **once they already are**. A prototype is about 5m long, so this is
+#: overlapping bodywork plus a car either way.
 DEFAULT_ALONGSIDE_METRES = 9.0
+
+#: And how much closer they must be before the call is *made* in the first
+#: place. Deliberately tighter than the range that keeps it.
+#:
+#: The two are different questions and answering them with one number gets both
+#: wrong. Announcing at the full range calls a car that is still most of a
+#: length back — which the driver cannot see, does not believe, and learns to
+#: ignore. Dropping the call at the same range would then have it flicker on
+#: and off as the two cars breathe. Enter close, leave at arm's length.
+DEFAULT_OVERLAP_METRES = 4.0
 
 #: How far to the side. Beyond this they are on a different part of the
 #: circuit: an adjacent straight, or the other side of a hairpin, which is
@@ -106,28 +116,41 @@ def alongside(
     metres: float = DEFAULT_ALONGSIDE_METRES,
     width: float = DEFAULT_WIDTH_METRES,
     swap: bool = False,
+    overlap: float = DEFAULT_OVERLAP_METRES,
+    holding: frozenset[str] | None = None,
 ) -> list[Alongside]:
     """Every car beside this one, nearest first.
 
     `others` is driver name -> world position, which is exactly what
     `SessionInfo.positions()` already returns for proximity voice.
+
+    **Two ranges, not one.** A car has to come within `overlap` before it
+    counts as alongside at all; once a side is `holding` a call, cars stay
+    counted out to `metres`. Announcing at the outer range calls somebody the
+    driver cannot yet see beside them, and dropping at the inner one makes the
+    call flicker as two cars breathe. `holding` is the set of sides currently
+    being called, which is what the notification already tracks.
     """
     if facing is None:
         return []
 
+    held = holding or frozenset()
     found: list[Alongside] = []
     for driver, position in (others or {}).items():
         if not driver:
             continue
         along, across = offsets(mine, facing, position)
-        if abs(along) > metres or abs(across) > width:
+        if abs(across) > width:
+            continue
+        side = RIGHT if (across > 0) != swap else LEFT
+        reach = metres if side in held else min(overlap, metres)
+        if abs(along) > reach:
             continue
         if abs(across) < 0.5:
             # Directly in front or behind at overlapping distance means the
             # positions came from different moments, not that somebody is
             # inside the car. Nothing useful can be said about it.
             continue
-        side = RIGHT if (across > 0) != swap else LEFT
         found.append(Alongside(driver, side, abs(across), along))
 
     found.sort(key=lambda car: abs(car.lateral))
@@ -191,7 +214,13 @@ def calls(
         if is_now and not was:
             changed.append((side, warning(side, tally.get(side, 1)), True))
         elif was and not is_now:
-            changed.append((side, f"clear {side}", False))
+            # **Urgent too.** This was ranked below the warning on the reasoning
+            # that only a warning can arrive too late to matter. That is wrong
+            # from the seat: a driver holding a line for a car that left two
+            # corners ago is giving up track they could be using, and they hold
+            # it until they are told otherwise. The all-clear is what ends that,
+            # so it cannot queue behind a lap time either.
+            changed.append((side, f"clear {side}", True))
     return changed
 
 

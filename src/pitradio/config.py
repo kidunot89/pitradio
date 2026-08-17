@@ -296,6 +296,15 @@ class EngineerConfig:
     #: routine id -> its settings.
     routines: dict[str, RoutineConfig] = field(default_factory=dict)
 
+    #: Only talk about cars in your own class.
+    #:
+    #: On, because on an endurance grid the two facts are different and only
+    #: one is about your race: a GT3 driver is not racing the Hypercars, and
+    #: being told a Hypercar has taken the fastest lap is noise at best and
+    #: misleading at worst. Sims with a single class are unaffected — there is
+    #: only one class to be in.
+    own_class_only: bool = True
+
     #: How much time in half a corner is worth interrupting for, in seconds.
     coach_threshold: float = 0.08
     #: The same, for a whole sector. Larger, because a sector is longer and a
