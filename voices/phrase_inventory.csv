@@ -1,0 +1,139 @@
+audio_filename,text_for_tts,subtitle
+a_tenth/a_tenth.wav,a tenth,a tenth
+best/best.wav,best,best
+best_lap/best_lap.wav,best lap,best lap
+better_entry/better_entry.wav,better entry,better entry
+car_left/car_left.wav,car left,car left
+car_right/car_right.wav,car right,car right
+car_stopped_ahead/car_stopped_ahead.wav,car stopped ahead,car stopped ahead
+clear/clear.wav,clear,clear
+clear_left/clear_left.wav,clear left,clear left
+clear_right/clear_right.wav,clear right,clear right
+down/down.wav,down,down
+eight/eight.wav,eight,eight
+eight_tenths/eight_tenths.wav,eight tenths,eight tenths
+eighteen/eighteen.wav,eighteen,eighteen
+eleven/eleven.wav,eleven,eleven
+faster_exit/faster_exit.wav,faster exit,faster exit
+fastest/fastest.wav,fastest,fastest
+fastest_lap_of_the_session/fastest_lap_of_the_session.wav,fastest lap of the session,fastest lap of the session
+fifteen/fifteen.wav,fifteen,fifteen
+fifty/fifty.wav,fifty,fifty
+fifty_eight/fifty_eight.wav,fifty eight,fifty eight
+fifty_five/fifty_five.wav,fifty five,fifty five
+fifty_four/fifty_four.wav,fifty four,fifty four
+fifty_nine/fifty_nine.wav,fifty nine,fifty nine
+fifty_one/fifty_one.wav,fifty one,fifty one
+fifty_seven/fifty_seven.wav,fifty seven,fifty seven
+fifty_six/fifty_six.wav,fifty six,fifty six
+fifty_three/fifty_three.wav,fifty three,fifty three
+fifty_two/fifty_two.wav,fifty two,fifty two
+five/five.wav,five,five
+forty/forty.wav,forty,forty
+forty_eight/forty_eight.wav,forty eight,forty eight
+forty_five/forty_five.wav,forty five,forty five
+forty_four/forty_four.wav,forty four,forty four
+forty_nine/forty_nine.wav,forty nine,forty nine
+forty_one/forty_one.wav,forty one,forty one
+forty_seven/forty_seven.wav,forty seven,forty seven
+forty_six/forty_six.wav,forty six,forty six
+forty_three/forty_three.wav,forty three,forty three
+forty_two/forty_two.wav,forty two,forty two
+four/four.wav,four,four
+four_tenths/four_tenths.wav,four tenths,four tenths
+four_wide/four_wide.wav,four wide,four wide
+fourteen/fourteen.wav,fourteen,fourteen
+give_me_a_lap_to_find_the_sectors/give_me_a_lap_to_find_the_sectors.wav,give me a lap to find the sectors,give me a lap to find the sectors
+go_ahead/go_ahead.wav,go ahead,go ahead
+had_a_better_entry/had_a_better_entry.wav,had a better entry,had a better entry
+half_a_second/half_a_second.wav,half a second,half a second
+has_no_lap_on_record_yet/has_no_lap_on_record_yet.wav,has no lap on record yet,has no lap on record yet
+has_no_time_in/has_no_time_in.wav,has no time in,has no time in
+has_taken/has_taken.wav,has taken,has taken
+has_the_fastest_lap/has_the_fastest_lap.wav,has the fastest lap,has the fastest lap
+i_cant_find/i_cant_find.wav,I can't find,I can't find
+is_ahead_by/is_ahead_by.wav,is ahead by,is ahead by
+last_lap/last_lap.wav,last lap,last lap
+nine/nine.wav,nine,nine
+nine_tenths/nine_tenths.wav,nine tenths,nine tenths
+nineteen/nineteen.wav,nineteen,nineteen
+no_reference_lap_yet_keep_going/no_reference_lap_yet_keep_going.wav,no reference lap yet; keep going,no reference lap yet; keep going
+nothing_in_it/nothing_in_it.wav,nothing in it,nothing in it
+oh/oh.wav,oh,oh
+one/one.wav,one,one
+one_second/one_second.wav,one second,one second
+point/point.wav,point,point
+radio_check/radio_check.wav,radio check,radio check
+say_again/say_again.wav,say again,say again
+sector_one/sector_one.wav,sector one,sector one
+sector_three/sector_three.wav,sector three,sector three
+sector_two/sector_two.wav,sector two,sector two
+seven/seven.wav,seven,seven
+seven_tenths/seven_tenths.wav,seven tenths,seven tenths
+seventeen/seventeen.wav,seventeen,seventeen
+six/six.wav,six,six
+six_tenths/six_tenths.wav,six tenths,six tenths
+sixteen/sixteen.wav,sixteen,sixteen
+slower_car_ahead/slower_car_ahead.wav,slower car ahead,slower car ahead
+standing_down/standing_down.wav,standing down,standing down
+targeting/targeting.wav,targeting,targeting
+ten/ten.wav,ten,ten
+thats_your_best/thats_your_best.wav,that's your best,that's your best
+thirteen/thirteen.wav,thirteen,thirteen
+thirty/thirty.wav,thirty,thirty
+thirty_eight/thirty_eight.wav,thirty eight,thirty eight
+thirty_five/thirty_five.wav,thirty five,thirty five
+thirty_four/thirty_four.wav,thirty four,thirty four
+thirty_nine/thirty_nine.wav,thirty nine,thirty nine
+thirty_one/thirty_one.wav,thirty one,thirty one
+thirty_seven/thirty_seven.wav,thirty seven,thirty seven
+thirty_six/thirty_six.wav,thirty six,thirty six
+thirty_three/thirty_three.wav,thirty three,thirty three
+thirty_two/thirty_two.wav,thirty two,thirty two
+three/three.wav,three,three
+three_tenths/three_tenths.wav,three tenths,three tenths
+three_wide/three_wide.wav,three wide,three wide
+turn_eight/turn_eight.wav,turn eight,turn eight
+turn_eighteen/turn_eighteen.wav,turn eighteen,turn eighteen
+turn_eleven/turn_eleven.wav,turn eleven,turn eleven
+turn_fifteen/turn_fifteen.wav,turn fifteen,turn fifteen
+turn_five/turn_five.wav,turn five,turn five
+turn_four/turn_four.wav,turn four,turn four
+turn_fourteen/turn_fourteen.wav,turn fourteen,turn fourteen
+turn_nine/turn_nine.wav,turn nine,turn nine
+turn_nineteen/turn_nineteen.wav,turn nineteen,turn nineteen
+turn_one/turn_one.wav,turn one,turn one
+turn_seven/turn_seven.wav,turn seven,turn seven
+turn_seventeen/turn_seventeen.wav,turn seventeen,turn seventeen
+turn_six/turn_six.wav,turn six,turn six
+turn_sixteen/turn_sixteen.wav,turn sixteen,turn sixteen
+turn_ten/turn_ten.wav,turn ten,turn ten
+turn_thirteen/turn_thirteen.wav,turn thirteen,turn thirteen
+turn_three/turn_three.wav,turn three,turn three
+turn_twelve/turn_twelve.wav,turn twelve,turn twelve
+turn_twenty/turn_twenty.wav,turn twenty,turn twenty
+turn_two/turn_two.wav,turn two,turn two
+twelve/twelve.wav,twelve,twelve
+twenty/twenty.wav,twenty,twenty
+twenty_eight/twenty_eight.wav,twenty eight,twenty eight
+twenty_five/twenty_five.wav,twenty five,twenty five
+twenty_four/twenty_four.wav,twenty four,twenty four
+twenty_nine/twenty_nine.wav,twenty nine,twenty nine
+twenty_one/twenty_one.wav,twenty one,twenty one
+twenty_seven/twenty_seven.wav,twenty seven,twenty seven
+twenty_six/twenty_six.wav,twenty six,twenty six
+twenty_three/twenty_three.wav,twenty three,twenty three
+twenty_two/twenty_two.wav,twenty two,twenty two
+two/two.wav,two,two
+two_cars_left/two_cars_left.wav,two cars left,two cars left
+two_cars_right/two_cars_right.wav,two cars right,two cars right
+two_tenths/two_tenths.wav,two tenths,two tenths
+up/up.wav,up,up
+was_faster_on_the_exit/was_faster_on_the_exit.wav,was faster on the exit,was faster on the exit
+which_sector/which_sector.wav,which sector?,which sector?
+yet/yet.wav,yet,yet
+you_are_ahead_by/you_are_ahead_by.wav,you are ahead by,you are ahead by
+you_had_a_better_entry/you_had_a_better_entry.wav,you had a better entry,you had a better entry
+you_were_faster_on_the_exit/you_were_faster_on_the_exit.wav,you were faster on the exit,you were faster on the exit
+yours/yours.wav,yours,yours
+zero/zero.wav,zero,zero

@@ -148,17 +148,12 @@ def resample(audio: np.ndarray, source: int, target: int) -> np.ndarray:
 
     A pack take at 24kHz and a synthesised name at 22.05kHz have to be played
     as one sentence; concatenating them untouched plays one of them at the
-    wrong pitch. Linear is crude and entirely adequate for speech at these
-    ratios — the alternative is a resampling dependency for a difference
-    nobody can hear over an engine.
+    wrong pitch. Shared with playback, which resamples again to whatever the
+    output device runs at — one implementation, because two would drift.
     """
-    if source <= 0 or target <= 0 or source == target or audio.size == 0:
-        return audio
-    count = round(audio.size * target / source)
-    if count <= 0:
-        return np.zeros(0, dtype=np.float32)
-    position = np.linspace(0.0, audio.size - 1, count, dtype=np.float64)
-    return np.interp(position, np.arange(audio.size), audio).astype(np.float32)
+    from pitradio import speech
+
+    return speech.resample(audio, source, target)
 
 
 #: A breath between fragments. Without it "turn four" and "Taylor" run together

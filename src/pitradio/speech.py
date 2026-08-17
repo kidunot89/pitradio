@@ -112,6 +112,33 @@ def device_name(index: int, kind: str = "output") -> str:
         return ""
 
 
+#: Which Windows sound API to prefer when a device appears under several.
+#:
+#: Every endpoint is listed once per host API, and they are not equivalent.
+#: **MME is the legacy WaveOut path**: when a game holds the endpoint in WASAPI
+#: exclusive mode, writes to the MME view succeed and go nowhere — no error, no
+#: sound, and nothing in any log. WASAPI shared mode is built to mix with other
+#: applications, which is exactly the situation this app is always in: it talks
+#: over a running game.
+#:
+#: Ordered best first. Anything unlisted sorts last but is still usable.
+_HOST_API_PREFERENCE = ("Windows WASAPI", "Windows DirectSound", "MME",
+                        "Windows WDM-KS")
+
+
+def _api_rank(index: int, kind: str) -> int:
+    try:
+        sd = _sd()
+        info = sd.query_devices(index)
+        name = sd.query_hostapis()[info["hostapi"]]["name"]
+    except Exception:
+        return len(_HOST_API_PREFERENCE)
+    try:
+        return _HOST_API_PREFERENCE.index(name)
+    except ValueError:
+        return len(_HOST_API_PREFERENCE)
+
+
 def resolve_device(spec: Any, kind: str = "input") -> Any:
     """A device index for a stored choice, or None for the system default.
 
@@ -130,17 +157,47 @@ def resolve_device(spec: Any, kind: str = "input") -> Any:
         return spec
 
     needle = str(spec).strip().lower()
-    for index, _label in devices:
-        if device_name(index, kind).strip().lower() == needle:
-            return index
-    for index, label in devices:
-        if needle in label.lower():
-            return index
+    exact = [index for index, _label in devices
+             if device_name(index, kind).strip().lower() == needle]
+    if exact:
+        # The same headset appears under every host API. Which one is picked
+        # decides whether the engineer can be heard over a game — see
+        # _HOST_API_PREFERENCE.
+        return min(exact, key=lambda index: _api_rank(index, kind))
+
+    loose = [index for index, label in devices if needle in label.lower()]
+    if loose:
+        return min(loose, key=lambda index: _api_rank(index, kind))
 
     log.warning("no %s device named %r any more; using the system default. "
                 "Available: %s", kind, spec,
                 ", ".join(label for _i, label in devices) or "(none)")
     return None
+
+
+def device_samplerate(index: Any) -> int:
+    """What rate a device is actually running at, or 0 if it will not say."""
+    try:
+        info = _sd().query_devices(index if index is not None else None, "output")
+        return int(float(info["default_samplerate"]))
+    except Exception:
+        log.debug("could not read the rate of device %r", index, exc_info=True)
+        return 0
+
+
+def resample(audio: np.ndarray, source: int, target: int) -> np.ndarray:
+    """Linear resampling between two rates.
+
+    Crude and entirely adequate for speech: the alternative is a resampling
+    dependency for a difference nobody can hear over an engine.
+    """
+    if source <= 0 or target <= 0 or source == target or audio.size == 0:
+        return audio
+    count = round(audio.size * target / source)
+    if count <= 0:
+        return np.zeros(0, dtype=np.float32)
+    position = np.linspace(0.0, audio.size - 1, count, dtype=np.float64)
+    return np.interp(position, np.arange(audio.size), audio).astype(np.float32)
 
 
 # -- capture -------------------------------------------------------------
@@ -301,16 +358,27 @@ def play_clip(audio: np.ndarray, rate: int, volume: float = 1.0,
     try:
         sd = _sd()
         level = min(1.0, max(0.0, float(volume)))
-        sd.play(
-            (audio * level).astype(np.float32),
-            int(rate) or 16000,
-            device=resolve_device(device, "output"),
-        )
+        index = resolve_device(device, "output")
+        rate = int(rate) or 16000
+
+        # **Resampled to whatever the device actually runs at.** WASAPI shared
+        # mode accepts only the endpoint's configured rate and refuses anything
+        # else outright; MME accepts any rate and resamples it itself, which is
+        # how a mismatch stayed invisible until a game was holding the device.
+        # Doing it here means neither host API has to.
+        native = device_samplerate(index)
+        if native and native != rate:
+            audio = resample(audio, rate, native)
+            rate = native
+
+        sd.play((audio * level).astype(np.float32), rate, device=index)
         sd.wait()
     except Exception as exc:
         # A missing or busy output device must not end the playback thread;
-        # the next clip may well work.
-        log.debug("clip playback failed: %s", exc)
+        # the next clip may well work. **Warned, not debugged**: this is the
+        # only signal that the engineer is being played into a device nobody
+        # can hear, and at debug level it was invisible.
+        log.warning("could not play on device %r: %s", device, exc)
 
 
 def stop_playback() -> None:
