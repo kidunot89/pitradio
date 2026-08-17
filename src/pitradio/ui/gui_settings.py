@@ -1518,15 +1518,103 @@ def _paired(app, body: dict) -> None:
     cfg.voice.host_token = token
     app.save_config()
 
+    _busy(app, t("asking what your account can use…"))
+    api = _voice_api(app)
+
+    def work():
+        reply = api.options()
+        _on_main(app, lambda: _choose_host(app, reply))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _choose_host(app, reply) -> None:
+    """Ask which size and where, then create it.
+
+    Both are the racer's to choose — it is their money and their grid. The
+    recommendation is shown with the reasoning behind it rather than asserted,
+    because "pick the cheapest" sounds like a cop-out until you know that
+    processor and memory are nowhere near the limit and transfer is.
+    """
+    if not reply.ok:
+        _voice_host_set(app, None, message=reply.error or t("could not read your account"))
+        return
+
+    sizes = reply.body.get("sizes") or []
+    regions = reply.body.get("regions") or []
+    if not sizes or not regions:
+        _voice_host_set(app, None, message=t("your account offers nothing to build on"))
+        return
+
+    chosen = _ask_host_choice(app, sizes, regions, reply.body.get("advice", ""))
+    if chosen is None:
+        _voice_host_refresh(app)
+        return
+
+    size, region = chosen
     _busy(app, t("creating your voice host…"))
     api = _voice_api(app)
     name = _voice_host_name(app)
 
     def work():
-        reply = api.create(name, _voice_host_region(app))
-        _on_main(app, lambda: _acted(app, reply))
+        made = api.create(name, region, size)
+        _on_main(app, lambda: _acted(app, made))
 
     threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _ask_host_choice(app, sizes, regions, advice):
+    """A modal chooser. Returns (size slug, region slug), or None if cancelled."""
+    window = tk.Toplevel(app.root)
+    window.title(t("Create a voice host"))
+    window.transient(app.root)
+    window.resizable(False, False)
+    body = ttk.Frame(window, padding=14)
+    body.pack(fill="both", expand=True)
+
+    recommended = next((s["slug"] for s in sizes if s.get("recommended")),
+                       sizes[0]["slug"])
+    labels = {f"{s['label']}{t('  ← recommended') if s.get('recommended') else ''}":
+              s["slug"] for s in sizes}
+    region_labels = {f"{r['name']}": r["slug"] for r in regions}
+
+    size_var = tk.StringVar(value=next(
+        (label for label, slug in labels.items() if slug == recommended),
+        next(iter(labels))))
+    region_var = tk.StringVar(value=next(iter(region_labels)))
+
+    ttk.Label(body, text=t("Size"), style="Heading.TLabel").grid(
+        row=0, column=0, sticky="w")
+    ttk.Combobox(body, textvariable=size_var, state="readonly", width=52,
+                 values=list(labels)).grid(row=1, column=0, sticky="we", pady=(2, 10))
+
+    ttk.Label(body, text=t("Region"), style="Heading.TLabel").grid(
+        row=2, column=0, sticky="w")
+    ttk.Combobox(body, textvariable=region_var, state="readonly", width=52,
+                 values=list(region_labels)).grid(row=3, column=0, sticky="we",
+                                                  pady=(2, 10))
+
+    ttk.Label(body, text=advice, style="Hint.TLabel", wraplength=430,
+              justify="left").grid(row=4, column=0, sticky="w", pady=(0, 12))
+
+    result = {}
+    buttons = ttk.Frame(body)
+    buttons.grid(row=5, column=0, sticky="e")
+
+    def accept():
+        result["size"] = labels.get(size_var.get(), recommended)
+        result["region"] = region_labels.get(region_var.get(), "")
+        window.destroy()
+
+    ttk.Button(buttons, text=t("Cancel"), command=window.destroy).pack(
+        side="right", padx=(6, 0))
+    ttk.Button(buttons, text=t("Create"), command=accept).pack(side="right")
+
+    window.grab_set()
+    app.root.wait_window(window)
+    if not result.get("region"):
+        return None
+    return result["size"], result["region"]
 
 
 def _voice_host_name(app) -> str:
@@ -1542,9 +1630,6 @@ def _voice_host_name(app) -> str:
     return cleaned[:24]
 
 
-def _voice_host_region(app) -> str:
-    """Where to put it. The relay picks when this is blank."""
-    return ""
 
 
 def _percent(value: float) -> str:

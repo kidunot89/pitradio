@@ -107,9 +107,15 @@ class HostApi:
     def hosts(self) -> Reply:
         return _http(f"{self.base}/hosts", token=self.token, opener=self._opener)
 
-    def create(self, name: str, region: str) -> Reply:
+    def options(self) -> Reply:
+        """Sizes and regions this account can use, and what we suggest."""
+        return _http(f"{self.base}/hosts/options", token=self.token,
+                     opener=self._opener)
+
+    def create(self, name: str, region: str, size: str = "") -> Reply:
         return _http(f"{self.base}/hosts", method="POST", token=self.token,
-                     payload={"name": name, "region": region}, opener=self._opener)
+                     payload={"name": name, "region": region, "size": size},
+                     opener=self._opener)
 
     def act(self, host_id: str, action: str) -> Reply:
         return _http(f"{self.base}/hosts/{host_id}/{action}", method="POST",
