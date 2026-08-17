@@ -29,6 +29,7 @@ import logging
 from dataclasses import dataclass, field
 
 from pitradio.engineer import spotter
+from pitradio.plugins import base
 
 log = logging.getLogger(__name__)
 
@@ -107,9 +108,13 @@ class Runner:
         self.notifications = list(notifications or [])
         #: (notification id, call key) -> when it was last said.
         self._said: dict[tuple[str, str], float] = {}
+        #: Behaviours already reported as unsupported, so the log says it once
+        #: per session rather than ten times a second.
+        self._unsupported: set[str] = set()
 
     def reset(self) -> None:
         self._said.clear()
+        self._unsupported.clear()
         for notification in self.notifications:
             try:
                 notification.reset()
@@ -126,16 +131,30 @@ class Runner:
             return False
         return now - stamp >= repeat
 
-    def run(self, context, now: float, settings) -> list[Call]:
+    def run(self, context, now: float, settings, provided=None) -> list[Call]:
         """Every call that should go out this tick, in order.
 
         `settings` answers `enabled(id)` and `repeat(id)`, so the runner does
         not have to know what a config looks like — which is what lets a
         routine supply its own without inventing a config section.
+
+        `provided` is what the current sim can actually supply. A behaviour
+        needing something absent is skipped **and said so once**, because the
+        alternative is a tick-box that is on, looks fine and is permanently
+        silent — which is indistinguishable from a bug, and is how somebody
+        ends up filing one.
         """
         due: list[Call] = []
         for notification in self.notifications:
             if not settings.enabled(notification.id):
+                continue
+            if not notification.supported(provided):
+                if notification.id not in self._unsupported:
+                    self._unsupported.add(notification.id)
+                    log.info(
+                        "%s is on but this sim does not publish %s; it will "
+                        "stay quiet", notification.name,
+                        ", ".join(sorted(set(notification.requires) - set(provided or ()))))
                 continue
             try:
                 calls = notification.check(context)
@@ -177,6 +196,11 @@ class SpotterNotification(Notification):
     default_repeat = 3.0
     default_enabled = False
     repeat_help = "how often it repeats while a car is still there"
+    # Every car's world position. A sim that only says how far round the lap
+    # each car is — iRacing — cannot answer "who is beside me" from that, and
+    # guessing from lap distance alone would put cars on the wrong side of the
+    # track on any circuit that doubles back.
+    requires = (base.PROVIDES_POSITIONS,)
 
     def __init__(self) -> None:
         self._previous: tuple[float, float, float] | None = None
@@ -201,7 +225,13 @@ class SpotterNotification(Notification):
                   for name, position in context.session.positions().items()
                   if name != own.driver}
         neighbours = spotter.alongside(
-            own.position, facing, others, swap=context.swap_sides)
+            own.position, facing, others,
+            # Per-sim, from the plugin's settings: a prototype and a GT car are
+            # different lengths, and sims disagree about where a car's origin
+            # sits, so a number that suits one game is wrong in the next.
+            metres=context.alongside_metres,
+            width=context.width_metres,
+            swap=context.swap_sides)
 
         now = spotter.occupied(neighbours)
         changes = spotter.calls(now, self._sides)
@@ -231,6 +261,7 @@ class LapTimeNotification(Notification):
     description = "Reads your lap out at the line, and says when it was your best."
     default_repeat = 0.0
     repeat_help = "a lap time does not become more true; leave this at 0"
+    requires = (base.PROVIDES_LAPS,)
 
     def check(self, context) -> list[Call]:
         finished = context.finished_lap
@@ -259,6 +290,7 @@ class FastestLapNotification(Notification):
                    "what it was.")
     default_repeat = 0.0
     repeat_help = "each new fastest lap is said once"
+    requires = (base.PROVIDES_LAPS,)
 
     def __init__(self) -> None:
         self._holder = ""
@@ -305,6 +337,7 @@ class FastestSectorNotification(Notification):
     default_repeat = 0.0
     default_enabled = False
     repeat_help = "each new fastest sector is said once"
+    requires = (base.PROVIDES_SECTORS,)
 
     def __init__(self) -> None:
         self._seen: set[int] = set()
@@ -348,6 +381,7 @@ class SectorPerformanceNotification(Notification):
     default_repeat = 0.0
     default_enabled = False
     repeat_help = "each sector is judged once, as you leave it"
+    requires = (base.PROVIDES_SECTORS,)
 
     def check(self, context) -> list[Call]:
         own = context.own_car()

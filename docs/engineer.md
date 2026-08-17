@@ -287,3 +287,55 @@ the problem.
 send, the log line says `that was for the engineer` along with what it matched —
 please open an issue with that line, because the matcher being too eager is the
 one bug in this feature that costs something real.
+
+---
+
+## Checking what your sim is actually sending
+
+Most "the engineer says nothing" problems are not the engineer. Start the game,
+get **on track and moving**, then:
+
+```bash
+python -m pitradio --telemetry
+```
+
+It prints every car as the engineer sees it — lap distance, speed, lap count,
+sector, lap times, pit flag, world position — and, more usefully, compares
+consecutive reads and tells you whether anything is changing.
+
+That last part matters more than it sounds. A sim that is paused or sitting in
+a menu keeps publishing a block that looks completely healthy: cars, positions,
+speeds, all plausible. Nothing moves, so the engineer has nothing to say, and
+no single snapshot shows that. If it reports
+
+> Nothing changed across 4 reads, including the sim's own clock.
+
+then the game is paused, in a menu, or the session has ended — not broken.
+
+What to look for when it *is* live:
+
+| Column | Feeds |
+| --- | --- |
+| `lapdist`, `speed` | the trainers, and corner detection |
+| `lap`, `last lap`, `best lap` | lap time and fastest lap calls |
+| `sec` — changes three times a lap | every sector call |
+| `world x/y/z` — different per car | the spotter |
+
+The `provides:` line at the top says which of those the plugin claims to
+supply. A behaviour that needs something absent is skipped rather than left
+switched on and silent, and the log says which capability is missing.
+
+## Per-sim settings
+
+Three of the engineer's numbers live on the **profile**, under the game's
+plugin settings, not on the Engineer tab — because they describe the game
+rather than your taste:
+
+- **Swap spotter sides** — if "left" means a car on your right
+- **Spotter overlap (metres)** — how far apart along the track still counts as
+  side by side. A Hypercar is about 5m long
+- **Spotter width (metres)** — how far to the side counts, before they are
+  simply on another part of the circuit
+
+Car lengths and axis conventions differ between sims, so a number that suits
+one game is wrong in the next.

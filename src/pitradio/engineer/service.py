@@ -36,6 +36,7 @@ from pitradio.engineer import (
     routines,
     sectors,
     speaking,
+    spotter,
     tts,
 )
 from pitradio.plugins.base import SessionInfo, Standings
@@ -339,32 +340,61 @@ class EngineerService:
             plugin_id, current = self.plugins.any_telemetry()
         standings = (self.plugins.standings_for(plugin_id)
                      if self.plugins is not None and plugin_id else None)
-        context = routines.Context(
+        return self._context_for(current, plugin_id, standings)
+
+    def _context_for(self, session, plugin_id, standings, **extra) -> routines.Context:
+        """One place that builds a Context, so every field is set the same way.
+
+        There were two, and they had already drifted: the spotter's range and
+        width were read in one and defaulted in the other, so the same car
+        counted as alongside or not depending on which path built the tick.
+        """
+        settings = self._plugin_settings(plugin_id)
+        return routines.Context(
             script=self.script, book=self.book, sectors=self.sectors,
-            session=current, standings=standings or Standings(),
-            swap_sides=self._swap_sides(plugin_id),
+            session=session, standings=standings or Standings(),
+            swap_sides=bool(settings.get("spotter_swap_sides")),
+            alongside_metres=float(
+                settings.get("spotter_metres") or spotter.DEFAULT_ALONGSIDE_METRES),
+            width_metres=float(
+                settings.get("spotter_width_metres") or spotter.DEFAULT_WIDTH_METRES),
             threshold=float(self.config.coach_threshold),
             sector_threshold=float(self.config.sector_threshold),
-            say=self.say)
-        return context
+            say=self.say, **extra)
 
-    def _swap_sides(self, plugin_id: str) -> bool:
-        """Whether this sim's axes need the spotter's sides flipped.
+    def _plugin_settings(self, plugin_id: str) -> dict:
+        """This sim's plugin settings, with the profile's overrides applied.
 
-        Per-sim, so it lives on the plugin's settings rather than in the
-        engineer's config — see `engineer/spotter.py` for why it is a setting
-        at all.
+        The engineer's per-sim knobs live here rather than in its own config
+        because they describe the *game*, not the driver: which way round the
+        axes are, and how long the cars are. Swallows everything — a sim that
+        has just closed must cost the override, not the tick.
         """
         if not plugin_id or self.plugins is None:
-            return False
+            return {}
         try:
-            settings = self.plugins.settings_for(
+            return self.plugins.settings_for(
                 plugin_id,
                 self.store.config.profile_for_plugin(plugin_id).plugin_settings)
         except Exception:
-            log.debug("could not read the plugin's spotter setting", exc_info=True)
-            return False
-        return bool(settings.get("spotter_swap_sides"))
+            log.debug("could not read the plugin's engineer settings", exc_info=True)
+            return {}
+
+    def _provides(self, plugin_id: str) -> frozenset[str] | None:
+        """What this sim can supply, or None for "nobody said".
+
+        None rather than an empty set when there is no plugin at all: empty
+        means "this sim has nothing", which would switch every behaviour off,
+        and that is the wrong answer for a registry that simply has not been
+        asked yet.
+        """
+        if not plugin_id or self.plugins is None:
+            return None
+        try:
+            return self.plugins.provides_for(plugin_id)
+        except Exception:
+            log.debug("could not read what the plugin provides", exc_info=True)
+            return None
 
     # -- the loop ---------------------------------------------------------
 
@@ -390,19 +420,20 @@ class EngineerService:
         self._maybe_new_session(session)
         context = self._observe(session, plugin_id)
         now = self._clock()
+        provided = self._provides(plugin_id)
 
         # The always-on behaviours, then whatever routine is running. Both go
         # through the same runner with the same repeat rules; the only
         # difference is where their settings come from.
         for call in self.behaviours.run(
-            context, now, notifications.Settings.from_config(self.config)
+            context, now, notifications.Settings.from_config(self.config), provided
         ):
             self.say(call.utterance, urgent=call.urgent)
 
         if self.active is None:
             return
         try:
-            for call in self.active.tick(context, now):
+            for call in self.active.tick(context, now, provided):
                 self.say(call.utterance, urgent=call.urgent)
             if self.active.finished():
                 self._stop_active()
@@ -451,15 +482,10 @@ class EngineerService:
                 finished_sectors.append(split)
 
         standings = self.plugins.standings_for(plugin_id) if plugin_id else None
-        return routines.Context(
-            script=self.script, book=self.book, sectors=self.sectors,
-            session=session, standings=standings or Standings(),
+        return self._context_for(
+            session, plugin_id, standings,
             finished_lap=finished_lap,
-            finished_sectors=tuple(finished_sectors),
-            swap_sides=self._swap_sides(plugin_id),
-            threshold=float(self.config.coach_threshold),
-            sector_threshold=float(self.config.sector_threshold),
-            say=self.say)
+            finished_sectors=tuple(finished_sectors))
 
     # -- for the window ----------------------------------------------------
 

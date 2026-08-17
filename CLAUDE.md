@@ -23,6 +23,8 @@ python -m pitradio --check-config    # validate config, resolve every key name
 python -m pitradio --list-devices    # audio devices
 python -m pitradio --gui-only        # window with no hook/audio/model
 python -m pitradio --self-test       # import every component + open a Tk window
+python -m pitradio --telemetry       # what the sim is publishing, for 10s
+python packaging/engineer_demo.py     # hear the engineer against a fake session
 pytest -q                             # test suite (runs on any platform)
 pytest tests/test_updater.py -q       # one file
 pytest -q -k checksum                 # one case
@@ -479,6 +481,29 @@ server, and offline practice is exactly where a coaching routine is most wanted.
 Routines are registered statically in `routines.BUILTIN` for the same reason
 plugins are. Their trigger phrases live on the **config**, not the routine —
 what a routine is called is not the routine.
+
+**A plugin declares what it `provides`, and a behaviour needing something
+absent is skipped and says so once.** Sims differ more than they look: LMU
+hands over every car's world position, iRacing hands over lap-distance
+percentage and has its own left/right field instead, so a spotter can be built
+from one and not the other. A behaviour left switched on and permanently silent
+is indistinguishable from a bug — `Runner.run` logs which capability is missing
+rather than letting that happen. `provides=None` means "nobody said" and is
+read as "everything", so a plugin written before this existed keeps working.
+
+**The spotter's geometry is per-sim**, on the plugin's settings:
+`spotter_swap_sides`, `spotter_metres`, `spotter_width_metres`. Car lengths and
+axis conventions differ per game, so a number that suits one is wrong in the
+next. `service._context_for` is the single place a Context is built — there
+were two, and they had already drifted, so the same car counted as alongside or
+not depending on which path built the tick.
+
+**`--telemetry` is how a sim gets verified.** The failure it exists for is not
+a plugin reading nothing, which is obvious; it is a block that is *published
+but frozen* — the sim connected, every field plausible, and none of it ever
+moving. It compares consecutive reads including the sim's own clock and says
+so. Found on the first real run: five identical snapshots two seconds apart
+with a car sitting at 77 m/s, because LMU was paused.
 
 ## Voice, and what is not in this repository
 

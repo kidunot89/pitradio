@@ -28,7 +28,15 @@ import re
 from dataclasses import dataclass, field
 
 from pitradio import mentions
-from pitradio.engineer import coaching, lines, notifications, phrases, sectors
+from pitradio.engineer import (
+    coaching,
+    lines,
+    notifications,
+    phrases,
+    sectors,
+    spotter,
+)
+from pitradio.plugins import base
 from pitradio.plugins.base import SessionInfo, Standings
 
 log = logging.getLogger(__name__)
@@ -61,8 +69,19 @@ class Context:
     finished_lap: coaching.LapTrace | None = None
     #: Sectors anybody finished on this tick.
     finished_sectors: tuple[sectors.SectorTime, ...] = ()
+    # -- the spotter's geometry, from the sim's own plugin settings --------
+    #
+    # All three are on the profile rather than in the engineer's config,
+    # because they depend on the sim and the cars in it rather than on the
+    # driver's taste. A number that suits one game is wrong in the next.
+
     #: Which side is which, per the sim's axes — see spotter.py.
     swap_sides: bool = False
+    #: How far apart along the track two cars can be and still be alongside.
+    alongside_metres: float = spotter.DEFAULT_ALONGSIDE_METRES
+    #: How far to the side still counts as beside you rather than elsewhere.
+    width_metres: float = spotter.DEFAULT_WIDTH_METRES
+
     #: Corner and sector deltas below this are not worth a call.
     threshold: float = DEFAULT_THRESHOLD
     sector_threshold: float = DEFAULT_THRESHOLD
@@ -253,8 +272,9 @@ class Routine:
         """A line for the Engineer tab, so it is visibly doing something."""
         return ""
 
-    def tick(self, context: Context, now: float) -> list[notifications.Call]:
-        return self.runner.run(context, now, self.settings)
+    def tick(self, context: Context, now: float,
+             provided=None) -> list[notifications.Call]:
+        return self.runner.run(context, now, self.settings, provided)
 
 
 # -- comparing corners against somebody's lap ------------------------------
@@ -276,6 +296,9 @@ class CornerComparison(notifications.Notification):
     id = "corner_comparison"
     name = "Corner comparison"
     description = "Entry and exit deltas against the target's best lap."
+    #: A lap trace is lap distance, speed and lap times per car. Without them
+    #: there is no reference lap and nothing to compare against.
+    requires = (base.PROVIDES_LAPS,)
 
     def __init__(self, sector: int = 0) -> None:
         #: Restrict to one sector, for the sector trainer. Zero is the whole lap.
@@ -370,6 +393,7 @@ class SectorComparison(notifications.Notification):
     id = "sector_comparison"
     name = "Sector comparison"
     description = "Your sector time against the target's best."
+    requires = (base.PROVIDES_SECTORS,)
 
     def __init__(self, sector: int = 0) -> None:
         self.only_sector = sector

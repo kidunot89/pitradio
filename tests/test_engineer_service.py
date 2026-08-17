@@ -19,6 +19,7 @@ import pytest
 
 from pitradio import config as config_mod
 from pitradio.engineer import notifications, service, spotter
+from pitradio.plugins import base
 from pitradio.plugins.base import Car, SessionInfo, Standings
 
 TRACK = 1200.0
@@ -81,6 +82,13 @@ class Plugins:
 
     session: SessionInfo = field(default_factory=SessionInfo)
     standings: Standings = field(default_factory=Standings)
+    #: What this sim claims it can supply. None means "nobody said", which is
+    #: read as "everything" so a plugin written before capabilities existed
+    #: does not silently lose its behaviours.
+    provides: frozenset[str] | None = None
+    #: The profile's plugin settings — where the engineer's per-sim overrides
+    #: live.
+    settings: dict = field(default_factory=dict)
 
     def any_telemetry(self):
         return ("stub", self.session) if self.session.has_data else ("", SessionInfo())
@@ -89,7 +97,10 @@ class Plugins:
         return self.standings
 
     def settings_for(self, plugin_id, stored=None):
-        return dict(stored or {})
+        return {**self.settings, **(stored or {})}
+
+    def provides_for(self, plugin_id):
+        return self.provides
 
 
 class Clock:
@@ -442,13 +453,17 @@ def test_a_new_fastest_sector_is_announced(engineer):
 # -- the spotter ----------------------------------------------------------
 
 
-def alongside(engineer, *, left=False, right=False, distance=10.0):
-    """Put the player on the move with cars beside them, and tick."""
+def alongside(engineer, *, left=False, right=False, distance=10.0, gap=1.0):
+    """Put the player on the move with cars beside them, and tick.
+
+    `gap` is how far up the road the other cars are, which is what the
+    alongside range is measured against.
+    """
     others = []
     if left:
-        others.append(car("Left", position=(-3.0, 0.0, distance + 1.0)))
+        others.append(car("Left", position=(-3.0, 0.0, distance + gap)))
     if right:
-        others.append(car("Right", position=(3.0, 0.0, distance + 1.0)))
+        others.append(car("Right", position=(3.0, 0.0, distance + gap)))
     publish(engineer, car("Me", player=True, position=(0.0, 0.0, distance)),
             *others)
 
@@ -601,6 +616,110 @@ def test_the_engineer_works_offline(engineer):
 
     engineer.handle("begin hot lap trainer")
     assert engineer.active is not None
+
+
+# -- what the sim can and cannot supply -----------------------------------
+
+
+def test_a_behaviour_whose_data_is_missing_is_skipped(engineer):
+    """A tick-box that is on, looks fine and is permanently silent is
+    indistinguishable from a bug — and is how somebody comes to file one.
+
+    iRacing is the real case: it publishes how far round the lap each car is
+    and nothing about where that is in space, so the spotter's geometry cannot
+    be done at all.
+    """
+    engineer.plugins.provides = frozenset({base.PROVIDES_LAPS})
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0)
+    assert engineer.speaker.said == []
+
+
+def test_a_behaviour_whose_data_is_present_still_runs(engineer):
+    engineer.plugins.provides = frozenset({base.PROVIDES_POSITIONS})
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0)
+    assert any("left" in line for line in engineer.speaker.lines())
+
+
+def test_a_plugin_that_says_nothing_keeps_its_behaviours(engineer):
+    """None means "nobody said", not "this sim has nothing".
+
+    A plugin written before capabilities existed would otherwise lose every
+    behaviour the moment the check was added, which is a silent regression for
+    anybody's third-party plugin.
+    """
+    engineer.plugins.provides = None
+    enable(engineer, notifications.LAP_TIME)
+
+    drive_a_lap(engineer, lap_time=83.4)
+    assert "one twenty three point four zero" in engineer.speaker.spoken()
+
+
+def test_the_reason_a_behaviour_is_quiet_is_said_once(engineer, caplog):
+    """Silence nobody can explain is the failure this whole check exists to
+    avoid, so it has to reach the log — and only once, not ten times a
+    second."""
+    engineer.plugins.provides = frozenset()
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    with caplog.at_level("INFO"):
+        for _ in range(5):
+            alongside(engineer, left=True, distance=10.0)
+
+    # Once per behaviour, not once per tick. Other behaviours are unsupported
+    # here too and each says so on its own — that is the point of the wording.
+    said = [line for line in caplog.text.splitlines()
+            if "does not publish" in line and "Spotter" in line]
+    assert len(said) == 1
+    assert "positions" in said[0]
+
+
+# -- per-sim overrides ----------------------------------------------------
+
+
+def test_the_spotter_range_comes_from_the_sim_s_plugin_settings(engineer):
+    """A prototype and a GT car are different lengths, and sims disagree about
+    where a car's origin sits — so the number belongs on the profile."""
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+    # A car 20m up the road is not alongside by default...
+    engineer.plugins.settings = {"spotter_metres": 9}
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0, gap=20.0)
+    assert engineer.speaker.said == []
+
+    # ...but is if this sim is told to count that far.
+    engineer.plugins.settings = {"spotter_metres": 30}
+    engineer.behaviours.reset()
+    alongside(engineer, distance=40.0)
+    alongside(engineer, left=True, distance=50.0, gap=20.0)
+    assert any("left" in line for line in engineer.speaker.lines())
+
+
+def test_swapping_sides_is_a_per_sim_setting(engineer):
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    alongside(engineer, left=True, distance=10.0)
+    normal = engineer.speaker.spoken()
+
+    engineer.plugins.settings = {"spotter_swap_sides": True}
+    engineer.behaviours.reset()
+    engineer.speaker.said.clear()
+    alongside(engineer, distance=40.0)
+    alongside(engineer, left=True, distance=50.0)
+    swapped = engineer.speaker.spoken()
+
+    assert ("left" in normal) != ("left" in swapped)
 
 
 def test_a_new_track_clears_everything(engineer):
