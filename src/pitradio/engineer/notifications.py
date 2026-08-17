@@ -225,11 +225,11 @@ class SpotterNotification(Notification):
         return f"{base.PROVIDES_POSITIONS} or {base.PROVIDES_SPOTTER}"
 
     def __init__(self) -> None:
-        self._previous: tuple[float, float, float] | None = None
+        self._heading = spotter.Heading()
         self._sides: frozenset[str] = frozenset()
 
     def reset(self) -> None:
-        self._previous = None
+        self._heading.reset()
         self._sides = frozenset()
 
     def check(self, context) -> list[Call]:
@@ -284,9 +284,11 @@ class SpotterNotification(Notification):
             # get the handedness of wrong.
             return dict(said)
 
-        previous, self._previous = self._previous, own.position
-        facing = spotter.heading(previous, own.position)
+        facing = self._heading.update(own.position)
         if facing is None:
+            # Not enough ground covered for the axes to mean anything. Saying
+            # nothing is right: a heading guessed from a stationary car turns
+            # the car in front into the car beside.
             return None
 
         others = {name: position

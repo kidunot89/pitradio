@@ -589,6 +589,86 @@ def test_swapping_sides_reverses_the_call():
     assert normal[0].side != swapped[0].side
 
 
+def test_a_car_directly_in_front_is_not_alongside():
+    """Reported from the car: nose-to-tail traffic was being called "car left".
+
+    Alongside means beside you *across* the track. Near enough the same line
+    and one car is simply following the other, however close they are.
+    """
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    assert spotter.alongside(
+        (0.0, 0.0, 10.0), facing, {"Ahead": (0.4, 0.0, 13.0)}) == []
+
+
+def test_a_car_directly_behind_is_not_alongside():
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    assert spotter.alongside(
+        (0.0, 0.0, 10.0), facing, {"Behind": (0.4, 0.0, 7.0)}) == []
+
+
+def test_a_queue_behind_the_car_beside_you_is_still_one_car():
+    """Also reported: "two cars left" when there was one, with another tucked
+    in behind it. The second is not beside you and calling it makes the driver
+    look for something that is not there."""
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    neighbours = spotter.alongside(
+        (0.0, 0.0, 10.0), facing,
+        {"Beside": (-3.0, 0.0, 10.5), "BehindThem": (-3.0, 0.0, 3.0)},
+        holding=frozenset({"left"}))
+
+    assert spotter.counts(neighbours) == {"left": 1}
+    assert spotter.call(neighbours) == "car left"
+
+
+def test_a_held_car_keeps_the_side_called_without_being_counted():
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    neighbours = spotter.alongside(
+        (0.0, 0.0, 10.0), facing, {"Drifted": (-3.0, 0.0, 16.0)},
+        holding=frozenset({"left"}))
+
+    assert neighbours and neighbours[0].overlapping is False
+    assert spotter.counts(neighbours) == {"left": 0}
+
+
+def test_two_genuinely_side_by_side_cars_are_two():
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    neighbours = spotter.alongside(
+        (0.0, 0.0, 10.0), facing,
+        {"Near": (-2.0, 0.0, 10.5), "Wide": (-5.0, 0.0, 9.5)})
+    assert spotter.call(neighbours) == "two cars left"
+
+
+# -- the heading the axes depend on ---------------------------------------
+
+
+def test_a_heading_needs_real_ground_covered():
+    """The fault underneath the other two: through slow traffic consecutive
+    reads are centimetres apart, the direction between them is the sim's own
+    rounding, and a car in front resolves as a car beside."""
+    heading = spotter.Heading()
+    assert heading.update((0.0, 0.0, 0.0)) is None
+    assert heading.update((0.0, 0.0, 0.2)) is None
+    assert heading.update((0.0, 0.0, 0.4)) is None
+
+
+def test_a_heading_settles_once_the_car_has_moved():
+    heading = spotter.Heading()
+    for z in (0.0, 2.0, 4.0, 6.0):
+        facing = heading.update((0.0, 0.0, z))
+    assert facing == pytest.approx((0.0, 1.0))
+
+
+def test_the_last_good_heading_survives_slowing_down():
+    """A car braking to a stop still points the way it was a moment ago, and
+    forgetting that would silence the spotter exactly when traffic is closest."""
+    heading = spotter.Heading()
+    for z in (0.0, 2.0, 4.0, 6.0):
+        heading.update((0.0, 0.0, z))
+    for _ in range(6):
+        facing = heading.update((0.0, 0.0, 6.0))
+    assert facing == pytest.approx((0.0, 1.0))
+
+
 def test_a_car_far_ahead_is_not_alongside():
     facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
     assert spotter.alongside(

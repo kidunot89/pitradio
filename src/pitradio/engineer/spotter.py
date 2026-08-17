@@ -46,12 +46,32 @@ DEFAULT_OVERLAP_METRES = 4.0
 #: How far to the side. Beyond this they are on a different part of the
 #: circuit: an adjacent straight, or the other side of a hairpin, which is
 #: exactly where a naive distance check starts shouting about nobody.
-DEFAULT_WIDTH_METRES = 12.0
+DEFAULT_WIDTH_METRES = 8.0
 
-#: Below this the heading derived from two positions is noise rather than a
-#: direction, so nothing is called at all. A stationary car in the pits would
-#: otherwise have every car on the circuit swinging around it.
-MIN_HEADING_METRES = 0.5
+#: And how far to the side is *far enough* to be a car beside you rather than
+#: one in front of you.
+#:
+#: This was missing, and its absence is what put nose-to-tail traffic on the
+#: door: a car two metres ahead and half a metre offset passed every other
+#: test and came out as "car left". Alongside means two cars occupy the track
+#: *across* its width — near enough the same line and one is simply following
+#: the other, however close they are.
+MIN_LATERAL_METRES = 1.3
+
+#: Below this the heading taken from two positions is noise rather than a
+#: direction.
+#:
+#: Half a metre was far too little, and this is the fault underneath the other
+#: two. Through slow traffic, consecutive reads are centimetres apart and the
+#: direction between them is dominated by the sim's own rounding — so "forward"
+#: swings about, and a car directly ahead is resolved as a car directly beside.
+#: That is why front and rear traffic was being called, and why the calls came
+#: and went at the wrong moments: not the ranges, the axes.
+MIN_HEADING_METRES = 3.0
+
+#: How many recent positions the heading is averaged over. Enough to ride out a
+#: bad sample without lagging round a corner.
+HEADING_SAMPLES = 5
 
 
 @dataclass(frozen=True)
@@ -65,6 +85,12 @@ class Alongside:
     lateral: float
     #: Metres ahead (positive) or behind (negative) along the heading.
     longitudinal: float
+    #: Whether the bodywork actually overlaps, rather than this being a car
+    #: kept in view by the wider holding range. **Only overlapping cars are
+    #: counted**: a car tucked in behind the one beside you is one car on that
+    #: side, not two, and calling "two cars left" for it is worse than saying
+    #: nothing because the driver looks for something that is not there.
+    overlapping: bool = True
 
 
 def _flat(point) -> tuple[float, float]:
@@ -76,6 +102,54 @@ def _flat(point) -> tuple[float, float]:
     """
     x, _y, z = point
     return float(x), float(z)
+
+
+class Heading:
+    """Which way the car is pointing, from where it has recently been.
+
+    A running window rather than the last two positions. Two consecutive reads
+    are only centimetres apart in slow traffic, and a direction taken from them
+    is mostly the sim's rounding — which rotates the whole frame of reference
+    and turns the car in front into the car beside. Averaging over a window and
+    refusing to answer until the car has actually covered some ground makes the
+    axes trustworthy, and everything downstream depends on them being so.
+    """
+
+    def __init__(self, samples: int = HEADING_SAMPLES,
+                 minimum: float = MIN_HEADING_METRES) -> None:
+        self._positions: list[tuple[float, float]] = []
+        self._samples = max(2, samples)
+        self._minimum = minimum
+        self._last: tuple[float, float] | None = None
+
+    def reset(self) -> None:
+        self._positions.clear()
+        self._last = None
+
+    def update(self, position) -> tuple[float, float] | None:
+        """Record where the car is now and return the heading, or None.
+
+        None means "cannot say yet", which callers read as "make no calls" —
+        the honest answer while stationary or just after a reset.
+        """
+        if position is None:
+            return self._last
+        self._positions.append(_flat(position))
+        if len(self._positions) > self._samples:
+            self._positions.pop(0)
+
+        oldest, newest = self._positions[0], self._positions[-1]
+        dx, dz = newest[0] - oldest[0], newest[1] - oldest[1]
+        if math.hypot(dx, dz) < self._minimum:
+            # Not enough baseline for the direction to mean anything. The last
+            # good heading is kept rather than dropped: a car slowing to a stop
+            # is still pointing the way it was a moment ago, and forgetting
+            # that would silence the spotter exactly when traffic is closest.
+            return self._last
+
+        length = math.hypot(dx, dz)
+        self._last = (dx / length, dz / length)
+        return self._last
 
 
 def heading(previous, current) -> tuple[float, float] | None:
@@ -124,12 +198,16 @@ def alongside(
     `others` is driver name -> world position, which is exactly what
     `SessionInfo.positions()` already returns for proximity voice.
 
-    **Two ranges, not one.** A car has to come within `overlap` before it
-    counts as alongside at all; once a side is `holding` a call, cars stay
-    counted out to `metres`. Announcing at the outer range calls somebody the
-    driver cannot yet see beside them, and dropping at the inner one makes the
-    call flicker as two cars breathe. `holding` is the set of sides currently
-    being called, which is what the notification already tracks.
+    **A car is alongside when it is beside you across the track**, not merely
+    near you. Three tests, and the middle one was missing until traffic proved
+    it: far enough to the side to be a different line (`MIN_LATERAL_METRES`),
+    not so far as to be elsewhere on the circuit (`width`), and overlapping
+    along the road (`overlap`).
+
+    Cars out to `metres` are still returned while their side is `holding` a
+    call, marked `overlapping=False`. They keep the call alive so it does not
+    flicker as two cars breathe — but they are **not counted**, because a car
+    tucked in behind the one beside you is one car on that side, not two.
     """
     if facing is None:
         return []
@@ -140,18 +218,18 @@ def alongside(
         if not driver:
             continue
         along, across = offsets(mine, facing, position)
-        if abs(across) > width:
+        sideways = abs(across)
+
+        # Beside you, not in front of you and not on another part of the track.
+        if sideways < MIN_LATERAL_METRES or sideways > width:
             continue
+
         side = RIGHT if (across > 0) != swap else LEFT
-        reach = metres if side in held else min(overlap, metres)
-        if abs(along) > reach:
+        overlapping = abs(along) <= overlap
+        if not overlapping and not (side in held and abs(along) <= metres):
             continue
-        if abs(across) < 0.5:
-            # Directly in front or behind at overlapping distance means the
-            # positions came from different moments, not that somebody is
-            # inside the car. Nothing useful can be said about it.
-            continue
-        found.append(Alongside(driver, side, abs(across), along))
+
+        found.append(Alongside(driver, side, sideways, along, overlapping))
 
     found.sort(key=lambda car: abs(car.lateral))
     return found
@@ -166,6 +244,8 @@ def call(neighbours: list[Alongside]) -> str | None:
     """
     if not neighbours:
         return None
+    beside = [car for car in neighbours if car.overlapping] or neighbours
+    neighbours = beside
     sides = {car.side for car in neighbours}
     if len(sides) > 1:
         # Cars on both sides is the one call that is about *you* rather than
@@ -308,6 +388,11 @@ def counts(neighbours: list[Alongside]) -> dict[str, int]:
     """
     tally: dict[str, int] = {}
     for car in neighbours:
+        if not car.overlapping:
+            # Held in view by the wider range, so the side stays called — but
+            # it is not a second car beside you and must not be counted as one.
+            tally.setdefault(car.side, 0)
+            continue
         tally[car.side] = tally.get(car.side, 0) + 1
     return tally
 
@@ -316,6 +401,7 @@ def warning(side: str, count: int) -> str:
     """The standing call for a side that still has somebody on it.
 
     What the repeat timer re-says. Counts them, because two cars stacked down
-    one side is a different problem from one.
+    one side is a different problem from one — but only cars actually beside
+    you count, so a queue forming behind the one on your door stays "car left".
     """
     return f"two cars {side}" if count > 1 else f"car {side}"
