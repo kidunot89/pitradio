@@ -38,6 +38,10 @@ PLAY_QUEUE = 16
 #: for a minute is being restarted or replaced, and hammering it helps nobody.
 BACKOFF = (1.0, 2.0, 5.0, 10.0, 30.0)
 
+#: How long an assignment from the coordinator is trusted before asking
+#: again. A session changes relay about once, so this is housekeeping.
+ASSIGNMENT_TTL = 60.0
+
 #: How long a receive may block before the loop checks whether it should stop.
 #: Short enough that quitting feels immediate, long enough not to spin.
 RECV_TIMEOUT = 0.5
@@ -263,6 +267,8 @@ class VoiceService:
         self.store = store
         self.plugins = plugins
         self.playback = Playback(lambda: self.store.config, play=play)
+        # (session key, relay url, when we were told) — see _assigned_relay.
+        self._assignment: tuple[str, str, float] = ("", "", 0.0)
         self.client = RelayClient(
             self._on_clip, connect=connect, room=self._room)
 
@@ -280,13 +286,52 @@ class VoiceService:
     # -- what the client asks it ------------------------------------------
 
     def _room(self) -> str | None:
+        """Which room, on the relay the **coordinator** names for this session.
+
+        The client does not choose. Two racers in one session choosing
+        separately — one with a host of their own, one without — land in the
+        same room on different servers, hear silence, and nothing anywhere
+        reports a fault. So the coordinator answers, every member gets the same
+        answer, and this asks rather than decides.
+
+        Falling back to the configured relay when the coordinator cannot be
+        reached is deliberate: a moment of trouble at the coordinator should
+        not silence a session that is already talking.
+        """
         cfg = self.store.config
         # Neither sending nor listening: there is no reason to hold a socket
         # open to a room, and being in one you cannot hear is worse than not.
         if not (cfg.voice.enabled or cfg.voice.playback):
             return None
         _plugin_id, session = self.plugins.any_session()
-        return room_url(cfg.voice.effective_relay(), session.key)
+        if not session.key:
+            return None
+
+        assigned = self._assigned_relay(session.key)
+        return room_url(assigned or cfg.voice.relay, session.key)
+
+    def _assigned_relay(self, session_key: str) -> str:
+        """Ask the coordinator which relay carries this session. "" if it will not say.
+
+        Cached for as long as the answer is stable, because this runs on the
+        connection loop and the answer changes about once a session.
+        """
+        cached_key, cached_url, cached_at = self._assignment
+        if cached_key == session_key and (_now() - cached_at) < ASSIGNMENT_TTL:
+            return cached_url
+
+        from pitradio import hostapi
+
+        cfg = self.store.config
+        api = hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)
+        if not api.configured:
+            return ""
+
+        reply = api.room_relay(session_key, cfg.voice.host_id)
+        url = str(reply.body.get("url") or "") if reply.ok else ""
+        if url:
+            self._assignment = (session_key, url, _now())
+        return url
 
     def _on_clip(self, clip) -> None:
         cfg = self.store.config

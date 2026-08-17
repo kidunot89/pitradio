@@ -1283,7 +1283,9 @@ def _voice_api(app):
     from pitradio import hostapi
 
     cfg = app.store.config
-    return hostapi.HostApi(cfg.voice.effective_relay(), cfg.voice.host_token)
+    # Always the coordinator, never a racer's own host: the host API lives
+    # there, and so does the decision about which relay a session uses.
+    return hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)
 
 
 def _on_main(app, work) -> None:

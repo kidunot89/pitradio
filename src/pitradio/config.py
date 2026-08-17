@@ -179,15 +179,15 @@ class VoiceConfig:
     #: field for it invites people to type something that will not work, and
     #: publishes the base host's address into a public application.
     relay: str = field(default_factory=endpoints.default_relay)
-    #: A host this racer provisioned for themselves, which takes precedence.
-    #: Also never shown: the window offers a lifecycle — create it, reset it,
-    #: stop it, destroy it — and an address is not part of that.
-    host_url: str = ""
     #: Credential for managing that host. Worth nothing anywhere but the
     #: relay, and specifically not a DigitalOcean token — the server holds
     #: that, because an app which self-elevates to administrator is a poor
     #: place for something that can spend money.
     host_token: str = ""
+    #: The host this install provisioned, offered to the coordinator so a
+    #: session it is in can be put on it. Which relay is actually used is
+    #: never decided here — see net.VoiceService._room.
+    host_id: str = ""
     #: Play what other people send. Separate from `enabled` on purpose — muting
     #: the session while still being heard is a normal thing to want mid-stint,
     #: and it is the first thing anyone reaches for.
@@ -202,14 +202,6 @@ class VoiceConfig:
     #: them, which is the right default — it is what is on their timing screen.
     display_name: str = ""
 
-    def effective_relay(self) -> str:
-        """Where this install actually connects.
-
-        A racer's own host wins over the base one. Everything that opens a
-        socket goes through here, so there is one answer to "which relay am I
-        on" rather than two places that can disagree.
-        """
-        return (self.host_url or self.relay or "").strip()
 
 
 @dataclass
@@ -342,7 +334,7 @@ class Config:
         possible moment — the first time somebody presses the button in a race.
         """
         problems: list[str] = []
-        relay = self.voice.effective_relay()
+        relay = (self.voice.relay or "").strip()
 
         if not relay:
             # Only a problem if you are trying to use it. A source build ships

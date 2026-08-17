@@ -471,9 +471,19 @@ def test_the_window_never_shows_a_relay_address():
     assert "v_voice_relay" not in source, (
         "the Voice tab has a relay entry again; the address must not be shown"
     )
-    assert "cfg.voice.relay" not in source and "voice.host_url" not in source, (
-        "the window reads a relay address directly; go through "
-        "effective_relay() and never render it"
+    assert "host_url" not in source, (
+        "the window is choosing a relay locally again. Two racers in one "
+        "session choosing separately land in the same room on different "
+        "servers and both hear silence — the coordinator decides, and the "
+        "client asks."
+    )
+
+    # Reading it to *address* the coordinator is fine; putting it on screen is
+    # not. So it may appear once, in the helper that builds the API client.
+    uses = [line.strip() for line in source.splitlines() if "voice.relay" in line]
+    assert uses == ["return hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)"], (
+        f"the relay address is read somewhere new: {uses}. It addresses the "
+        f"coordinator and is never rendered."
     )
 
 

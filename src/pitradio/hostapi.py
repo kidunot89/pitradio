@@ -107,6 +107,12 @@ class HostApi:
     def hosts(self) -> Reply:
         return _http(f"{self.base}/hosts", token=self.token, opener=self._opener)
 
+    def room_relay(self, session_key: str, host_id: str = "") -> Reply:
+        """Which relay carries this session. The client never decides."""
+        return _http(f"{self.base}/rooms/{session_key}/relay", method="POST",
+                     token=self.token, payload={"host_id": host_id},
+                     opener=self._opener)
+
     def options(self) -> Reply:
         """Sizes and regions this account can use, and what we suggest."""
         return _http(f"{self.base}/hosts/options", token=self.token,
