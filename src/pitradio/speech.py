@@ -46,13 +46,46 @@ def _sd():
     return sounddevice
 
 
+def device_label(index: int, name: str, channels: int, api: str = "") -> str:
+    """How one device is named in a picker.
+
+    **The index leads, and that is the point.** Windows lists the same physical
+    device once per host API — MME, DirectSound, WASAPI, WDM-KS — under the
+    same name, so a machine with one headset shows four identical rows:
+
+        Speakers (PRO X 2 LIGHTSPEED) (2ch)
+        Speakers (PRO X 2 LIGHTSPEED) (2ch)
+        ...
+
+    A picker that maps the chosen *text* back to a device then resolves every
+    one of them to the first, so choosing the third silently selects the first
+    and the sound comes out somewhere the user did not pick. That is not a
+    hypothetical: it is what sent the engineer into a Steam virtual microphone
+    on the machine this was written on, with everything looking correct.
+    """
+    detail = f"{channels}ch, {api}" if api else f"{channels}ch"
+    return f"[{index}] {name} ({detail})"
+
+
 def list_devices(kind: str = "input") -> list[tuple[int, str]]:
-    """(index, label) for every device with channels of the requested kind."""
+    """(index, label) for every device with channels of the requested kind.
+
+    Labels are unique, because a caller has to be able to get back from one to
+    the device the user actually pointed at. See `device_label`.
+    """
     try:
         sd = _sd()
         field = "max_input_channels" if kind == "input" else "max_output_channels"
+        apis = {}
+        try:
+            apis = {index: api["name"]
+                    for index, api in enumerate(sd.query_hostapis())}
+        except Exception:
+            # Costs the host API in the label, not the label itself.
+            log.debug("could not enumerate host APIs", exc_info=True)
         return [
-            (index, f"{info['name']} ({info[field]}ch)")
+            (index, device_label(index, info["name"], info[field],
+                                 apis.get(info.get("hostapi"), "")))
             for index, info in enumerate(sd.query_devices())
             if info[field] > 0
         ]
@@ -61,17 +94,52 @@ def list_devices(kind: str = "input") -> list[tuple[int, str]]:
         return []
 
 
+def device_name(index: int, kind: str = "output") -> str:
+    """The bare name of a device, for storing a choice by.
+
+    **Names are stored, not indices.** Windows renumbers audio devices whenever
+    the set of them changes — a headset powering off, Steam starting, an HDMI
+    display waking — so an index saved on Tuesday points at a different device
+    on Wednesday. Nothing errors: the sound simply comes out somewhere else,
+    which is indistinguishable from the feature being broken. That is exactly
+    how the engineer ended up talking into a Steam virtual microphone.
+    """
+    try:
+        info = _sd().query_devices(index)
+        return str(info["name"])
+    except Exception:
+        log.debug("could not name device %r", index, exc_info=True)
+        return ""
+
+
 def resolve_device(spec: Any, kind: str = "input") -> Any:
-    """Accept an index, a substring of the device name, or None for default."""
+    """A device index for a stored choice, or None for the system default.
+
+    Accepts a name (what is stored now), an index (what older configs hold),
+    or None. A name that no longer matches anything falls back to the default
+    and **says so**, because a device that has been unplugged is the other way
+    this goes quiet without explanation.
+    """
     if spec is None or spec == "":
         return None
-    if isinstance(spec, int):
+
+    devices = list_devices(kind)
+    if isinstance(spec, int) and not isinstance(spec, bool):
+        # An index from a config written before names were stored. Honoured,
+        # but it means whatever it means today.
         return spec
-    needle = str(spec).lower()
-    for index, label in list_devices(kind):
+
+    needle = str(spec).strip().lower()
+    for index, _label in devices:
+        if device_name(index, kind).strip().lower() == needle:
+            return index
+    for index, label in devices:
         if needle in label.lower():
             return index
-    log.warning("no %s device matching %r; falling back to the default", kind, spec)
+
+    log.warning("no %s device named %r any more; using the system default. "
+                "Available: %s", kind, spec,
+                ", ".join(label for _i, label in devices) or "(none)")
     return None
 
 
@@ -158,7 +226,7 @@ class Recorder:
 # -- cues ----------------------------------------------------------------
 
 
-def play_cue(cue_cfg, frequency: int) -> None:
+def play_cue(cue_cfg, frequency: int, device: Any = None) -> None:
     """Short sine beep, fire-and-forget.
 
     Played on the same tick recording starts, so a faint tone can land at the
@@ -177,7 +245,7 @@ def play_cue(cue_cfg, frequency: int) -> None:
         fade = max(1, samples // 20)
         wave[:fade] *= np.linspace(0.0, 1.0, fade)
         wave[-fade:] *= np.linspace(1.0, 0.0, fade)
-        sd.play(wave, rate, device=resolve_device(cue_cfg.output_device, "output"))
+        sd.play(wave, rate, device=resolve_device(device, "output"))
     except Exception as exc:
         log.debug("cue playback failed: %s", exc)
 
@@ -216,28 +284,48 @@ def from_pcm16(payload: bytes) -> np.ndarray:
     return (samples.astype(np.float32) / 32767.0).copy()
 
 
-def play_clip(audio: np.ndarray, rate: int, voice_cfg) -> None:
-    """Play a received clip. Blocking, so callers give it its own thread.
+def play_clip(audio: np.ndarray, rate: int, volume: float = 1.0,
+              device: Any = None) -> None:
+    """Play a clip. Blocking, so callers give it its own thread.
 
     Blocking on purpose: two clips played at once are unintelligible, and
     queueing them is what makes a radio a radio. The caller owning the queue is
     what keeps that decision out of here.
+
+    The device is passed in rather than read off a feature's config, because
+    there is one output device for the whole app — see `AudioConfig` for why
+    that stopped being per-feature.
     """
     if audio is None or audio.size == 0:
         return
     try:
         sd = _sd()
-        volume = min(1.0, max(0.0, float(voice_cfg.volume)))
+        level = min(1.0, max(0.0, float(volume)))
         sd.play(
-            (audio * volume).astype(np.float32),
+            (audio * level).astype(np.float32),
             int(rate) or 16000,
-            device=resolve_device(voice_cfg.output_device, "output"),
+            device=resolve_device(device, "output"),
         )
         sd.wait()
     except Exception as exc:
         # A missing or busy output device must not end the playback thread;
         # the next clip may well work.
         log.debug("clip playback failed: %s", exc)
+
+
+def stop_playback() -> None:
+    """Cut whatever is playing, now.
+
+    For one case only: a warning that arrives while something less urgent is
+    still talking. A spotter call is about a car that is beside you *at this
+    moment*, and waiting politely for a lap time to finish reading is how it
+    arrives after the corner — which is worse than not making it, because the
+    driver acts on it late.
+    """
+    try:
+        _sd().stop()
+    except Exception as exc:
+        log.debug("could not stop playback: %s", exc)
 
 
 # -- transcription -------------------------------------------------------

@@ -376,15 +376,18 @@ class Playback:
                 continue
 
             try:
-                self._play(clip, self._config().voice)
+                self._play(clip, self._config())
             except Exception:
                 log.exception("playing a clip failed")
 
 
-def _play_clip(clip, voice_cfg) -> None:
+def _play_clip(clip, cfg) -> None:
     from pitradio import speech
 
-    speech.play_clip(speech.from_pcm16(clip.audio), clip.rate, voice_cfg)
+    # The whole config, not just the voice section: how loud is voice chat's
+    # business and where it comes out is the app's, set once on the Audio tab.
+    speech.play_clip(speech.from_pcm16(clip.audio), clip.rate,
+                     cfg.voice.volume, cfg.audio.output_device)
 
 
 def _now() -> float:

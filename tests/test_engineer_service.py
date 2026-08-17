@@ -43,6 +43,7 @@ class Speaker:
         self.urgent: list[list[str]] = []
         self.cleared = 0
         self.settings = None
+        self.primed = []
 
     def start(self):
         pass
@@ -52,6 +53,9 @@ class Speaker:
 
     def configure(self, settings):
         self.settings = settings
+
+    def prime(self, phrases):
+        self.primed = list(phrases)
 
     def say(self, utterance, *, urgent=False):
         self.said.append(list(utterance))
@@ -188,11 +192,19 @@ def test_the_name_is_what_it_answers_to(engineer):
     assert engineer.handle("Chief") is False              # renamed, so not it
 
 
-def test_the_persona_supplies_the_name_when_none_is_set(engineer):
-    engineer.store.config.engineer.persona = "ada"
+def test_there_is_a_name_even_when_it_is_cleared(engineer):
+    """The name is how a command is addressed, so an empty one would silently
+    narrow the engineer to its bare phrases."""
     engineer.store.config.engineer.name = ""
-    assert engineer.display_name() == "Ada"
-    assert engineer.handle("Ada") is True
+    assert engineer.display_name() == "Chief"
+    assert engineer.handle("Chief") is True
+
+
+def test_the_spotter_phrases_are_rendered_up_front(engineer):
+    """The first "car left" of a session is the one that would otherwise pay
+    for a synthesiser while somebody is already alongside."""
+    engineer.refresh_voice(force=True)
+    assert any("car left" in phrase for phrase in engineer.speaker.primed)
 
 
 def test_a_disabled_routine_stops_answering(engineer):

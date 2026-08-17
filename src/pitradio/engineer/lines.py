@@ -46,10 +46,9 @@ _TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
 
 @dataclass
 class Script:
-    """The engineer's words. One per configured language and persona.
+    """The engineer's words. One per configured language.
 
-    `terse` is what separates one built-in engineer from another beyond the
-    voice itself: the same information, with or without the lead-in. Some
+    `terse` drops the lead-in: the same information, with or without it. Some
     people want "exit, two tenths" and some want a sentence, and it is not a
     difference worth two sets of translations — the terse form is a subset of
     the same fragments.
@@ -213,8 +212,24 @@ class Script:
                 else self.t("you had a better entry"))
         return [turn, half, gap]
 
+    def urgent_phrases(self) -> list[str]:
+        """Everything the spotter can say, for pre-rendering.
+
+        A short fixed set, and the only calls whose entire value is being on
+        time. Rendered up front so the first "car left" of a session does not
+        pay for a synthesiser while somebody is already alongside — see
+        `speaking.Speaker.prime`.
+        """
+        return [
+            self.t("car left"), self.t("car right"),
+            self.t("two cars left"), self.t("two cars right"),
+            self.t("three wide"), self.t("four wide"),
+            self.t("clear left"), self.t("clear right"), self.t("clear"),
+            self.t("car stopped ahead"), self.t("slower car ahead"),
+        ]
+
     def spotter_call(self, call: str) -> Utterance:
-        """Left, right, both, or one of them going clear.
+        """Left, right, both, a hazard ahead, or a side going clear.
 
         Looked up rather than passed through, so every one of these is a
         literal the string extractor can find. `spotter` returns the English
@@ -225,10 +240,13 @@ class Script:
             "car right": self.t("car right"),
             "two cars left": self.t("two cars left"),
             "two cars right": self.t("two cars right"),
-            "cars both sides": self.t("cars both sides"),
+            "three wide": self.t("three wide"),
+            "four wide": self.t("four wide"),
             "clear left": self.t("clear left"),
             "clear right": self.t("clear right"),
             "clear": self.t("clear"),
+            "car stopped ahead": self.t("car stopped ahead"),
+            "slower car ahead": self.t("slower car ahead"),
         }
         return [spoken.get(call, call)]
 
@@ -309,7 +327,8 @@ FIXED_LINES = (
     "you were faster on the exit", "you had a better entry",
     "faster exit", "better entry", "yours",
     "radio check", "car left", "car right", "two cars left", "two cars right",
-    "cars both sides", "clear", "clear left", "clear right",
+    "three wide", "four wide", "clear", "clear left", "clear right",
+    "car stopped ahead", "slower car ahead",
     "{routine} running", "{routine} off",
     "sector {number}", "fastest lap of the session", "has the fastest lap",
     "fastest", "has taken", "best", "down", "up", "is ahead by",

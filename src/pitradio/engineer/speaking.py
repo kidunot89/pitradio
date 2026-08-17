@@ -40,6 +40,12 @@ QUEUE_SIZE = 6
 #: How long a call may sit in the queue before it is no longer worth saying.
 MAX_AGE = 6.0
 
+#: And how long an *urgent* one may. Far shorter, because the entire content of
+#: a spotter call is "right now": a car that was alongside two seconds ago has
+#: been passed or been hit, and saying so late is worse than staying quiet —
+#: the driver holds a line for a gap that has already closed or opened.
+URGENT_MAX_AGE = 1.5
+
 #: Urgency. A spotter call about a car alongside cannot wait behind a comment
 #: about the last corner; everything else is ordinary.
 URGENT, NORMAL = 0, 1
@@ -179,10 +185,11 @@ def join(clips: list[tuple[np.ndarray, int]]) -> tuple[np.ndarray, int]:
 class Speaker(threading.Thread):
     """The engineer's mouth: a queue, a resolver, and an output device.
 
-    `config` is a callable returning the live `EngineerConfig`, so volume and
-    output device follow the Settings tab without a restart. What the voice
-    *is* comes through `configure` instead, because resolving it asks Windows
-    what is installed and that is not work for this thread's hot path.
+    `config` is a callable returning the live **whole** `Config`: the volume is
+    the engineer's, the output device is the app's, and both follow the window
+    without a restart. What the voice *is* comes through `configure` instead,
+    because resolving it asks Windows what is installed and that is not work
+    for this thread's hot path.
     """
 
     def __init__(self, config, *, host: tts.SapiHost | None = None, play=None):
@@ -229,6 +236,43 @@ class Speaker(threading.Thread):
             self._queue.put_nowait(item)
         except queue.Full:
             log.debug("the engineer is behind; dropped %r", " ".join(words))
+            return
+
+        if urgent:
+            # **Cut whatever is talking.** Jumping the queue is not enough on
+            # its own: the queue is only reached once the current utterance has
+            # finished, and a lap time takes two or three seconds to read. A
+            # warning that waits that long describes a car you have already
+            # gone past. Interrupting a lap time mid-word to say "car left" is
+            # the right trade every time.
+            from pitradio import speech
+
+            speech.stop_playback()
+
+    def prime(self, phrases: list[str]) -> None:
+        """Synthesise these now, so the first time they are needed is free.
+
+        Every phrase is cached after its first use, which is fine for a lap
+        time and useless for a spotter: the first "car left" of a session is
+        the one that costs half a second of synthesis, and it is also the one
+        arriving while somebody is already alongside. Rendering the short fixed
+        set up front moves that cost to startup, where nobody is waiting.
+
+        Runs on the speaking thread's own time and swallows everything — a
+        machine that cannot synthesise has already been logged about once, and
+        priming is an optimisation, not a feature.
+        """
+        settings = self.settings
+        for phrase in phrases:
+            if self._stopping.is_set():
+                return
+            try:
+                if settings.pack is not None and settings.pack.has(phrase):
+                    continue
+                self._host.synthesize(phrase, voice=settings.voice,
+                                      rate=settings.rate)
+            except Exception:
+                log.debug("could not prime %r", phrase, exc_info=True)
 
     def clear(self) -> None:
         """Throw away everything waiting.
@@ -253,7 +297,8 @@ class Speaker(threading.Thread):
                 continue
 
             waited = time.monotonic() - item.queued_at
-            if waited > MAX_AGE:
+            limit = URGENT_MAX_AGE if item.priority == URGENT else MAX_AGE
+            if waited > limit:
                 log.debug("dropped a call that waited %.1fs: %r",
                           waited, " ".join(item.utterance))
                 continue
@@ -302,7 +347,7 @@ class Speaker(threading.Thread):
         self._host.close()
 
 
-def _play(audio: np.ndarray, rate: int, engineer_cfg) -> None:
+def _play(audio: np.ndarray, rate: int, cfg) -> None:
     """Out of the headset, on the configured device.
 
     Goes through the same helper as voice chat and for the same reason: one
@@ -311,4 +356,4 @@ def _play(audio: np.ndarray, rate: int, engineer_cfg) -> None:
     """
     from pitradio import speech
 
-    speech.play_clip(audio, rate, engineer_cfg)
+    speech.play_clip(audio, rate, cfg.engineer.volume, cfg.audio.output_device)

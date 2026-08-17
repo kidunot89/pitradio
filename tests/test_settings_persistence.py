@@ -121,14 +121,14 @@ def test_settings_survive_a_save_from_another_tab(app):
 
 def test_the_engineer_survives_a_restart(app):
     app.v_eng_enabled.set(True)
-    app.v_eng_persona.set("Ada")
     app.v_eng_name.set("Radio")
+    app.v_eng_terse.set(True)
     gui_settings._save_engineer(app)
 
     engineer = reopened(app).engineer
     assert engineer.enabled is True
-    assert engineer.persona == "ada"
     assert engineer.name == "Radio"
+    assert engineer.terse is True
 
 
 def test_a_behaviour_and_its_repeat_timer_survive_a_restart(app):

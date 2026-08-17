@@ -119,6 +119,17 @@ class MentionConfig:
 @dataclass
 class AudioConfig:
     input_device: Any = None          # index, substring of the name, or null
+    #: **Where everything the app plays comes out**: the record and stop cues,
+    #: voice chat, and the engineer.
+    #:
+    #: One setting rather than one per feature, and on the Audio tab rather
+    #: than scattered over three. Sound going to the wrong device is silent by
+    #: nature — nothing raises, nothing logs, you simply hear nothing — so
+    #: three separate pickers meant three chances to get it wrong and three
+    #: places to go looking. That is not hypothetical: the engineer was found
+    #: pointed at a Steam virtual microphone while the cues played on the
+    #: headset, which presents exactly as "the engineer does not work".
+    output_device: Any = None
     samplerate: int = 16000           # what Whisper wants; no resampling needed
     channels: int = 1
     min_clip_seconds: float = 0.3     # below this, don't even transcribe
@@ -148,7 +159,6 @@ class WhisperConfig:
 @dataclass
 class CueConfig:
     enabled: bool = True
-    output_device: Any = None
     start_hz: int = 880
     stop_hz: int = 620
     duration_ms: int = 60
@@ -179,7 +189,6 @@ class VoiceConfig:
     #: the session while still being heard is a normal thing to want mid-stint,
     #: and it is the first thing anyone reaches for.
     playback: bool = True
-    output_device: Any = None
     volume: float = 0.8
     #: Drop a clip that took longer than this to arrive. Racing information goes
     #: stale: a warning about a car alongside is worse than useless once the
@@ -229,31 +238,42 @@ class EngineerConfig:
     app that started talking over the sim on first launch would be a surprise,
     and this one is a surprise with opinions about your driving.
 
-    The voice is resolved in three steps, each overriding the last — a persona
-    picks a sensible installed voice, `voice` pins a specific one, and
-    `voice_pack` replaces the synthesiser entirely with recorded takes. See
-    `engineer/personas.py` and `engineer/packs.py`.
+    **There is one engineer**, and what it sounds like is a *voice pack*: a
+    folder of recorded phrases, which is the only route to something that
+    sounds like a person. Windows' own synthesiser is a fallback for the
+    driver names no pack can contain. See `engineer/packs.py`.
     """
 
     enabled: bool = False
-    #: One of the built-in personas. Sets the default name, voice preference,
-    #: pace and how much it talks.
-    persona: str = "chief"
-    #: What it is called, and therefore what it answers to. Empty follows the
-    #: persona, so picking "Ada" and never touching this gets an engineer
-    #: called Ada.
-    name: str = ""
-    #: A specific Windows speech voice, overriding the persona's preference.
-    #: Empty lets the persona choose from what is installed.
-    voice: str = ""
-    #: A folder under `voices/` in the config directory. Empty means the
-    #: synthesiser. A pack covers the fixed phrases; names and numbers still
-    #: come from the synthesiser — see docs/engineer.md.
+    #: What it is called, and therefore what it answers to.
+    name: str = "Chief"
+
+    # -- what it sounds like ----------------------------------------------
+    #
+    # **The voice is a pack.** A voice pack is a folder of recorded phrases —
+    # see `engineer/packs.py` — and it is the only route to something that
+    # sounds like a person. Windows' own synthesiser is a fallback, not a
+    # choice: it exists so a driver's name, which no pack can contain, still
+    # gets said.
+    #
+    # Because the engineer renders numbers as *words* rather than digits, a
+    # generated pack covers lap times, sector times and deltas as well as the
+    # fixed calls. Names are the only real gap.
+
+    #: A folder under `voices/` in the config directory. Empty means every
+    #: word comes from the synthesiser, which is worth hearing once and not
+    #: worth racing with.
     voice_pack: str = ""
-    #: Windows' own -10..10, on top of the persona's.
+    #: The Windows voice used for anything the pack has never heard — driver
+    #: names, and everything if no pack is installed. Empty lets Windows pick.
+    fallback_voice: str = ""
+    #: Windows' own -10..10, for that fallback voice only.
     rate: int | None = None
+    #: Whether it drops the lead-in: "Tandy, faster exit, two tenths" rather
+    #: than "turn four, Tandy was faster on the exit, two tenths". The same
+    #: information, for people who want different amounts of it.
+    terse: bool = False
     volume: float = 0.9
-    output_device: Any = None
     #: What language it speaks and listens for. Empty follows the transcription
     #: language, which is the right default by some distance: the commands are
     #: spoken into the same microphone Whisper is transcribing, so they arrive
@@ -477,21 +497,10 @@ class Config:
                     f"engineer.notifications[{notification_id!r}].repeat_seconds "
                     f"must be 0 or more; 0 means say it once")
 
-        # A persona that no longer exists falls back rather than failing, but
-        # it is still worth saying — a config carried over from a newer build
-        # is not obviously the reason the voice changed.
-        from pitradio.engineer import personas
-
-        if engineer.persona and engineer.persona not in {p.id for p in personas.BUILTIN}:
-            known = ", ".join(p.id for p in personas.BUILTIN)
+        if engineer.enabled and not engineer.name.strip():
             problems.append(
-                f"engineer.persona is {engineer.persona!r}; expected one of {known}")
-
-        if engineer.enabled and not (engineer.name.strip()
-                                     or personas.by_id(engineer.persona).name):
-            problems.append(
-                "engineer.name is empty and the persona has none, so the "
-                "engineer cannot be addressed by name")
+                "engineer.name is empty, so the engineer cannot be addressed "
+                "by name and only its bare trigger phrases would work")
 
         for routine_id, routine in (engineer.routines or {}).items():
             for field_name in ("phrases", "end_phrases"):

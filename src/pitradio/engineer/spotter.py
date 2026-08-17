@@ -145,7 +145,10 @@ def call(neighbours: list[Alongside]) -> str | None:
         return None
     sides = {car.side for car in neighbours}
     if len(sides) > 1:
-        return "cars both sides"
+        # Cars on both sides is the one call that is about *you* rather than
+        # about them: it means there is nowhere to go, which is a different
+        # instruction from "somebody is on your left".
+        return "three wide" if len(neighbours) <= 2 else "four wide"
     side = neighbours[0].side
     if len(neighbours) > 1:
         return f"two cars {side}"
@@ -190,6 +193,81 @@ def calls(
         elif was and not is_now:
             changed.append((side, f"clear {side}", False))
     return changed
+
+
+#: How far up the road a hazard is worth warning about. Beyond this there is
+#: time to see it; much closer and the call arrives after the impact.
+HAZARD_METRES = 250.0
+
+#: Below this a car is stopped rather than slow — on the racing line, facing
+#: the wrong way, or in the wall.
+STOPPED_SPEED = 4.0
+
+#: And how much slower than you a moving car has to be before it is a hazard
+#: rather than simply someone you are catching. A car forty metres a second
+#: slower is a closing speed no driver expects.
+SLOWER_BY = 20.0
+
+
+@dataclass(frozen=True)
+class Hazard:
+    """Something stationary or much slower on the road ahead."""
+
+    driver: str
+    metres: float
+    stopped: bool
+
+
+def ahead(own, cars, *, track_length: float = 0.0,
+          metres: float = HAZARD_METRES) -> Hazard | None:
+    """The nearest stopped or much slower car in front, or None.
+
+    Measured **along the track**, not through the air. Two cars either side of
+    a hairpin are metres apart in space and half a lap apart on the road, and a
+    spotter that cannot tell those apart cries wolf at every corner.
+
+    Nearest first, because only one call can be made and the near one is the
+    one about to matter.
+    """
+    if own is None:
+        return None
+    mine = float(getattr(own, "lap_dist", 0.0) or 0.0)
+    my_speed = float(getattr(own, "speed", 0.0) or 0.0)
+
+    found: list[Hazard] = []
+    for car in cars or ():
+        name = getattr(car, "driver", "") or ""
+        if not name or name == getattr(own, "driver", ""):
+            continue
+        if getattr(car, "in_pits", False):
+            # A car in its pit box is not on the road, however close the
+            # numbers say it is.
+            continue
+
+        gap = float(getattr(car, "lap_dist", 0.0) or 0.0) - mine
+        if gap < 0 and track_length > 0:
+            # They are round the lap from here, not behind: on a circuit the
+            # car "behind" you is also the car a lap ahead.
+            gap += track_length
+        if not 0.0 < gap <= metres:
+            continue
+
+        speed = float(getattr(car, "speed", 0.0) or 0.0)
+        if speed <= STOPPED_SPEED:
+            found.append(Hazard(name, gap, True))
+        elif my_speed - speed >= SLOWER_BY:
+            found.append(Hazard(name, gap, False))
+
+    if not found:
+        return None
+    return min(found, key=lambda hazard: hazard.metres)
+
+
+def hazard_call(hazard: Hazard | None) -> str | None:
+    """What to say about what is up the road."""
+    if hazard is None:
+        return None
+    return "car stopped ahead" if hazard.stopped else "slower car ahead"
 
 
 def counts(neighbours: list[Alongside]) -> dict[str, int]:

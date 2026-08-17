@@ -255,7 +255,7 @@ def cmd_self_test() -> int:
         "pitradio.engineer.routines", "pitradio.engineer.notifications",
         "pitradio.engineer.coaching", "pitradio.engineer.sectors",
         "pitradio.engineer.lines", "pitradio.engineer.phrases",
-        "pitradio.engineer.packs", "pitradio.engineer.personas",
+        "pitradio.engineer.packs",
         "pitradio.engineer.speaking", "pitradio.engineer.spotter",
         "pitradio.engineer.tts",
     ]

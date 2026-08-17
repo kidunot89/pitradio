@@ -135,7 +135,7 @@ class Worker(threading.Thread):
         self.state.set_status(state_mod.STATUS_RECORDING)
 
         started = time.perf_counter()
-        speech.play_cue(cfg.cues, cfg.cues.start_hz)
+        speech.play_cue(cfg.cues, cfg.cues.start_hz, cfg.audio.output_device)
         self.recorder.start(cfg.audio)
 
         inject.send_keys(profile.pre_keys, profile.key_hold_ms, profile.key_gap_ms)
@@ -235,7 +235,7 @@ class Worker(threading.Thread):
         cfg = self.store.config
         profile: Profile = active["profile"]
 
-        speech.play_cue(cfg.cues, cfg.cues.stop_hz)
+        speech.play_cue(cfg.cues, cfg.cues.stop_hz, cfg.audio.output_device)
         audio = self.recorder.stop()
         clip_seconds = self.recorder.duration(audio)
 

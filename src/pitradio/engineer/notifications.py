@@ -259,6 +259,16 @@ class SpotterNotification(Notification):
             text = spotter.warning(side, tally.get(side, 1))
             calls.append(Call(f"{side}:{text}",
                               context.script.spotter_call(text), urgent=True))
+
+        # What is up the road, which the sides say nothing about. A stopped car
+        # is the hazard a spotter exists for: it is the one you cannot see
+        # coming and cannot do anything about late.
+        hazard = spotter.ahead(own, context.session.cars,
+                               track_length=context.session.track_length)
+        text = spotter.hazard_call(hazard)
+        if text:
+            calls.append(Call(f"ahead:{text}",
+                              context.script.spotter_call(text), urgent=True))
         return calls
 
     def _tally(self, context, own) -> dict[str, int] | None:

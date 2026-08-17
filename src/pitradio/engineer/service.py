@@ -31,7 +31,6 @@ from pitradio.engineer import (
     lines,
     notifications,
     packs,
-    personas,
     phrases,
     routines,
     sectors,
@@ -73,7 +72,7 @@ class EngineerService:
         self._clock = clock
         self._host = host if host is not None else tts.SapiHost()
         self.speaker = speaker if speaker is not None else speaking.Speaker(
-            lambda: self.store.config.engineer, host=self._host)
+            lambda: self.store.config, host=self._host)
 
         self.book = coaching.LapBook()
         self.sectors = sectors.SectorBook()
@@ -96,6 +95,9 @@ class EngineerService:
         self._laps: dict[str, int] = {}
         self._previous_position: tuple[float, float, float] | None = None
         self._spotter_call: str | None = None
+        #: Set whenever the voice is resolved, so the short
+        #: urgent phrases are rendered once per voice change.
+        self._prime_urgent = True
         self._spotter_at = 0.0
 
         self._stopping = threading.Event()
@@ -128,9 +130,8 @@ class EngineerService:
         return self.store.config.engineer
 
     def display_name(self) -> str:
-        """The name it answers to: the configured one, or the persona's."""
-        configured = (self.config.name or "").strip()
-        return configured or personas.by_id(self.config.persona).name
+        """The name it answers to."""
+        return (self.config.name or "").strip() or "Chief"
 
     def _language_for(self) -> str:
         """Which language it speaks.
@@ -144,16 +145,16 @@ class EngineerService:
         return pinned or (self.store.config.whisper.language or "").strip() or "en"
 
     def refresh_voice(self, *, force: bool = False) -> None:
-        """Resolve the persona, the voice and the pack, if anything changed.
+        """Resolve the voice pack and the fallback voice, if either changed.
 
-        Signature-guarded because resolving means starting a PowerShell host to
-        ask Windows what is installed, and doing that ten times a second would
-        be absurd.
+        Signature-guarded because resolving means listing a folder of
+        thousands of clips and starting a PowerShell host, and doing that ten
+        times a second would be absurd.
         """
         cfg = self.config
         language = self._language_for()
-        persona = personas.by_id(cfg.persona)
-        signature = (cfg.persona, cfg.voice, cfg.voice_pack, cfg.rate, language)
+        signature = (cfg.voice_pack, cfg.fallback_voice, cfg.rate, cfg.terse,
+                     language)
         if not force and signature == self._voice_signature:
             return
         self._voice_signature = signature
@@ -161,29 +162,33 @@ class EngineerService:
         if language != self._language:
             self._language = language
             self.catalogue = i18n.Catalogue.for_setting(language)
-            self.script = lines.Script(self.catalogue, terse=persona.terse)
             log.info("engineer language: %s", self.catalogue.code)
-        else:
-            self.script = lines.Script(self.catalogue, terse=persona.terse)
+        self.script = lines.Script(self.catalogue, terse=bool(cfg.terse))
 
         pack = None
         if cfg.voice_pack:
             pack = packs.find(paths.voice_pack_dir(), cfg.voice_pack)
             if pack is None:
-                log.warning("no voice pack called %r in %s; using the synthesiser",
+                log.warning("no voice pack called %r in %s; every word will "
+                            "come from the synthesiser",
                             cfg.voice_pack, paths.voice_pack_dir())
             else:
-                log.info("engineer voice pack: %s (%d phrase(s))",
+                log.info("engineer voice: %s (%d phrase(s) recorded)",
                          pack.name, len(pack.clips))
+        else:
+            log.info("engineer has no voice pack; using the Windows voice")
 
-        voice = cfg.voice.strip()
-        if not voice:
-            voice = personas.pick_voice(persona, self._host.voices(), language)
-            if voice:
-                log.info("engineer voice: %s (%s)", voice, persona.name)
-
-        rate = persona.rate if cfg.rate is None else int(cfg.rate)
+        rate = 0 if cfg.rate is None else int(cfg.rate)
+        voice = (cfg.fallback_voice or "").strip()
+        self._prime_urgent = True
         self.speaker.configure(speaking.VoiceSettings(voice, rate, pack))
+        if self._prime_urgent:
+            # The spotter's whole vocabulary is a handful of two-word calls, and
+            # they are the ones that must not wait on a synthesiser. Rendered
+            # here, on the thread that resolved the voice, rather than when a
+            # car is already alongside.
+            self._prime_urgent = False
+            self.speaker.prime(self.script.urgent_phrases())
 
     def say(self, utterance: list[str], *, urgent: bool = False) -> None:
         self.speaker.say(utterance, urgent=urgent)

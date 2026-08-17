@@ -997,7 +997,7 @@ def build_audio_tab(app) -> None:
     outputs.pack(fill="x", pady=(10, 0))
     app.output_devices = speech.list_devices("output")
     app.v_output = tk.StringVar(
-        value=_device_label(app.output_devices, cfg.cues.output_device))
+        value=_device_label(app.output_devices, cfg.audio.output_device))
     _row(outputs, 0, t("Output device"),
          ttk.Combobox(outputs, textvariable=app.v_output, state="readonly",
                       values=["(system default)"] + [label for _i, label in app.output_devices]))
@@ -1012,19 +1012,40 @@ def build_audio_tab(app) -> None:
     ttk.Button(footer, text=t("Save"), command=lambda: _save_audio(app)).pack(anchor="e")
 
 
+DEFAULT_DEVICE = "(system default)"
+
+
 def _device_label(devices, spec) -> str:
+    """The row to show for a stored choice.
+
+    Handles a stored *name* (what is written now) and a stored *index* (what
+    older configs hold), so upgrading does not silently reset somebody's
+    device to the default.
+    """
     if spec is None or spec == "":
-        return "(system default)"
+        return DEFAULT_DEVICE
     for index, label in devices:
-        if spec == index or (isinstance(spec, str) and spec.lower() in label.lower()):
+        if isinstance(spec, int) and not isinstance(spec, bool):
+            if spec == index:
+                return label
+            continue
+        if str(spec).strip().lower() == speech.device_name(index, "output").strip().lower():
             return label
-    return "(system default)"
+        if str(spec).lower() in label.lower():
+            return label
+    return DEFAULT_DEVICE
 
 
-def _device_from_label(devices, label: str):
-    for index, name in devices:
-        if name == label:
-            return index
+def _device_from_label(devices, label: str, kind: str = "output"):
+    """What to store for a chosen row: the device's **name**, not its index.
+
+    Windows renumbers audio devices whenever the set of them changes, so an
+    index saved today points somewhere else tomorrow — silently, because sound
+    going to the wrong device raises nothing. A name survives that.
+    """
+    for index, shown in devices:
+        if shown == label:
+            return speech.device_name(index, kind) or index
     return None
 
 
@@ -1041,7 +1062,9 @@ def _save_audio(app) -> None:
     cfg = app.store.config
     cfg.audio.gain = min(10.0, max(0.1, round(float(app.v_gain.get()), 2)))
     cfg.audio.input_device = _device_from_label(app.input_devices, app.v_input.get())
-    cfg.cues.output_device = _device_from_label(app.output_devices, app.v_output.get())
+    # One device for the whole app — cues, voice and the engineer.
+    cfg.audio.output_device = _device_from_label(
+        app.output_devices, app.v_output.get())
     app.save_config()
 
 
@@ -1060,14 +1083,14 @@ def _play_test_cue(app) -> None:
         # A test button should make a sound even when cues are switched off;
         # that is what the user is asking to hear.
         enabled=True,
-        output_device=_device_from_label(app.output_devices, app.v_output.get()),
         start_hz=_as_int(app.v_cue_start, saved.start_hz),
         stop_hz=_as_int(app.v_cue_stop, saved.stop_hz),
         duration_ms=_as_int(app.v_cue_ms, saved.duration_ms),
         volume=min(1.0, max(0.0, _as_float(app.v_cue_vol, saved.volume))),
     )
-    log.info("test cue on device %r", cue.output_device)
-    speech.play_cue(cue, cue.start_hz)
+    device = _device_from_label(app.output_devices, app.v_output.get())
+    log.info("test cue on device %r", device)
+    speech.play_cue(cue, cue.start_hz, device)
 
 
 def set_level(app, rms: float) -> None:
@@ -1164,14 +1187,12 @@ def build_voice_tab(app) -> None:
          t("separate from sending, so you can go quiet without going deaf — "
            "or the reverse"))
 
-    app.voice_devices = speech.list_devices("output")
-    app.v_voice_output = tk.StringVar(
-        value=_device_label(app.voice_devices, cfg.voice.output_device))
-    _row(hearing, 1, t("Output device"),
-         ttk.Combobox(hearing, textvariable=app.v_voice_output, state="readonly",
-                      values=["(system default)"]
-                             + [label for _i, label in app.voice_devices]),
-         t("your headset, not the sim's output"))
+    # No device picker here. There is one output device for the whole app and
+    # it lives on the Audio tab — three pickers meant three chances to send
+    # sound somewhere nobody was listening, which is silent when it happens.
+    ttk.Label(hearing, text=t("Plays on the output device set in the Audio tab."),
+              style="Muted.TLabel").grid(row=1, column=0, columnspan=3,
+                                         sticky="w", pady=(2, 4))
 
     app.v_voice_volume = tk.DoubleVar(value=cfg.voice.volume)
     app.v_voice_volume_label = tk.StringVar(value=_percent(cfg.voice.volume))
@@ -1232,8 +1253,6 @@ def _save_voice(app) -> None:
     cfg.voice.enabled = bool(app.v_voice_enabled.get())
     cfg.voice.playback = bool(app.v_voice_playback.get())
     cfg.voice.display_name = app.v_voice_name.get().strip()
-    cfg.voice.output_device = _device_from_label(
-        app.voice_devices, app.v_voice_output.get())
     cfg.voice.volume = min(1.0, max(0.0, round(float(app.v_voice_volume.get()), 2)))
     cfg.voice.max_age_seconds = max(
         0.1, _as_float(app.v_voice_max_age, cfg.voice.max_age_seconds))
@@ -1251,8 +1270,6 @@ def build_engineer_tab(app) -> None:
     what does it sound like, and what does it tell me. The routines go last
     because they are the part you configure once and then talk to.
     """
-    from pitradio.engineer import personas
-
     frame, footer = scrolling_tab(app, t("Engineer"))
     cfg = app.store.config.engineer
 
@@ -1265,26 +1282,17 @@ def build_engineer_tab(app) -> None:
          ttk.Checkbutton(who, variable=app.v_eng_enabled),
          t("off until you switch it on; nothing is spoken until you do"))
 
-    app.engineer_personas = personas.choices()
-    app.v_eng_persona = tk.StringVar(
-        value=dict(app.engineer_personas).get(cfg.persona or personas.DEFAULT, "Chief"))
-    _row(who, 1, t("Engineer"),
-         ttk.Combobox(who, textvariable=app.v_eng_persona, state="readonly", width=18,
-                      values=[label for _id, label in app.engineer_personas]),
-         t("four to choose from; each has its own voice, pace and how much it talks"))
-
-    app.engineer_persona_hint = tk.StringVar(value=_persona_description(cfg.persona))
-    ttk.Label(who, textvariable=app.engineer_persona_hint, style="Hint.TLabel",
-              wraplength=620, justify="left").grid(
-        row=2, column=0, columnspan=3, sticky="w", pady=(0, 6))
-    app.v_eng_persona.trace_add("write", lambda *_: _refresh_persona(app))
-
     app.v_eng_name = tk.StringVar(value=cfg.name)
-    _row(who, 3, t("Called"), _entry(who, app.v_eng_name),
-         t("what it answers to. \"Chief, target P3\" — blank uses the name above"))
+    _row(who, 1, t("Called"), _entry(who, app.v_eng_name),
+         t("what it answers to. \"Chief, target P3\""))
+
+    app.v_eng_terse = tk.BooleanVar(value=cfg.terse)
+    _row(who, 2, t("Keep it short"),
+         ttk.Checkbutton(who, variable=app.v_eng_terse),
+         t("\"Tandy, faster exit, two tenths\" rather than the full sentence"))
 
     app.v_eng_language = tk.StringVar(value=_engineer_language_label(cfg.language))
-    _row(who, 4, t("Speaks"),
+    _row(who, 3, t("Speaks"),
          ttk.Combobox(who, textvariable=app.v_eng_language, state="readonly", width=18,
                       values=[label for _code, label in _engineer_languages()]),
          t("follows the transcription language, because that is the language "
@@ -1297,32 +1305,29 @@ def build_engineer_tab(app) -> None:
     # starting a process, and doing that while the window is being built shows
     # up as the app taking a second longer to open.
     app.engineer_voices = []
-    app.v_eng_voice = tk.StringVar(value=cfg.voice or t("(the engineer's own)"))
+    app.v_eng_voice = tk.StringVar(
+        value=cfg.fallback_voice or t("(let Windows choose)"))
     app.engineer_voice_box = ttk.Combobox(
         sound, textvariable=app.v_eng_voice, state="readonly", width=32,
-        values=[t("(the engineer's own)")])
-    _row(sound, 0, t("Windows voice"), app.engineer_voice_box,
-         t("whichever voices are installed on this PC"))
+        values=[t("(let Windows choose)")])
+    _row(sound, 1, t("Fallback voice"), app.engineer_voice_box,
+         t("used only for driver names, which no pack can contain"))
 
     app.engineer_packs = _voice_packs()
-    app.v_eng_pack = tk.StringVar(value=cfg.voice_pack or t("(synthesised)"))
-    _row(sound, 1, t("Voice pack"),
+    app.v_eng_pack = tk.StringVar(value=cfg.voice_pack or t("(no pack)"))
+    _row(sound, 0, t("Voice"),
          ttk.Combobox(sound, textvariable=app.v_eng_pack, state="readonly", width=32,
-                      values=[t("(synthesised)"), *app.engineer_packs]),
-         t("recorded takes, if you have installed a pack"))
+                      values=[t("(no pack)"), *app.engineer_packs]),
+         t("a recorded voice pack — the only thing that sounds like a person"))
 
     app.v_eng_rate = tk.StringVar(value="" if cfg.rate is None else str(cfg.rate))
     _row(sound, 2, t("Pace"), _entry(sound, app.v_eng_rate, width=8),
          t("-10 to 10; blank keeps the engineer's own"))
 
-    app.engineer_devices = speech.list_devices("output")
-    app.v_eng_output = tk.StringVar(
-        value=_device_label(app.engineer_devices, cfg.output_device))
-    _row(sound, 3, t("Output device"),
-         ttk.Combobox(sound, textvariable=app.v_eng_output, state="readonly",
-                      values=["(system default)"]
-                             + [label for _i, label in app.engineer_devices]),
-         t("your headset, not the sim's output"))
+    # Same as voice: the device is the app's, set once on the Audio tab.
+    ttk.Label(sound, text=t("Speaks on the output device set in the Audio tab."),
+              style="Muted.TLabel").grid(row=3, column=0, columnspan=3,
+                                         sticky="w", pady=(2, 4))
 
     app.v_eng_volume = tk.DoubleVar(value=cfg.volume)
     app.v_eng_volume_label = tk.StringVar(value=_percent(cfg.volume))
@@ -1480,25 +1485,6 @@ def _phrase_box(app, parent, label: str, lines_: tuple[str, ...]):
     return text
 
 
-def _persona_description(persona_id: str) -> str:
-    from pitradio.engineer import personas
-
-    return personas.by_id(persona_id).description
-
-
-def _refresh_persona(app) -> None:
-    app.engineer_persona_hint.set(_persona_description(_engineer_persona_id(app)))
-
-
-def _engineer_persona_id(app) -> str:
-    from pitradio.engineer import personas
-
-    for persona_id, label in app.engineer_personas:
-        if label == app.v_eng_persona.get():
-            return persona_id
-    return personas.DEFAULT
-
-
 def _engineer_languages() -> list[tuple[str, str]]:
     """(code, label), with "follow the transcription language" first."""
     from pitradio import languages as languages_mod
@@ -1590,7 +1576,7 @@ def _fill_engineer_voices(app, found) -> None:
     app.engineer_voices = found
     try:
         app.engineer_voice_box.configure(
-            values=[t("(the engineer's own)"), *[voice.label for voice in found]])
+            values=[t("(let Windows choose)"), *[voice.label for voice in found]])
     except tk.TclError:
         # The window closed while the host was starting.
         log.debug("the voice list arrived after the tab went away")
@@ -1602,7 +1588,7 @@ def _engineer_voice_name(app) -> str:
     for voice in app.engineer_voices:
         if voice.label == chosen:
             return voice.name
-    return "" if chosen == t("(the engineer's own)") else chosen
+    return "" if chosen == t("(let Windows choose)") else chosen
 
 
 def _test_engineer(app) -> None:
@@ -1627,18 +1613,17 @@ def _apply_engineer(app) -> None:
     """
     cfg = app.store.config.engineer
     cfg.enabled = bool(app.v_eng_enabled.get())
-    cfg.persona = _engineer_persona_id(app)
     cfg.name = app.v_eng_name.get().strip()
     cfg.language = _engineer_language_code(app.v_eng_language.get())
-    cfg.voice = _engineer_voice_name(app)
+    cfg.fallback_voice = _engineer_voice_name(app)
     pack = app.v_eng_pack.get()
-    cfg.voice_pack = "" if pack == t("(synthesised)") else pack
+    cfg.voice_pack = "" if pack == t("(no pack)") else pack
+    cfg.terse = bool(app.v_eng_terse.get())
     rate = str(app.v_eng_rate.get()).strip()
     try:
         cfg.rate = max(-10, min(10, int(rate))) if rate else None
     except ValueError:
         cfg.rate = None
-    cfg.output_device = _device_from_label(app.engineer_devices, app.v_eng_output.get())
     cfg.volume = min(1.0, max(0.0, round(float(app.v_eng_volume.get()), 2)))
     from pitradio import config as config_mod
 
