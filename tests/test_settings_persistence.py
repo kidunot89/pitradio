@@ -119,6 +119,64 @@ def test_settings_survive_a_save_from_another_tab(app):
     assert reopened(app).trigger_key == "ctrl+f9"
 
 
+def test_the_engineer_survives_a_restart(app):
+    app.v_eng_enabled.set(True)
+    app.v_eng_persona.set("Ada")
+    app.v_eng_name.set("Radio")
+    gui_settings._save_engineer(app)
+
+    engineer = reopened(app).engineer
+    assert engineer.enabled is True
+    assert engineer.persona == "ada"
+    assert engineer.name == "Radio"
+
+
+def test_a_behaviour_and_its_repeat_timer_survive_a_restart(app):
+    """The repeat interval is what makes the spotter keep telling you a car is
+    still there, and it is typed rather than picked — so it is the one most
+    likely to be silently dropped by a save that only handles tick-boxes."""
+    enabled, repeat = app.v_eng_notifications["spotter"]
+    enabled.set(True)
+    repeat.set("2.5")
+    gui_settings._save_engineer(app)
+
+    spotter = reopened(app).engineer.notifications["spotter"]
+    assert spotter.enabled is True
+    assert spotter.repeat_seconds == 2.5
+
+
+def test_a_behaviour_can_be_switched_off_and_stay_off(app):
+    enabled, _repeat = app.v_eng_notifications["lap_time"]
+    enabled.set(False)
+    gui_settings._save_engineer(app)
+
+    assert reopened(app).engineer.notifications["lap_time"].enabled is False
+
+
+def test_a_routine_s_own_phrases_survive_a_restart(app):
+    """Start and end phrases both, because they are separate fields and a save
+    that only carried one would look like it worked."""
+    _enabled, start, end = app.v_eng_routines["hot_lap_trainer"]
+    start.delete("1.0", "end")
+    start.insert("1.0", "initiate build procedures {target}")
+    end.delete("1.0", "end")
+    end.insert("1.0", "cease build procedures")
+    gui_settings._save_engineer(app)
+
+    routine = reopened(app).engineer.routines["hot_lap_trainer"]
+    assert routine.enabled is True
+    assert routine.phrases == ["initiate build procedures {target}"]
+    assert routine.end_phrases == ["cease build procedures"]
+
+
+def test_a_routine_can_be_switched_off_and_stay_off(app):
+    enabled, _start, _end = app.v_eng_routines["hot_lap_trainer"]
+    enabled.set(False)
+    gui_settings._save_engineer(app)
+
+    assert reopened(app).engineer.routines["hot_lap_trainer"].enabled is False
+
+
 def test_quitting_does_not_revert_an_earlier_save(app):
     """quit() rewrites the config to persist the window geometry. Doing that
     from a stale object would undo everything saved during the session."""

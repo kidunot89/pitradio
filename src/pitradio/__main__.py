@@ -243,6 +243,16 @@ def cmd_self_test() -> int:
         # still runs, which means nothing at module scope proves it was
         # bundled — exactly how av.utils went missing from v0.1.0.
         "pitradio.voice", "pitradio.net", "pitradio.endpoints",
+        # The engineer. Its speech host is a subprocess rather than an import,
+        # so nothing here proves it can talk — but a dropped module would take
+        # the whole feature out silently, which is what this catches.
+        "pitradio.engineer", "pitradio.engineer.service",
+        "pitradio.engineer.routines", "pitradio.engineer.notifications",
+        "pitradio.engineer.coaching", "pitradio.engineer.sectors",
+        "pitradio.engineer.lines", "pitradio.engineer.phrases",
+        "pitradio.engineer.packs", "pitradio.engineer.personas",
+        "pitradio.engineer.speaking", "pitradio.engineer.spotter",
+        "pitradio.engineer.tts",
     ]
 
     failures: list[tuple[str, str]] = []
@@ -484,6 +494,15 @@ def run(args) -> int:
     voice_service = net_mod.VoiceService(store, registry)
     worker.voice = voice_service
 
+    # Built even when the engineer is switched off, for the same reason as
+    # voice: the service reads the config on every poll, so turning it on in
+    # the window works without a restart. Switched off it is one sleeping
+    # thread.
+    from pitradio.engineer import service as engineer_mod
+
+    engineer = engineer_mod.EngineerService(store, registry)
+    worker.engineer = engineer
+
     def is_busy() -> bool:
         """True when a sim is focused, so updates can wait."""
         try:
@@ -501,7 +520,7 @@ def run(args) -> int:
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
         transcriber=transcriber, hook=hook, plugins=registry,
-        voice=voice_service, use_tray=not args.no_tray,
+        voice=voice_service, engineer=engineer, use_tray=not args.no_tray,
     )
 
     if checker is not None:
@@ -511,6 +530,7 @@ def run(args) -> int:
 
     worker.start()
     voice_service.start()
+    engineer.start()
     hook.start()
     if not hook.wait_until_ready(5.0):
         log.error("the keyboard hook did not come up; the trigger key will do nothing")

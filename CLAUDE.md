@@ -84,6 +84,7 @@ src/pitradio/            the app, as a package
   input/                 winapi hook inject
   ui/                    gui gui_settings gui_language tray
   plugins/               per-sim session data
+  engineer/              the voice that talks back; see docs/engineer.md
 vendor/                  third-party modules that are deliberately not deps
 packaging/               build, installer, icon, checksums
 tests/
@@ -126,6 +127,10 @@ Four threads, and mixing them up is how this breaks:
 | hook | `WH_KEYBOARD_LL` + its `GetMessageW` pump |
 | worker | audio, transcription, injection — everything slow |
 | tray | pystray's blocking `run()` |
+
+Voice and the engineer add two more each — a relay/poll thread and a playback
+thread — for the same reason: the hook has a deadline, the worker is holding
+somebody's trigger, and the GUI owns the widgets. None of them may block those.
 
 **Controllers are not read at all.** PitRadio once had four joystick backends
 — SDL3, SDL2, XInput and the legacy multimedia API — merged and deduplicated
@@ -395,6 +400,85 @@ vendored rather than depended on. A wrong field offset produces plausible
 garbage instead of an error, so the layout is worth taking from a maintained
 source — and it is pure Python, so vendoring costs no bundling risk. Pinned at
 commit `3968c15`.
+
+## The engineer
+
+`engineer/` is a named voice that watches the sim and talks back — lap times, a
+spotter, and routines started by saying a phrase.
+[docs/engineer.md](docs/engineer.md) is the guide; this is what would otherwise
+be rediscovered.
+
+**A command must never be invented.** The trigger key is the one that sends
+messages to the whole session, so `EngineerService.handle` returning True throws
+somebody's words away. Two narrow paths in: addressed by name, or the whole
+sentence is a phrase. **A phrase taking a `{driver}` argument is only ever
+matched on the addressed path** — its argument has no end, so unaddressed
+"target time is a twenty three" was swallowed whole and never reached the chat
+box. `worker._for_engineer` swallows every exception and returns False for the
+same reason: a fault in an optional feature must not cost a message.
+
+**Corners are found in the data, not looked up.** A track map would need a file
+per circuit, would go stale on layout changes, and would leave the feature
+working on four tracks. A corner is where the reference lap slowed and sped up
+again, which holds everywhere; the cost is that they are numbered, not named.
+
+**Time is read off the trace, never integrated.** Each sample carries the sim's
+clock as well as the distance, so a segment time is one subtraction between
+interpolated points. Integrating ds/v would accumulate every sample's error, and
+at the rate the scoring block publishes that error is larger than the
+differences being reported. `time_between` returns None across a gap rather than
+interpolating over it — a plausible number here is indistinguishable from a real
+one and would be acted on.
+
+**Silence is the default.** Below `coach_threshold` there is no call. An
+engineer that speaks at every corner is one nobody listens to.
+
+**TTS is a PowerShell host, not a binding.** `System.Speech` is on every Windows
+10/11 machine; `pywin32` and `comtypes` are two more native dependencies in a
+build that has already shipped four releases broken by one. It is passed as
+`-EncodedCommand` so execution policy cannot block it, base64 in both directions
+so an accented driver name and a `C:\Users\José` temp path both survive the
+console code page, and it **synthesises to a WAV** rather than speaking — that
+is what gives the engineer the same output-device setting as voice chat instead
+of landing on whatever Windows considers default mid-race.
+
+**Voice packs use Crew Chief's folder layout**, so a `crew-chief-autovoicepack`
+output drops straight in. Phrase ids are *derived* from the words
+(`slug("two tenths")` → `two_tenths`), so nothing maintains a mapping and a pack
+built for an older version keeps working. `speaking.read_wav` is hand-rolled
+because `wave` raises on IEEE float, which is exactly what that generator emits.
+
+**Four personas, not four recordings.** A generated pack is 1-2GB; four would be
+an 8GB download to replace what Windows already has. A persona is a name, a
+preferred voice, a pace and a verbosity, resolved against installed voices.
+
+**The engineer's language follows `whisper.language`, not `gui.language`.** The
+commands arrive through Whisper, so an engineer listening for English phrases
+while Whisper produces Spanish would never hear one — and nothing about that
+failure points at a language setting. `i18n.Catalogue` exists for this: a *held*
+language, separate from the global one the window uses.
+
+**Numbers are words in English and digits elsewhere.** Number grammar is
+per-language and doing it half-well produces confident nonsense in somebody's
+own language; digits hand it to the speech voice for that language, which is
+correct. Consequence: a non-English pack cannot cover numbers.
+
+**The spotter's left/right could not be verified off a track.** The geometry is
+sound but the sign depends on the sim's handedness, so it is
+`spotter_swap_sides` on the plugin rather than a guess in the code. Heading
+comes from two consecutive positions, not `mOri`, precisely because the
+orientation matrix's convention is the thing that could not be checked.
+
+Session data grew rather than gaining a parallel type: `Car` carries lap
+distance, speed, laps and lap times, and `SessionInfo` carries `track_length`
+and `elapsed`, all from the same single read. **`SessionInfo.has_data` is not
+`__bool__`** — `__bool__` asks "is there a room to be in", which needs a game
+server, and offline practice is exactly where a coaching routine is most wanted.
+`PluginRegistry.any_telemetry` is the engineer's entry point for that reason.
+
+Routines are registered statically in `routines.BUILTIN` for the same reason
+plugins are. Their trigger phrases live on the **config**, not the routine —
+what a routine is called is not the routine.
 
 ## Voice, and what is not in this repository
 

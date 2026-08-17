@@ -26,6 +26,9 @@ from pathlib import Path
 
 from pitradio import voice
 from pitradio.plugins.base import (
+    PROVIDES_LAPS,
+    PROVIDES_POSITIONS,
+    PROVIDES_SECTORS,
     Car,
     PluginSetting,
     SessionInfo,
@@ -48,6 +51,14 @@ FILE_MAP_READ = 0x0004
 #: Roughly the car behind and the one you are catching. Named here rather than
 #: written into the setting so the number has somewhere to be explained.
 DEFAULT_PROXIMITY_METRES = 200
+
+#: The spotter's window, per sim, because cars are not the same length
+#: everywhere. A Hypercar is about 5m, so this is overlapping bodywork plus a
+#: little either way.
+DEFAULT_ALONGSIDE_METRES = 9
+#: How far to the side still counts as beside you rather than on another part
+#: of the circuit.
+DEFAULT_WIDTH_METRES = 12
 
 # -- which car is on screen ----------------------------------------------
 #
@@ -147,6 +158,21 @@ def _text(raw: bytes) -> str:
     return raw.decode("utf-8", "replace").strip("\x00").strip()
 
 
+def _speed(local_velocity) -> float:
+    """How fast a car is going, in metres per second.
+
+    The block publishes velocity in the car's own axes rather than a scalar, so
+    speed is the length of that vector. Taking the longitudinal component alone
+    would read low through a slide, which is exactly where somebody is losing
+    the time a coaching routine is meant to find.
+    """
+    try:
+        return float((local_velocity.x ** 2 + local_velocity.y ** 2
+                      + local_velocity.z ** 2) ** 0.5)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
 def _close_mapping(handle, view) -> None:
     try:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -163,9 +189,15 @@ class LeMansUltimatePlugin(SessionPlugin):
     name = "Le Mans Ultimate"
     executables = ("le mans ultimate.exe",)
     description = (
-        "Reads the driver list from LMU's shared memory, so names are "
-        "transcribed correctly and can be turned into mentions."
+        "Reads the driver list, lap and sector times and every car's position "
+        "from LMU's shared memory — names for mentions, and everything the "
+        "engineer needs."
     )
+    #: All of it. The block carries every car's world position, lap and sector
+    #: data, which is why this is the sim the engineer was built against.
+    provides = frozenset({
+        PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS,
+    })
     settings = (
         PluginSetting(
             key="positions",
@@ -192,6 +224,33 @@ class LeMansUltimatePlugin(SessionPlugin):
             default=DEFAULT_PROXIMITY_METRES,
             help=("how near counts. 200m is roughly the car behind you and the "
                   "one you are catching; a lap of Daytona is 5,700m"),
+        ),
+        PluginSetting(
+            key="spotter_swap_sides",
+            label="Swap spotter sides",
+            kind="bool",
+            default=False,
+            help=("turn this on if the engineer's spotter says \"left\" for a "
+                  "car on your right. Which side is which depends on the sim's "
+                  "own axes, and that could not be checked without driving"),
+        ),
+        PluginSetting(
+            key="spotter_metres",
+            label="Spotter overlap (metres)",
+            kind="int",
+            default=DEFAULT_ALONGSIDE_METRES,
+            help=("how far apart along the track two cars can be and still "
+                  "count as alongside. A Hypercar is about 5m long, so 9m is "
+                  "overlapping bodywork plus a little"),
+        ),
+        PluginSetting(
+            key="spotter_width_metres",
+            label="Spotter width (metres)",
+            kind="int",
+            default=DEFAULT_WIDTH_METRES,
+            help=("how far to the side still counts. Beyond this they are on "
+                  "another part of the circuit — an adjacent straight, or the "
+                  "far side of a hairpin"),
         ),
     )
 
@@ -341,13 +400,19 @@ class LeMansUltimatePlugin(SessionPlugin):
                 address = int(info.mServerPublicIP)
                 port = int(info.mServerPort)
                 track = _text(info.mTrackName)
+                # The lap length and the session clock, read in the same lock
+                # as the cars above. The engineer compares one car's position
+                # against another's, and two reads would be two moments.
+                track_length = max(0.0, float(info.mLapDist))
+                elapsed = float(info.mCurrentET)
             except (AttributeError, ValueError) as exc:
                 self._fail(f"could not read the session block: {exc}")
                 return SessionInfo()
 
         return SessionInfo(
             key=voice.session_key(address, port), track=track, cars=tuple(cars),
-            focus_slot=self._focus_slot())
+            focus_slot=self._focus_slot(), track_length=track_length,
+            elapsed=elapsed)
 
     def _focus_slot(self) -> int | None:
         """Which car the camera is on, from the game's own HTTP API.
@@ -409,6 +474,24 @@ class LeMansUltimatePlugin(SessionPlugin):
                     position=(float(vehicle.mPos.x), float(vehicle.mPos.y),
                               float(vehicle.mPos.z)),
                     is_player=bool(vehicle.mIsPlayer),
+                    lap_dist=float(vehicle.mLapDist),
+                    speed=_speed(vehicle.mLocalVel),
+                    laps=max(0, int(vehicle.mTotalLaps)),
+                    # Negative is how the block says "no time", and letting
+                    # that through would make every car's best lap beat every
+                    # real one.
+                    last_lap=max(0.0, float(vehicle.mLastLapTime)),
+                    best_lap=max(0.0, float(vehicle.mBestLapTime)),
+                    in_pits=bool(vehicle.mInPits),
+                    # mSector numbers its sectors 0=third, 1=first, 2=second.
+                    # Passed through as the block reports it rather than
+                    # normalised here, so the one place that has to know the
+                    # convention is the module that documents it.
+                    sector=int(vehicle.mSector),
+                    cur_sector1=max(0.0, float(vehicle.mCurSector1)),
+                    cur_sector2=max(0.0, float(vehicle.mCurSector2)),
+                    last_sector1=max(0.0, float(vehicle.mLastSector1)),
+                    last_sector2=max(0.0, float(vehicle.mLastSector2)),
                 ))
             return cars
 

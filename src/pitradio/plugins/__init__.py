@@ -170,6 +170,36 @@ class PluginRegistry:
                 return plugin.id, session
         return "", SessionInfo()
 
+    def provides_for(self, plugin_id: str | None) -> frozenset[str]:
+        """What this sim can tell the engineer, or nothing.
+
+        Nothing is the safe answer: a behaviour whose data is absent is skipped
+        rather than left switched on and silent, and silence nobody can explain
+        is indistinguishable from the feature being broken.
+        """
+        plugin = self.by_id(plugin_id)
+        return getattr(plugin, "provides", frozenset()) if plugin else frozenset()
+
+    def any_telemetry(self) -> tuple[str, SessionInfo]:
+        """(plugin id, session) for whichever sim is publishing cars.
+
+        The engineer's equivalent of `any_session`, and separate from it on
+        purpose: that one answers "is there a room to be in", which needs a
+        game server, and this one answers "is there a car on a track", which
+        does not. Asking the voice question here would leave the engineer
+        silent in exactly the session — offline practice — where a coaching
+        routine is most wanted.
+        """
+        for plugin in self.plugins:
+            try:
+                session = plugin.session()
+            except Exception:
+                log.exception("plugin %s failed while reading the session", plugin.name)
+                continue
+            if session.has_data:
+                return plugin.id, session
+        return "", SessionInfo()
+
     def positions_for(self, plugin_id: str | None) -> dict[int, str]:
         """The overall order alone, for callers that want nothing else."""
         return self.standings_for(plugin_id).overall

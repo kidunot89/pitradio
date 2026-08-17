@@ -52,6 +52,81 @@ _catalogue: dict[str, str] = {}
 _active = SOURCE
 
 
+def read(code: str) -> dict[str, str] | None:
+    """One catalogue off disk. None means it could not be read.
+
+    None rather than an empty dict, because the two are different and the
+    difference decides which language is reported as active: a catalogue with
+    nothing translated in it yet is still that language, and one that failed to
+    parse is English.
+
+    Split out from `activate` because the window is no longer the only thing
+    that needs a language: the engineer speaks out loud, and what it says can
+    reasonably be in a different language from the window it is configured in —
+    a driver talking to the sim in Spanish wants a Spanish engineer whatever
+    language the tabs are in. `Catalogue` below is that second consumer, and
+    both go through this so there is still only one file format and one place
+    that reads it.
+    """
+    if code == SOURCE:
+        return {}
+    path = LOCALE_DIR / f"{code}.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning("could not load the %s catalogue (%s); using English", code, exc)
+        return None
+    # Empty values mean "not translated yet", which is how a partly finished
+    # catalogue stays usable instead of showing blanks.
+    return {k: v for k, v in raw.items() if isinstance(v, str) and v.strip()}
+
+
+class Catalogue:
+    """A language, held rather than made global.
+
+    The module-level `t()` renders the window and there is only ever one of
+    those, so it stays a global. Anything that needs its own — today the
+    engineer — holds one of these instead of fighting over the same one.
+    """
+
+    def __init__(self, code: str = SOURCE, entries: dict[str, str] | None = None):
+        loaded = entries if entries is not None else read(code)
+        # A catalogue that would not load is English, not a broken version of
+        # the language it claimed to be — otherwise `english` reads False and
+        # the engineer stops spelling numbers out for no visible reason.
+        self.code = SOURCE if loaded is None else code
+        self.entries = loaded or {}
+
+    @classmethod
+    def for_setting(cls, setting: str) -> Catalogue:
+        code = resolve(setting)
+        return cls(code)
+
+    @property
+    def english(self) -> bool:
+        """Whether this is the language the source strings are written in.
+
+        Asked by the engineer, which spells numbers out in English and reads
+        them as digits everywhere else — see `engineer/lines.py`.
+        """
+        return self.code == SOURCE
+
+    def t(self, text: str, **fields) -> str:
+        return _render(self.entries, self.code, text, **fields)
+
+    def translate(self, text: str, **fields) -> str:
+        """`t`, for a string that is not a literal at the call site.
+
+        A separate name rather than a habit, because `packaging/extract_strings`
+        rejects `t(variable)` — and rightly: a source string it cannot see is
+        one no translator is ever offered. These calls are the exception it is
+        guarding against, where the literal lives somewhere the extractor has
+        already found it (a routine's default phrases, the engineer's fixed
+        lines) and this is only where it gets looked up.
+        """
+        return self.t(text, **fields)
+
+
 def available() -> list[str]:
     """Language codes that have a catalogue, English first."""
     if not LOCALE_DIR.is_dir():
@@ -86,24 +161,27 @@ def activate(setting: str = SYSTEM) -> str:
     global _catalogue, _active
 
     code = resolve(setting)
-    if code == SOURCE:
-        _catalogue, _active = {}, SOURCE
-        return SOURCE
-
-    path = LOCALE_DIR / f"{code}.json"
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        # Empty values mean "not translated yet", which is how a partly
-        # finished catalogue stays usable instead of showing blanks.
-        _catalogue = {k: v for k, v in raw.items()
-                      if isinstance(v, str) and v.strip()}
-        _active = code
-        log.info("interface language: %s (%d of %d strings translated)",
-                 code, len(_catalogue), len(raw))
-    except Exception as exc:
-        log.warning("could not load the %s catalogue (%s); using English", code, exc)
-        _catalogue, _active = {}, SOURCE
+    entries = read(code)
+    _catalogue = entries or {}
+    _active = SOURCE if entries is None or code == SOURCE else code
+    if _active != SOURCE:
+        log.info("interface language: %s (%d strings translated)",
+                 _active, len(_catalogue))
     return _active
+
+
+def _render(entries: dict[str, str], code: str, text: str, **fields) -> str:
+    translated = entries.get(text) or text
+    if not fields:
+        return translated
+    try:
+        return translated.format(**fields)
+    except (KeyError, IndexError, ValueError):
+        log.warning("placeholder mismatch in the %s translation of %r", code, text)
+        try:
+            return text.format(**fields)
+        except (KeyError, IndexError, ValueError):
+            return text
 
 
 def t(text: str, **fields) -> str:
@@ -114,17 +192,7 @@ def t(text: str, **fields) -> str:
     English rather than taking the window down — and says so once, because a
     catalogue error nobody sees never gets fixed.
     """
-    translated = _catalogue.get(text) or text
-    if not fields:
-        return translated
-    try:
-        return translated.format(**fields)
-    except (KeyError, IndexError, ValueError):
-        log.warning("placeholder mismatch in the %s translation of %r", _active, text)
-        try:
-            return text.format(**fields)
-        except (KeyError, IndexError, ValueError):
-            return text
+    return _render(_catalogue, _active, text, **fields)
 
 
 def placeholders(text: str) -> set[str]:

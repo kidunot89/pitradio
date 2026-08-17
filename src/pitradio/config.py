@@ -191,6 +191,99 @@ class VoiceConfig:
 
 
 @dataclass
+class NotificationConfig:
+    """One behaviour: whether it speaks, and how often it repeats itself.
+
+    `repeat_seconds` is what separates a call that is *true once* from one that
+    stays true. A lap time never needs saying twice; a car alongside stops
+    being there without anything happening, so the spotter has to keep saying
+    it and then say when the side is clear. Zero means say it once per change
+    and then stay quiet.
+    """
+
+    enabled: bool = True
+    repeat_seconds: float = 0.0
+
+
+@dataclass
+class RoutineConfig:
+    """One on-track routine's settings.
+
+    `phrases` empty means "whatever the routine ships with", translated into
+    the engineer's language. It is a list rather than a single string because
+    people say the same thing several ways and remembering which one you
+    configured is not a thing to do at 200km/h. `end_phrases` is the same for
+    standing it down, on top of the global stop phrases which always work.
+    """
+
+    enabled: bool = True
+    phrases: list[str] = field(default_factory=list)
+    end_phrases: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EngineerConfig:
+    """A named voice that talks back: lap times, a spotter, and routines.
+
+    **Off by default**, like voice chat, and for a related reason: a dictation
+    app that started talking over the sim on first launch would be a surprise,
+    and this one is a surprise with opinions about your driving.
+
+    The voice is resolved in three steps, each overriding the last — a persona
+    picks a sensible installed voice, `voice` pins a specific one, and
+    `voice_pack` replaces the synthesiser entirely with recorded takes. See
+    `engineer/personas.py` and `engineer/packs.py`.
+    """
+
+    enabled: bool = False
+    #: One of the built-in personas. Sets the default name, voice preference,
+    #: pace and how much it talks.
+    persona: str = "chief"
+    #: What it is called, and therefore what it answers to. Empty follows the
+    #: persona, so picking "Ada" and never touching this gets an engineer
+    #: called Ada.
+    name: str = ""
+    #: A specific Windows speech voice, overriding the persona's preference.
+    #: Empty lets the persona choose from what is installed.
+    voice: str = ""
+    #: A folder under `voices/` in the config directory. Empty means the
+    #: synthesiser. A pack covers the fixed phrases; names and numbers still
+    #: come from the synthesiser — see docs/engineer.md.
+    voice_pack: str = ""
+    #: Windows' own -10..10, on top of the persona's.
+    rate: int | None = None
+    volume: float = 0.9
+    output_device: Any = None
+    #: What language it speaks and listens for. Empty follows the transcription
+    #: language, which is the right default by some distance: the commands are
+    #: spoken into the same microphone Whisper is transcribing, so they arrive
+    #: in that language or not at all.
+    language: str = ""
+
+    # -- what it talks about ---------------------------------------------
+    #
+    # Two kinds, and the split is the point. A **behaviour** is a tick-box that
+    # runs for as long as the engineer does. A **routine** is started by saying
+    # something and stands down again. They are separate sections of the
+    # Engineer tab because they are separate ideas — and the same runner drives
+    # both, so a routine is literally a set of behaviours with its own
+    # conditions.
+
+    #: notification id -> its settings. Defaults come from the notification
+    #: classes, so a behaviour added later appears without any config being
+    #: rewritten — the same rule plugin settings follow.
+    notifications: dict[str, NotificationConfig] = field(default_factory=dict)
+    #: routine id -> its settings.
+    routines: dict[str, RoutineConfig] = field(default_factory=dict)
+
+    #: How much time in half a corner is worth interrupting for, in seconds.
+    coach_threshold: float = 0.08
+    #: The same, for a whole sector. Larger, because a sector is longer and a
+    #: hundredth over thirty seconds is not something anybody drove differently.
+    sector_threshold: float = 0.15
+
+
+@dataclass
 class GuiConfig:
     start_minimized: bool = False
     geometry: str = ""
@@ -231,6 +324,7 @@ class Config:
     whisper: WhisperConfig = field(default_factory=WhisperConfig)
     cues: CueConfig = field(default_factory=CueConfig)
     voice: VoiceConfig = field(default_factory=VoiceConfig)
+    engineer: EngineerConfig = field(default_factory=EngineerConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     updates: UpdateConfig = field(default_factory=UpdateConfig)
     default_profile: Profile = field(default_factory=Profile)
@@ -251,6 +345,7 @@ class Config:
         cfg.whisper = _section(WhisperConfig, data.get("whisper"))
         cfg.cues = _section(CueConfig, data.get("cues"))
         cfg.voice = _section(VoiceConfig, data.get("voice"))
+        cfg.engineer = _engineer(data.get("engineer"))
         cfg.gui = _section(GuiConfig, data.get("gui"))
         cfg.updates = _section(UpdateConfig, data.get("updates"))
 
@@ -277,6 +372,7 @@ class Config:
             "whisper": asdict(self.whisper),
             "cues": asdict(self.cues),
             "voice": asdict(self.voice),
+            "engineer": asdict(self.engineer),
             "gui": asdict(self.gui),
             "updates": asdict(self.updates),
             "default_profile": asdict(self.default_profile),
@@ -352,6 +448,66 @@ class Config:
             )
         return problems
 
+    def _engineer_problems(self) -> list[str]:
+        """Checked whether or not the engineer is switched on.
+
+        A name it cannot answer to is the interesting one. The engineer's name
+        is how a command is addressed, so an empty one silently narrows the
+        feature to the bare phrases and nothing says why "Chief, target P3"
+        stopped working.
+        """
+        problems: list[str] = []
+        engineer = self.engineer
+
+        if not 0.0 <= engineer.volume <= 1.0:
+            problems.append("engineer.volume must be between 0.0 and 1.0")
+        if engineer.rate is not None and not -10 <= int(engineer.rate) <= 10:
+            problems.append("engineer.rate must be between -10 and 10")
+        if engineer.coach_threshold <= 0:
+            problems.append(
+                "engineer.coach_threshold must be > 0, or every corner is worth "
+                "a call and the engineer never stops talking"
+            )
+        if engineer.sector_threshold <= 0:
+            problems.append("engineer.sector_threshold must be > 0")
+
+        for notification_id, notification in (engineer.notifications or {}).items():
+            if notification.repeat_seconds < 0:
+                problems.append(
+                    f"engineer.notifications[{notification_id!r}].repeat_seconds "
+                    f"must be 0 or more; 0 means say it once")
+
+        # A persona that no longer exists falls back rather than failing, but
+        # it is still worth saying — a config carried over from a newer build
+        # is not obviously the reason the voice changed.
+        from pitradio.engineer import personas
+
+        if engineer.persona and engineer.persona not in {p.id for p in personas.BUILTIN}:
+            known = ", ".join(p.id for p in personas.BUILTIN)
+            problems.append(
+                f"engineer.persona is {engineer.persona!r}; expected one of {known}")
+
+        if engineer.enabled and not (engineer.name.strip()
+                                     or personas.by_id(engineer.persona).name):
+            problems.append(
+                "engineer.name is empty and the persona has none, so the "
+                "engineer cannot be addressed by name")
+
+        for routine_id, routine in (engineer.routines or {}).items():
+            for field_name in ("phrases", "end_phrases"):
+                spoken = getattr(routine, field_name)
+                if not isinstance(spoken, list):
+                    problems.append(
+                        f"engineer.routines[{routine_id!r}].{field_name} must be "
+                        f"a list")
+                    continue
+                for phrase in spoken:
+                    if not str(phrase).strip():
+                        problems.append(
+                            f"engineer.routines[{routine_id!r}].{field_name} has "
+                            f"an empty phrase, which would match nothing")
+        return problems
+
     def validate(self) -> list[str]:
         """Everything wrong with this config, as human-readable lines.
 
@@ -411,6 +567,7 @@ class Config:
             problems.append("audio.max_clip_seconds must exceed min_clip_seconds")
 
         problems.extend(self._voice_problems())
+        problems.extend(self._engineer_problems())
 
         if self.whisper.device != "cpu":
             problems.append(
@@ -519,6 +676,25 @@ def _section(cls, raw: Any):
     known = {f.name for f in fields(cls)}
     values = {k: v for k, v in (raw or {}).items() if k in known}
     return cls(**values)
+
+
+def _engineer(raw: Any) -> EngineerConfig:
+    """The engineer section, whose routines are dataclasses rather than dicts.
+
+    `_section` cannot do this on its own: it copies values straight across, so
+    `routines` would come back as a dict of plain dicts and every attribute
+    access on one would fail at the point of use rather than here.
+    """
+    cfg = _section(EngineerConfig, raw)
+    cfg.routines = {
+        str(routine_id): _section(RoutineConfig, settings)
+        for routine_id, settings in (cfg.routines or {}).items()
+    }
+    cfg.notifications = {
+        str(notification_id): _section(NotificationConfig, settings)
+        for notification_id, settings in (cfg.notifications or {}).items()
+    }
+    return cfg
 
 
 # -- persistence ---------------------------------------------------------

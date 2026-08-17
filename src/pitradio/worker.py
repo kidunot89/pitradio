@@ -53,6 +53,9 @@ class Worker(threading.Thread):
         #: `--gui-only`, in tests, and in any build without the websocket
         #: package — and every use site copes with that.
         self.voice = None
+        #: The race engineer, when there is one. Consulted after transcription
+        #: and before anything is typed; None everywhere it is not built.
+        self.engineer = None
 
         self._active: dict | None = None
         # A message typed but not sent, waiting on a gesture. Only ever set
@@ -258,6 +261,16 @@ class Worker(threading.Thread):
 
         text = speech.sanitize(raw, profile.max_chars)
 
+        # Before mentions, before standings, before anything is typed: if that
+        # was an instruction to the engineer it was never a message, and the
+        # chat box has to be sent away rather than filled in. Deliberately on
+        # the raw words — a command run through name matching would have its
+        # own trigger phrase rewritten into somebody's driver name.
+        if text and self._for_engineer(text):
+            log.info("that was for the engineer; not sending it to the chat box")
+            self._abort(active, profile, text, transcribe_seconds)
+            return
+
         standings = active.get("standings")
         if text and standings and cfg.mentions.enabled:
             # Before name matching: "P3" is unambiguous, and resolving it first
@@ -321,6 +334,24 @@ class Worker(threading.Thread):
                 total_seconds=total,
             )
         )
+
+    def _for_engineer(self, text: str) -> bool:
+        """Whether the engineer took those words as an instruction.
+
+        Wrapped whole. This sits between a transcription and somebody's message
+        reaching the chat box, and it is the one thing in the cycle that can
+        *swallow* a message rather than merely fail to decorate it — so a fault
+        in it must mean "not a command" and let the words through. Losing a
+        message to a crash in an optional feature would be the worst bug this
+        file could have.
+        """
+        if self.engineer is None:
+            return False
+        try:
+            return bool(self.engineer.handle(text))
+        except Exception:
+            log.exception("the engineer failed on %r; sending it as a message", text)
+            return False
 
     def _abort(self, active: dict, profile: Profile, text: str, transcribe_seconds: float) -> None:
         inject.send_keys(profile.abort_keys, profile.key_hold_ms, profile.key_gap_ms)

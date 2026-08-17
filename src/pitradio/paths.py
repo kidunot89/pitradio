@@ -99,8 +99,19 @@ def model_dir() -> Path:
     return install_dir() / "models"
 
 
+def voice_pack_dir() -> Path:
+    """Where the engineer's voice packs are installed.
+
+    Beside the config rather than under the install directory, for the same
+    reason the model cache is elsewhere: an update replaces the install
+    directory wholesale, and a pack is a gigabyte of audio the user chose to
+    put there. Losing it on every release would make the feature unusable.
+    """
+    return config_path().parent / "voices"
+
+
 def ensure_dirs() -> None:
-    for path in (config_path().parent, log_dir(), model_dir()):
+    for path in (config_path().parent, log_dir(), model_dir(), voice_pack_dir()):
         path.mkdir(parents=True, exist_ok=True)
 
 

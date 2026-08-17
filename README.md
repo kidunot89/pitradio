@@ -260,6 +260,29 @@ anywhere; it only proves the mic and the model work. If the level bar barely
 moves while you speak, raise **Microphone gain** — the bar shows the signal
 *after* gain, which is what Whisper actually receives.
 
+### Engineer
+
+A named voice that talks back: your lap times, cars alongside, and routines you
+start by saying something. Four engineers ship with it, each with its own voice,
+pace and how much it says.
+
+The one that ships targets a driver's quickest lap and, corner by corner, tells
+you how yours compared:
+
+> Chief, target P3
+>
+> *Targeting N.Tandy. Best lap, one twenty five point two seven.*
+>
+> *Turn one, N.Tandy was faster on the exit, six tenths.*
+
+It uses the same push-to-talk key as everything else, and it is off until you
+switch it on. Trigger phrases are yours to choose — if you would rather start
+the coach by saying "initiate build procedures", type that in.
+
+**[docs/engineer.md](docs/engineer.md)** is the full guide: talking to it,
+choosing a voice, writing your own routine phrases, other languages, and
+installing a recorded voice pack.
+
 ### History
 
 ![History](docs/images/history.png)

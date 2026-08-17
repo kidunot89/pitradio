@@ -763,7 +763,19 @@ def test_no_session_at_all_places_nobody():
 def test_lmu_exposes_the_proximity_settings():
     lmu = plugins.PluginRegistry().by_id("lmu")
     assert [s.key for s in lmu.settings] == [
-        "positions", "proximity_only", "proximity_metres"]
+        "positions", "proximity_only", "proximity_metres", "spotter_swap_sides",
+        "spotter_metres", "spotter_width_metres"]
+
+
+def test_the_spotter_side_swap_is_off_until_it_is_needed():
+    """It exists because which side is which could not be verified off a track.
+
+    Off by default is the only defensible starting point: half the users would
+    have to flip it whichever way round it shipped, and the ones who never
+    touch the spotter should not be asked to care.
+    """
+    defaults = plugins.PluginRegistry().settings_for("lmu")
+    assert defaults["spotter_swap_sides"] is False
 
 
 def test_proximity_is_off_until_it_is_switched_on():
