@@ -124,6 +124,43 @@ class HostApi:
         return _http(f"{self.base}/health", opener=self._opener)
 
 
+#: How long to wait for the browser half of pairing. Shorter than the relay's
+#: own expiry, so the window gives up *before* the thing it is asking about
+#: stops existing — otherwise the last minutes are spent polling something
+#: already gone, and the message would be wrong for all of them.
+PAIRING_WAIT_SECONDS = 300.0
+
+LINKED = "linked"
+FAILED = "failed"
+EXPIRED = "expired"
+PENDING = "pending"
+
+
+def pairing_outcome(reply: Reply) -> str:
+    """What a poll of a pairing means.
+
+    Named and separated because getting it wrong is invisible: a window that
+    treats "gone" as "still waiting" sits there with every button disabled and
+    nothing to say, which is what somebody sees after closing the browser tab
+    — by far the most common way a login ends without finishing.
+
+    A relay that cannot be reached is `pending`, not failed: a moment of
+    network trouble in the middle of a login should not throw the login away.
+    """
+    if not reply.ok:
+        return PENDING
+    status = str(reply.body.get("status") or "")
+    if status == "linked":
+        return LINKED
+    if status == "failed":
+        return FAILED
+    if status == "unknown":
+        # The relay has never heard of it, or has forgotten it. Either way
+        # nothing more will arrive, and waiting is only a longer silence.
+        return EXPIRED
+    return PENDING
+
+
 def describe(host: dict | None, *, base_ok: bool | None = None) -> str:
     """The status line the window shows.
 

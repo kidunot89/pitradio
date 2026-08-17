@@ -1242,7 +1242,13 @@ def _build_voice_host(app, frame) -> None:
                             command=lambda: _voice_host_act(app, "start")),
         "destroy": ttk.Button(buttons, text=t("Destroy"),
                               command=lambda: _voice_host_destroy(app)),
+        # Shown only while a login is in flight. Closing the browser tab is the
+        # commonest way one ends, and nothing tells the app that happened — so
+        # there has to be a way out that is not waiting for a timeout.
+        "cancel": ttk.Button(buttons, text=t("Cancel"),
+                             command=lambda: _voice_pair_cancel(app)),
     }
+    app.voice_pairing = None
     for button in app.voice_host_buttons.values():
         button.pack(side="left", padx=(0, 6))
         button.state(["disabled"])
@@ -1307,6 +1313,9 @@ def _voice_host_set(app, host, base_ok=None, message: str = "") -> None:
         # No host of your own yet. Create is the only thing on offer, and only
         # when there is a relay to ask.
         allowed = {"create"} if _voice_api(app).configured else set()
+    # A login in flight replaces everything with a way to abandon it.
+    if getattr(app, "voice_pairing", None) is not None:
+        allowed = {"cancel"}
 
     for name, button in app.voice_host_buttons.items():
         button.state(["!disabled"] if name in allowed else ["disabled"])
@@ -1424,40 +1433,82 @@ def _voice_host_create(app) -> None:
         code = started.body.get("user_code", "")
         poll_token = started.body.get("poll_token", "")
         if not (url and poll_token):
-            _on_main(app, lambda: _voice_host_set(
-                app, None, message=t("the relay did not offer a pairing")))
+            _on_main(app, lambda: _voice_pair_ended(
+                app, t("the relay did not offer a pairing")))
             return
 
-        _on_main(app, lambda: app.v_voice_host_status.set(
-            t("waiting for DigitalOcean… code {code}").format(code=code)))
+        # Recorded before the browser opens, so Cancel works from the first
+        # moment there is anything to cancel.
+        app.voice_pairing = poll_token
+
+        _on_main(app, lambda: _voice_pair_waiting(app, code))
         try:
             webbrowser.open(url)
         except Exception:
             log.debug("could not open a browser", exc_info=True)
 
-        # Poll until the browser half finishes. Bounded: an abandoned pairing
-        # expires at the relay anyway, and a window that waits forever is one
-        # nobody can tell has stopped trying.
-        deadline = time.monotonic() + 600
+        # Poll until the browser half finishes, is refused, expires, or the
+        # racer gives up. Closing the tab produces none of the first three —
+        # nothing tells an application that a browser window has gone — which
+        # is why Cancel exists rather than only a timeout.
+        deadline = time.monotonic() + hostapi.PAIRING_WAIT_SECONDS
         while time.monotonic() < deadline:
             time.sleep(hostapi.POLL_SECONDS)
-            status = api.pairing_status(poll_token)
-            state = status.body.get("status") if status.ok else ""
-            if state == "linked":
-                _on_main(app, lambda body=status.body: _paired(app, body))
+            if getattr(app, "voice_pairing", None) != poll_token:
+                return                      # cancelled, or another was started
+
+            # Polled **once** per turn and the body kept: a successful poll
+            # consumes the pairing at the relay, so asking again for the same
+            # answer gets "unknown" and throws away the link that just
+            # succeeded.
+            reply = api.pairing_status(poll_token)
+            outcome = hostapi.pairing_outcome(reply)
+            if outcome == hostapi.LINKED:
+                _on_main(app, lambda body=reply.body: _paired(app, body))
                 return
-            if state == "failed":
-                _on_main(app, lambda: _voice_host_set(
-                    app, None, message=t("DigitalOcean did not grant access")))
+            if outcome == hostapi.FAILED:
+                _on_main(app, lambda: _voice_pair_ended(
+                    app, t("DigitalOcean did not grant access")))
                 return
-        _on_main(app, lambda: _voice_host_set(
-            app, None, message=t("pairing timed out; try again")))
+            if outcome == hostapi.EXPIRED:
+                _on_main(app, lambda: _voice_pair_ended(
+                    app, t("that login expired — press Create to try again")))
+                return
+
+        _on_main(app, lambda: _voice_pair_ended(
+            app, t("no answer from DigitalOcean — press Create to try again")))
 
     threading.Thread(target=work, name="voice-pair", daemon=True).start()
 
 
+def _voice_pair_waiting(app, code: str) -> None:
+    """A login is in flight: say so, and offer the way out."""
+    app.v_voice_host_status.set(
+        t("waiting for DigitalOcean… code {code}").format(code=code))
+    for name, button in app.voice_host_buttons.items():
+        button.state(["!disabled"] if name == "cancel" else ["disabled"])
+
+
+def _voice_pair_ended(app, message: str) -> None:
+    """A login finished without linking, however it ended."""
+    app.voice_pairing = None
+    _voice_host_set(app, None, message=message)
+
+
+def _voice_pair_cancel(app) -> None:
+    """Give up waiting.
+
+    The poll loop notices the token has changed and stops. Nothing is told to
+    DigitalOcean — there is nothing to tell it — and the pairing expires at the
+    relay on its own, which is exactly what it is for.
+    """
+    app.voice_pairing = None
+    _voice_host_refresh(app)
+
+
 def _paired(app, body: dict) -> None:
     """Store the handle, then ask for a host."""
+    app.voice_pairing = None
     token = body.get("host_token", "")
     if not token:
         _voice_host_set(app, None, message=t("the relay linked nothing"))
