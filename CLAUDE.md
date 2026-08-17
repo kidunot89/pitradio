@@ -431,11 +431,38 @@ counts down and is zero in a lap-limited race. A per-lap clock is not a
 compromise: a trace is one lap and every question asked of it is a subtraction
 between two points on the same one.
 
-**Neither the iRacing nor the Assetto Corsa layout has been run against its
-game.** Both are tested against blocks built by hand, which catches a wrong
-width, a bad sentinel or a mis-decoded string, and cannot catch a wrong
-assumption about what the sim puts in a field. `--telemetry` is how that gets
-settled.
+**The Project CARS block covers three games**, which is why `pcars2.py` reads
+only the *head* of it: the participant array gives names, world positions, lap
+distance in metres, place and lap counts, and everything past it — the timing
+arrays — is where the layout is least certain from outside. `ParticipantInfo`
+has a `bool` then a 64-byte name then a float array, so the name ends at 65 and
+the position starts at **68**; the offsets are written out rather than summed
+because three bytes of padding turns a grid into noise that still looks like
+numbers.
+
+Lap times there are a **stopwatch**, not a field: the clock when the lap
+counter went up minus the clock when it last did. That clock is this machine's,
+so a lap spanning a pause comes out long — which fails safe, since an inflated
+lap never becomes a reference. Their sector enum could not be pinned down, so
+`PROVIDES_SECTORS` is not claimed.
+
+**Automobilista 2 is a subclass with its own id**, not a shared entry. A
+profile picks a plugin by name and should be able to name the game being run;
+plugin settings are stored against the id, so the two get separate spotter
+geometry; and AMS2 has been diverging from the Project CARS API, so the
+override has somewhere to live. It is listed **before** its parent in
+`BUILTIN`, because `for_executable` returns the first match and the generic one
+would otherwise claim AMS2's executables.
+
+`derive.Speeds` is shared by iRacing and the Project CARS plugins, both of
+which publish distance and no usable speed. The lap book records nothing from a
+stationary car, so a speed left at zero means no trace samples at all and a
+trainer that never sees a lap.
+
+**Only LMU has been run against its game.** Every other reader is tested
+against a block built by hand, which catches a wrong width, a bad sentinel,
+a mis-decoded string or a padding mistake, and cannot catch a wrong assumption
+about what the sim puts in a field. `--telemetry` is how that gets settled.
 
 Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
 can serve several games. `executables` on the plugin only pre-fills the picker.

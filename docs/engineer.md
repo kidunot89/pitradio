@@ -330,31 +330,41 @@ switched on and silent, and the log says which capability is missing.
 Sims publish very different things, and a behaviour whose data is missing is
 **skipped with a line in the log** rather than left switched on and silent.
 
-| | Le Mans Ultimate | iRacing | Assetto Corsa / Competizione / Evo |
-| --- | --- | --- | --- |
-| Lap times | yes | yes | yes |
-| New fastest lap | yes | yes | — |
-| Sector calls | yes | — | yes |
-| Hot lap trainer | any driver | any driver | your own best |
-| Sector trainer | any driver | — | your own best |
-| Spotter | geometry | the sim's own call | geometry |
-| Driver mentions, "P3" | yes | yes | — |
+| | Le Mans Ultimate | iRacing | Assetto Corsa / Competizione / Evo | Automobilista 2, Project CARS 2 / 3 |
+| --- | --- | --- | --- | --- |
+| Lap times | yes | yes | yes | derived |
+| New fastest lap | yes | yes | — | yes |
+| Sector calls | yes | — | yes | — |
+| Hot lap trainer | any driver | any driver | your own best | any driver |
+| Sector trainer | any driver | — | your own best | — |
+| Spotter | geometry | the sim's own call | geometry | geometry |
+| Driver mentions, "P3" | yes | yes | — | yes |
 
 The gaps are the games, not the app:
 
 - **iRacing** publishes no per-car sector splits, so sector calls have nothing
-  to work from. Its spotter is the best of the three — `CarLeftRight` comes
-  from the real car bodies, so it needs no swap setting and no width guess.
+  to work from. Its spotter is the best of the lot — `CarLeftRight` comes from
+  the real car bodies, so it needs no swap setting and no width guess.
 - **Assetto Corsa** publishes lap times for your car only and no driver names
   at all. That is why there are no standings and no mentions, and why the
   trainers chase your own best lap — which is what a practice session is for
   anyway.
+- **Automobilista 2 and Project CARS** carry lap *counts* rather than lap
+  times in the part of their block worth trusting, so lap times are measured
+  here with a stopwatch. A lap that spans a pause comes out longer than it was;
+  that fails safe, since an inflated lap never becomes the reference a trainer
+  chases. Their sector field is an enum that could not be pinned down from
+  outside the games, so sector calls are not offered.
 
-**Le Mans Ultimate is the only one verified against the running game.** The
-iRacing and Assetto Corsa readers are tested against shared memory built by
-hand, which catches a wrong field width or a mis-decoded name and cannot catch
-a wrong assumption about what the sim puts where. Run `--telemetry` with the
-game on track before trusting either — and Assetto Corsa Evo especially, which
+Automobilista 2 has its own entry rather than sharing the Project CARS one, so
+you can pick the game you are actually running and so the two keep separate
+spotter and proximity settings.
+
+**Le Mans Ultimate is the only one verified against the running game.** Every
+other reader is tested against shared memory built by hand, which catches a
+wrong field width, a mis-decoded name or a padding mistake — and cannot catch a
+wrong assumption about what the sim puts where. Run `--telemetry` with the game
+on track before trusting any of them, and Assetto Corsa Evo especially, which
 is still early access and may move its layout.
 
 ## Per-sim settings

@@ -50,6 +50,7 @@ from pitradio.plugins.base import (
     SessionPlugin,
     Standings,
 )
+from pitradio.plugins.derive import Speeds
 
 log = logging.getLogger(__name__)
 
@@ -72,17 +73,6 @@ LEFT_RIGHT = {
 
 #: Track length arrives as a string with its unit on it: "5.55 km".
 _LENGTH = re.compile(r"([\d.]+)\s*(km|mi)?", re.IGNORECASE)
-
-#: Below this a car has not moved enough between reads for the derived speed to
-#: be a speed rather than the noise on a lap-distance fraction.
-MIN_DELTA_SECONDS = 0.05
-
-#: Metres per second past which the reading is not a car. Formula machinery
-#: tops out around 103 m/s and the fastest ovals a little over that, so this
-#: leaves generous room while still catching a car that has been moved rather
-#: than driven.
-MAX_SPEED = 130.0
-
 
 def track_length(raw) -> float:
     """"5.55 km" -> 5550.0. Zero when it cannot be read.
@@ -116,50 +106,6 @@ def sides(value) -> dict[str, int]:
     except (TypeError, ValueError):
         return {}
 
-
-class Speeds:
-    """Per-car speed, derived from how far they moved between two reads.
-
-    iRacing publishes a speed for the player and for nobody else, so this is
-    the only way the coaching traces get one for a car being chased. It is a
-    speed trap rather than a speedometer: distance over time, which is exactly
-    right on average and slightly behind through a corner.
-    """
-
-    def __init__(self) -> None:
-        #: driver -> (session time, distance round the lap)
-        self._seen: dict[str, tuple[float, float]] = {}
-
-    def reset(self) -> None:
-        self._seen.clear()
-
-    def of(self, driver: str, elapsed: float, distance: float,
-           length: float) -> float:
-        previous = self._seen.get(driver)
-        self._seen[driver] = (elapsed, distance)
-        if previous is None or length <= 0:
-            return 0.0
-
-        was_at, was_distance = previous
-        span = elapsed - was_at
-        if span < MIN_DELTA_SECONDS:
-            return 0.0
-
-        moved = distance - was_distance
-        if moved < 0:
-            # Crossed the line: what was left of the old lap plus what has been
-            # done of the new one.
-            moved += length
-
-        # Sanity, not arithmetic. A car sent to the pits, a session restart or
-        # a tow all jump the lap distance by hundreds of metres between two
-        # reads, and every one of them comes out of the subtraction above as a
-        # perfectly well-formed enormous speed. Checking the *speed* catches
-        # them whichever direction they jumped, which comparing distances did
-        # not: a teleport from 4000m to 100m wraps to 1100m and read as 1100
-        # metres per second.
-        speed = moved / span
-        return speed if 0.0 <= speed <= MAX_SPEED else 0.0
 
 
 class IRacingPlugin(SessionPlugin):

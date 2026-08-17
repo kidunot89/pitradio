@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from pitradio.plugins.ams2 import Automobilista2Plugin
 from pitradio.plugins.assetto import AssettoCorsaPlugin
 from pitradio.plugins.base import (
     PluginSetting,
@@ -23,12 +24,18 @@ from pitradio.plugins.base import (
 )
 from pitradio.plugins.iracing import IRacingPlugin
 from pitradio.plugins.lmu import LeMansUltimatePlugin
+from pitradio.plugins.projectcars2 import ProjectCars2Plugin
 
 log = logging.getLogger(__name__)
 
 #: Every plugin that ships. Add new sims here.
+#:
+#: Automobilista 2 is listed before the Project CARS plugin it inherits from,
+#: because `for_executable` returns the first match and both would claim an
+#: AMS2 executable if the order were the other way round.
 BUILTIN: tuple[type[SessionPlugin], ...] = (
-    LeMansUltimatePlugin, IRacingPlugin, AssettoCorsaPlugin)
+    LeMansUltimatePlugin, IRacingPlugin, AssettoCorsaPlugin,
+    Automobilista2Plugin, ProjectCars2Plugin)
 
 
 class PluginRegistry:
