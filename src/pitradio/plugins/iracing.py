@@ -41,6 +41,7 @@ import threading
 
 from pitradio.plugins import irsdk, shared_memory
 from pitradio.plugins.base import (
+    PROVIDES_FIELD,
     PROVIDES_LAPS,
     PROVIDES_SPOTTER,
     Car,
@@ -172,7 +173,7 @@ class IRacingPlugin(SessionPlugin):
     #: Not `positions`: iRacing publishes none for other cars. Not `sectors`
     #: either — see the module docstring. Claiming what is not there is how a
     #: behaviour ends up switched on and permanently silent.
-    provides = frozenset({PROVIDES_LAPS, PROVIDES_SPOTTER})
+    provides = frozenset({PROVIDES_LAPS, PROVIDES_SPOTTER, PROVIDES_FIELD})
     settings = (
         PluginSetting(
             key="positions",

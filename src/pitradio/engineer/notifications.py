@@ -329,7 +329,10 @@ class FastestLapNotification(Notification):
                    "what it was.")
     default_repeat = 0.0
     repeat_help = "each new fastest lap is said once"
-    requires = (base.PROVIDES_LAPS,)
+    # The field as well as the laps: a sim that times only the player's car has
+    # a field of one, and this would fire every time you beat your own best and
+    # call it the fastest lap of the session.
+    requires = (base.PROVIDES_LAPS, base.PROVIDES_FIELD)
 
     def __init__(self) -> None:
         self._holder = ""
@@ -376,7 +379,7 @@ class FastestSectorNotification(Notification):
     default_repeat = 0.0
     default_enabled = False
     repeat_help = "each new fastest sector is said once"
-    requires = (base.PROVIDES_SECTORS,)
+    requires = (base.PROVIDES_SECTORS, base.PROVIDES_FIELD)
 
     def __init__(self) -> None:
         self._seen: set[int] = set()

@@ -46,6 +46,14 @@ PROVIDES_SECTORS = "sectors"
 #: A left/right call the sim makes itself, for sims that do that rather than
 #: handing over positions.
 PROVIDES_SPOTTER = "spotter"
+#: Lap data for cars *other than the player's*, and names to attach it to.
+#:
+#: The distinction is not pedantry. Assetto Corsa publishes every car's world
+#: position but lap times for the player alone, and no driver names at all — so
+#: "somebody has taken the fastest lap of the session" would fire when you beat
+#: your own, naming a field of one. Anything comparing you to the rest of the
+#: grid needs this as well as `PROVIDES_LAPS`.
+PROVIDES_FIELD = "field"
 
 
 @dataclass(frozen=True)

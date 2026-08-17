@@ -406,6 +406,37 @@ and it is the one the driver list is in: iRacing indents a list **level with
 the key that introduced it**, so "less indented, close the block" would drop
 every driver.
 
+**Assetto Corsa is the most limited of the three, and the shape follows from
+it.** `acpmf_static`/`graphics`/`physics` give every car's world position, and
+lap data for the player *only* — no driver names for anybody else at all. So
+the trainers work against your own best lap, which is what a practice session
+is anyway, and standings and mentions cannot work. It does not claim
+`PROVIDES_FIELD`, which is what stops "somebody has taken the fastest lap"
+firing when you beat your own with a field of one.
+
+Three things in `acpmf.py` are the traps: strings are **UTF-16** (`wchar_t`),
+so decoding as UTF-8 yields a first letter and rubbish; "no time" is a
+**sentinel of 99999999ms**, which left alone becomes an eleven-hour best lap
+that the trainers then target; and the layout stops at the fields the three
+games agree on, because past `sectorCount` sits a `bool` whose padding is a
+compiler's business and one byte shifts everything after it. `plausible()`
+refuses pages whose values are not Assetto Corsa-shaped, turning a layout
+change into "not connected" rather than confident nonsense.
+
+Track length there is **measured, not read**: distance covered over fraction of
+a lap covered, which holds whether `distanceTraveled` counts the lap or the
+session, and avoids an offset nobody can check. `elapsed` is the **current lap
+time**, because these pages have no session clock — only the time *left*, which
+counts down and is zero in a lap-limited race. A per-lap clock is not a
+compromise: a trace is one lap and every question asked of it is a subtraction
+between two points on the same one.
+
+**Neither the iRacing nor the Assetto Corsa layout has been run against its
+game.** Both are tested against blocks built by hand, which catches a wrong
+width, a bad sentinel or a mis-decoded string, and cannot catch a wrong
+assumption about what the sim puts in a field. `--telemetry` is how that gets
+settled.
+
 Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
 can serve several games. `executables` on the plugin only pre-fills the picker.
 

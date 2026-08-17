@@ -325,6 +325,38 @@ The `provides:` line at the top says which of those the plugin claims to
 supply. A behaviour that needs something absent is skipped rather than left
 switched on and silent, and the log says which capability is missing.
 
+## What each sim can do
+
+Sims publish very different things, and a behaviour whose data is missing is
+**skipped with a line in the log** rather than left switched on and silent.
+
+| | Le Mans Ultimate | iRacing | Assetto Corsa / Competizione / Evo |
+| --- | --- | --- | --- |
+| Lap times | yes | yes | yes |
+| New fastest lap | yes | yes | — |
+| Sector calls | yes | — | yes |
+| Hot lap trainer | any driver | any driver | your own best |
+| Sector trainer | any driver | — | your own best |
+| Spotter | geometry | the sim's own call | geometry |
+| Driver mentions, "P3" | yes | yes | — |
+
+The gaps are the games, not the app:
+
+- **iRacing** publishes no per-car sector splits, so sector calls have nothing
+  to work from. Its spotter is the best of the three — `CarLeftRight` comes
+  from the real car bodies, so it needs no swap setting and no width guess.
+- **Assetto Corsa** publishes lap times for your car only and no driver names
+  at all. That is why there are no standings and no mentions, and why the
+  trainers chase your own best lap — which is what a practice session is for
+  anyway.
+
+**Le Mans Ultimate is the only one verified against the running game.** The
+iRacing and Assetto Corsa readers are tested against shared memory built by
+hand, which catches a wrong field width or a mis-decoded name and cannot catch
+a wrong assumption about what the sim puts where. Run `--telemetry` with the
+game on track before trusting either — and Assetto Corsa Evo especially, which
+is still early access and may move its layout.
+
 ## Per-sim settings
 
 Three of the engineer's numbers live on the **profile**, under the game's

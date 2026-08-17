@@ -27,6 +27,7 @@ from pathlib import Path
 from pitradio import voice
 from pitradio.plugins import shared_memory
 from pitradio.plugins.base import (
+    PROVIDES_FIELD,
     PROVIDES_LAPS,
     PROVIDES_POSITIONS,
     PROVIDES_SECTORS,
@@ -167,7 +168,7 @@ class LeMansUltimatePlugin(SessionPlugin):
     #: All of it. The block carries every car's world position, lap and sector
     #: data, which is why this is the sim the engineer was built against.
     provides = frozenset({
-        PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS,
+        PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS, PROVIDES_FIELD,
     })
     settings = (
         PluginSetting(

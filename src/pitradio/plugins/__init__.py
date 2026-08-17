@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from pitradio.plugins.assetto import AssettoCorsaPlugin
 from pitradio.plugins.base import (
     PluginSetting,
     SessionInfo,
@@ -26,7 +27,8 @@ from pitradio.plugins.lmu import LeMansUltimatePlugin
 log = logging.getLogger(__name__)
 
 #: Every plugin that ships. Add new sims here.
-BUILTIN: tuple[type[SessionPlugin], ...] = (LeMansUltimatePlugin, IRacingPlugin)
+BUILTIN: tuple[type[SessionPlugin], ...] = (
+    LeMansUltimatePlugin, IRacingPlugin, AssettoCorsaPlugin)
 
 
 class PluginRegistry:
