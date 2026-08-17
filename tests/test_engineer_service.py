@@ -623,7 +623,7 @@ def test_a_queue_behind_the_car_beside_you_is_still_one_car():
 def test_a_held_car_keeps_the_side_called_without_being_counted():
     facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
     neighbours = spotter.alongside(
-        (0.0, 0.0, 10.0), facing, {"Drifted": (-3.0, 0.0, 16.0)},
+        (0.0, 0.0, 10.0), facing, {"Drifted": (-3.0, 0.0, 15.0)},
         holding=frozenset({"left"}))
 
     assert neighbours and neighbours[0].overlapping is False
@@ -897,7 +897,9 @@ def test_a_car_is_not_called_until_it_is_properly_alongside(engineer):
     disable(engineer, notifications.LAP_TIME)
 
     alongside(engineer, distance=0.0)
-    alongside(engineer, left=True, distance=10.0, gap=7.0)   # inside 9m, outside 4m
+    # Inside the hold range (5.17m) but outside the enter range (4.05m), so
+    # nothing is said until they come properly alongside.
+    alongside(engineer, left=True, distance=10.0, gap=4.5)
     assert engineer.speaker.said == []
 
     alongside(engineer, left=True, distance=20.0, gap=2.0)   # properly alongside
@@ -914,7 +916,7 @@ def test_a_call_is_held_out_to_the_wider_range(engineer):
     engineer.speaker.said.clear()
 
     # Drifted back past the enter range but still inside the leave range.
-    alongside(engineer, left=True, distance=20.0, gap=7.0)
+    alongside(engineer, left=True, distance=20.0, gap=4.5)
     assert "clear" not in engineer.speaker.spoken()
 
 
@@ -926,15 +928,16 @@ def test_the_spotter_range_comes_from_the_sim_s_plugin_settings(engineer):
     where a car's origin sits — so the number belongs on the profile."""
     enable(engineer, notifications.SPOTTER, repeat=3.0)
     disable(engineer, notifications.LAP_TIME)
-    # A car 20m up the road is not alongside by default...
-    engineer.plugins.settings = {"spotter_metres": 9, "spotter_overlap_metres": 4}
+    # A car 20m up the road is not alongside in a sim whose cars are 5m...
+    engineer.plugins.settings = {"spotter_car_length": 5}
     alongside(engineer, distance=0.0)
     alongside(engineer, left=True, distance=10.0, gap=20.0)
     assert engineer.speaker.said == []
 
-    # ...but is if this sim is told to count that far. Both ranges, because
-    # the call is only *made* inside the tighter one.
-    engineer.plugins.settings = {"spotter_metres": 30, "spotter_overlap_metres": 30}
+    # ...but is where they are trucks. One number moves every range, which is
+    # the point: a length is a fact about the cars, and the four distances are
+    # all statements about it.
+    engineer.plugins.settings = {"spotter_car_length": 30}
     engineer.behaviours.reset()
     alongside(engineer, distance=40.0)
     alongside(engineer, left=True, distance=50.0, gap=20.0)
@@ -973,3 +976,88 @@ def test_a_new_track_clears_everything(engineer):
     assert engineer.book.best == {}
     assert engineer.sectors.best == {}
     assert engineer.book.track_length == 13600.0
+
+
+# -- what the spotter says the second time --------------------------------
+
+
+def test_a_repeat_says_still_there_rather_than_the_call_again():
+    """"Car left" twice makes the driver re-check a side they already know
+    about. Crew Chief's own vocabulary, and for that reason."""
+    key, first = spotter.standing("left", 1, first=True)
+    again_key, again = spotter.standing("left", 1, first=False)
+
+    assert first == "car left"
+    assert again == spotter.STILL_THERE
+    # **The same key**, or the repeat would be a new call and go out on the
+    # very next tick instead of on the repeat interval.
+    assert key == again_key
+
+
+def test_a_second_car_arriving_is_a_new_call_not_a_repeat():
+    one, _ = spotter.standing("left", 1, first=True)
+    two, text = spotter.standing("left", 2, first=True)
+
+    assert one != two
+    assert text == "two cars left"
+
+
+def test_both_sides_going_clear_at_once_is_one_call():
+    changes = spotter.calls({}, frozenset({"left", "right"}))
+    assert [text for _side, text, _urgent in changes] == [spotter.CLEAR_ALL_ROUND]
+
+
+# -- ranges come from the size of the cars --------------------------------
+
+
+def test_every_spotter_distance_moves_with_the_car():
+    small = spotter.ranges(2.0, 1.5)
+    big = spotter.ranges(6.5, 2.5)
+
+    for key in ("overlap", "metres", "min_lateral", "width"):
+        assert small[key] < big[key], key
+    # And the leave range is past the enter range, or a call would clear
+    # itself the instant it was made.
+    assert small["metres"] > small["overlap"]
+
+
+# -- what is up the road --------------------------------------------------
+
+
+def a_car(name: str, distance: float, speed: float) -> Car:
+    return Car(slot=0, driver=name, lap_dist=distance, speed=speed)
+
+
+def test_braking_for_a_corner_is_not_a_hazard():
+    """The rule that fired here was "much slower than you", which is the
+    definition of a braking zone. It is gone; only a stopped car is called."""
+    own = a_car("Me", 100.0, 70.0)
+    braking = a_car("Ahead", 150.0, 30.0)
+
+    assert spotter.ahead(own, [own, braking], track_length=5000.0) is None
+
+
+def test_a_car_has_to_stay_stopped_before_it_is_called():
+    own = a_car("Me", 100.0, 70.0)
+    spun = a_car("Ahead", 150.0, 0.5)
+    stopped = spotter.Stopped(hold=1.0)
+
+    assert spotter.ahead(own, [own, spun], track_length=5000.0,
+                         stopped=stopped, now=0.0) is None
+    hazard = spotter.ahead(own, [own, spun], track_length=5000.0,
+                           stopped=stopped, now=1.5)
+    assert hazard is not None and hazard.driver == "Ahead"
+    assert spotter.hazard_call(hazard) == "car stopped ahead"
+
+
+def test_getting_going_again_clears_the_stopped_memory():
+    own = a_car("Me", 100.0, 70.0)
+    stopped = spotter.Stopped(hold=1.0)
+
+    spotter.ahead(own, [own, a_car("Ahead", 150.0, 0.5)],
+                  track_length=5000.0, stopped=stopped, now=0.0)
+    # Rejoined, so the clock starts again rather than carrying on.
+    spotter.ahead(own, [own, a_car("Ahead", 150.0, 40.0)],
+                  track_length=5000.0, stopped=stopped, now=0.5)
+    assert spotter.ahead(own, [own, a_car("Ahead", 150.0, 0.5)],
+                         track_length=5000.0, stopped=stopped, now=1.2) is None

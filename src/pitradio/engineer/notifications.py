@@ -227,10 +227,12 @@ class SpotterNotification(Notification):
     def __init__(self) -> None:
         self._heading = spotter.Heading()
         self._sides: frozenset[str] = frozenset()
+        self._stopped = spotter.Stopped()
 
     def reset(self) -> None:
         self._heading.reset()
         self._sides = frozenset()
+        self._stopped.reset()
 
     def check(self, context) -> list[Call]:
         own = context.own_car()
@@ -246,25 +248,37 @@ class SpotterNotification(Notification):
         changes = spotter.calls(tally, self._sides)
         self._sides = now
 
-        calls = [
-            Call(f"{side}:{text}", context.script.spotter_call(text), urgent)
-            for side, text, urgent in changes
-        ]
+        # An arrival and the repeats that follow it are **one call under one
+        # key**, from `spotter.standing`. Two keys would mean the repeat was a
+        # new call the moment the wording changed, and a new call is due
+        # immediately — so "car left" would be followed by "still there" a tick
+        # later instead of three seconds later.
+        arrived = {side for side, _text, _urgent in changes if side in now}
+        calls: list[Call] = []
+        for side, text, urgent in changes:
+            key = (spotter.standing(side, tally.get(side, 1), first=True)[0]
+                   if side in arrived else f"{side}:{text}")
+            calls.append(Call(key, context.script.spotter_call(text), urgent))
         # Sides that have not changed still get a standing call, which the
         # repeat interval decides the fate of. Without this the spotter says
-        # "car left" once and then nothing for as long as they sit there.
+        # "car left" once and then nothing for as long as they sit there — and
+        # with the arrival's own wording it would say "car left" over and over,
+        # which is what `spotter.standing` exists to stop.
         for side in sorted(now):
-            if any(call.key.startswith(f"{side}:") for call in calls):
+            if side in arrived:
                 continue
-            text = spotter.warning(side, tally.get(side, 1))
-            calls.append(Call(f"{side}:{text}",
-                              context.script.spotter_call(text), urgent=True))
+            key, text = spotter.standing(side, tally.get(side, 1), first=False)
+            calls.append(Call(key, context.script.spotter_call(text), urgent=True))
 
-        # What is up the road, which the sides say nothing about. A stopped car
-        # is the hazard a spotter exists for: it is the one you cannot see
-        # coming and cannot do anything about late.
+        # What is up the road, which the sides say nothing about. A car that
+        # has been *stationary* for a second is the hazard a spotter exists
+        # for: the one you cannot see coming and cannot do anything about
+        # late. Note what is deliberately not here — a car merely slower than
+        # you. That fired on every braking zone, and it is not what Crew Chief
+        # does either; see `spotter.STOPPED_FOR_SECONDS`.
         hazard = spotter.ahead(own, context.session.cars,
-                               track_length=context.session.track_length)
+                               track_length=context.session.track_length,
+                               stopped=self._stopped, now=context.session.elapsed)
         text = spotter.hazard_call(hazard)
         if text:
             calls.append(Call(f"ahead:{text}",
@@ -303,6 +317,7 @@ class SpotterNotification(Notification):
             width=context.width_metres,
             swap=context.swap_sides,
             overlap=context.overlap_metres,
+            min_lateral=context.min_lateral_metres,
             # What is already being called. A car keeps its call out to the
             # wider range; a new one has to come properly alongside first.
             holding=self._sides))

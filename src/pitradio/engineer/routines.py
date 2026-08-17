@@ -71,7 +71,7 @@ class Context:
     finished_sectors: tuple[sectors.SectorTime, ...] = ()
     # -- the spotter's geometry, from the sim's own plugin settings --------
     #
-    # All three are on the profile rather than in the engineer's config,
+    # All four are on the profile rather than in the engineer's config,
     # because they depend on the sim and the cars in it rather than on the
     # driver's taste. A number that suits one game is wrong in the next.
 
@@ -84,6 +84,10 @@ class Context:
     overlap_metres: float = spotter.DEFAULT_OVERLAP_METRES
     #: How far to the side still counts as beside you rather than elsewhere.
     width_metres: float = spotter.DEFAULT_WIDTH_METRES
+    #: And how far out a car has to be before it is beside you rather than
+    #: nose-to-tail on the same line — which is the test that stops a queue
+    #: forming behind your door being called as a car on it.
+    min_lateral_metres: float = spotter.MIN_LATERAL_METRES
 
     #: Whether calls about other cars are limited to the player's own class.
     own_class_only: bool = True

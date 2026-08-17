@@ -773,7 +773,7 @@ def test_lmu_exposes_the_proximity_settings():
     lmu = plugins.PluginRegistry().by_id("lmu")
     assert [s.key for s in lmu.settings] == [
         "positions", "proximity_only", "proximity_metres", "spotter_swap_sides",
-        "spotter_metres", "spotter_width_metres"]
+        "spotter_car_length", "spotter_car_width"]
 
 
 def test_the_spotter_side_swap_is_off_until_it_is_needed():

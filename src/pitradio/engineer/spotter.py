@@ -28,46 +28,63 @@ from dataclasses import dataclass
 LEFT = "left"
 RIGHT = "right"
 
-#: How far apart two cars may be along the track and still count as alongside
-#: **once they already are**. A prototype is about 5m long, so this is
-#: overlapping bodywork plus a car either way.
-DEFAULT_ALONGSIDE_METRES = 9.0
-
-#: And how much closer they must be before the call is *made* in the first
-#: place. Deliberately tighter than the range that keeps it.
+#: The car, in metres. **Everything else is derived from these.**
 #:
-#: The two are different questions and answering them with one number gets both
-#: wrong. Announcing at the full range calls a car that is still most of a
-#: length back — which the driver cannot see, does not believe, and learns to
-#: ignore. Dropping the call at the same range would then have it flicker on
-#: and off as the two cars breathe. Enter close, leave at arm's length.
-DEFAULT_OVERLAP_METRES = 4.0
+#: Taken from how Crew Chief models it, which is the right way round: two cars
+#: are alongside when their *bodywork* overlaps, and that is a fact about car
+#: length, not an arbitrary radius. Its defaults are 4.5m by 1.8m, with
+#: per-car overrides — a kart is 2.0 by 1.5, an LMP 4.34 by 1.75, a truck 6.5
+#: by 2.5 — which is why these are plugin settings rather than constants.
+DEFAULT_CAR_LENGTH = 4.5
+DEFAULT_CAR_WIDTH = 1.8
 
-#: How far to the side. Beyond this they are on a different part of the
-#: circuit: an adjacent straight, or the other side of a hairpin, which is
-#: exactly where a naive distance check starts shouting about nobody.
-DEFAULT_WIDTH_METRES = 8.0
+#: Bodywork overlaps when the centres are within a car length. Slightly inside
+#: that, so the call means "properly beside you" rather than "just caught the
+#: back of them".
+ENTER_LENGTHS = 0.9
 
-#: And how far to the side is *far enough* to be a car beside you rather than
-#: one in front of you.
-#:
-#: This was missing, and its absence is what put nose-to-tail traffic on the
-#: door: a car two metres ahead and half a metre offset passed every other
-#: test and came out as "car left". Alongside means two cars occupy the track
-#: *across* its width — near enough the same line and one is simply following
-#: the other, however close they are.
-MIN_LATERAL_METRES = 1.3
+#: And the call is dropped just past a full length, when they are genuinely
+#: clear. This was two car lengths, which is why the all-clear kept arriving
+#: long after the car had gone.
+LEAVE_LENGTHS = 1.15
+
+#: Two cars side by side have their centres about a car width apart. Nearer
+#: than this and they are on the same line — one following the other.
+MIN_LATERAL_WIDTHS = 0.9
+
+#: And beyond a few widths they are on another part of the circuit.
+MAX_LATERAL_WIDTHS = 4.0
 
 #: Below this the heading taken from two positions is noise rather than a
 #: direction.
 #:
-#: Half a metre was far too little, and this is the fault underneath the other
-#: two. Through slow traffic, consecutive reads are centimetres apart and the
+#: Half a metre was far too little, and this is the fault underneath several
+#: others. Through slow traffic consecutive reads are centimetres apart and the
 #: direction between them is dominated by the sim's own rounding — so "forward"
-#: swings about, and a car directly ahead is resolved as a car directly beside.
-#: That is why front and rear traffic was being called, and why the calls came
-#: and went at the wrong moments: not the ranges, the axes.
+#: swings about, and a car directly ahead resolves as a car directly beside.
+#: Everything downstream depends on these axes being right.
 MIN_HEADING_METRES = 3.0
+
+DEFAULT_ALONGSIDE_METRES = DEFAULT_CAR_LENGTH * LEAVE_LENGTHS
+DEFAULT_OVERLAP_METRES = DEFAULT_CAR_LENGTH * ENTER_LENGTHS
+DEFAULT_WIDTH_METRES = DEFAULT_CAR_WIDTH * MAX_LATERAL_WIDTHS
+MIN_LATERAL_METRES = DEFAULT_CAR_WIDTH * MIN_LATERAL_WIDTHS
+
+
+def ranges(car_length: float = DEFAULT_CAR_LENGTH,
+           car_width: float = DEFAULT_CAR_WIDTH) -> dict[str, float]:
+    """Every spotter distance, from the size of the cars.
+
+    One place, so the four of them cannot drift apart — and so a sim whose
+    cars are karts or trucks gets all four right by changing two numbers.
+    """
+    return {
+        "overlap": car_length * ENTER_LENGTHS,
+        "metres": car_length * LEAVE_LENGTHS,
+        "min_lateral": car_width * MIN_LATERAL_WIDTHS,
+        "width": car_width * MAX_LATERAL_WIDTHS,
+    }
+
 
 #: How many recent positions the heading is averaged over. Enough to ride out a
 #: bad sample without lagging round a corner.
@@ -191,6 +208,7 @@ def alongside(
     width: float = DEFAULT_WIDTH_METRES,
     swap: bool = False,
     overlap: float = DEFAULT_OVERLAP_METRES,
+    min_lateral: float = MIN_LATERAL_METRES,
     holding: frozenset[str] | None = None,
 ) -> list[Alongside]:
     """Every car beside this one, nearest first.
@@ -202,7 +220,8 @@ def alongside(
     near you. Three tests, and the middle one was missing until traffic proved
     it: far enough to the side to be a different line (`MIN_LATERAL_METRES`),
     not so far as to be elsewhere on the circuit (`width`), and overlapping
-    along the road (`overlap`).
+    along the road (`overlap`). All four distances come from `ranges()`, so
+    they move together with the size of the cars in the sim.
 
     Cars out to `metres` are still returned while their side is `holding` a
     call, marked `overlapping=False`. They keep the call alive so it does not
@@ -221,7 +240,7 @@ def alongside(
         sideways = abs(across)
 
         # Beside you, not in front of you and not on another part of the track.
-        if sideways < MIN_LATERAL_METRES or sideways > width:
+        if sideways < min_lateral or sideways > width:
             continue
 
         side = RIGHT if (across > 0) != swap else LEFT
@@ -263,6 +282,22 @@ def occupied(neighbours: list[Alongside]) -> frozenset[str]:
     return frozenset(car.side for car in neighbours)
 
 
+#: What the spotter says about a car that is *still* there, rather than saying
+#: "car left" over and over.
+#:
+#: Crew Chief's own vocabulary, and it is right for a reason worth writing
+#: down: the first call tells you which side, and repeating it makes the driver
+#: re-check a side they already know about. "Still there" carries the one piece
+#: of information a repeat actually has — that nothing has changed — in two
+#: syllables, and it cannot be mistaken for a second car arriving.
+STILL_THERE = "still there"
+
+#: And when both sides go clear on the same tick. One call, because two
+#: all-clears on top of each other is the moment a driver most needs a short
+#: answer.
+CLEAR_ALL_ROUND = "clear all round"
+
+
 def calls(
     now: dict[str, int] | frozenset[str], before: frozenset[str]
 ) -> list[tuple[str, str, bool]]:
@@ -288,6 +323,12 @@ def calls(
     the notification that owns the repeat interval.
     """
     tally = now if isinstance(now, dict) else {side: 1 for side in now}
+    if (LEFT in before and RIGHT in before
+            and LEFT not in tally and RIGHT not in tally):
+        # Both at once. Two all-clears back to back is the one place the
+        # spotter is talking over itself at exactly the wrong moment.
+        return [(LEFT, CLEAR_ALL_ROUND, True)]
+
     changed: list[tuple[str, str, bool]] = []
     for side in (LEFT, RIGHT):
         was, is_now = side in before, side in tally
@@ -312,28 +353,73 @@ HAZARD_METRES = 250.0
 #: the wrong way, or in the wall.
 STOPPED_SPEED = 4.0
 
-#: And how much slower than you a moving car has to be before it is a hazard
-#: rather than simply someone you are catching. A car forty metres a second
-#: slower is a closing speed no driver expects.
-SLOWER_BY = 20.0
+#: And how long it has to stay that way before it is called.
+#:
+#: **This is the whole of the fix**, and the reason is worth stating plainly.
+#: There was a second rule here: a car much slower than you was a hazard too.
+#: It fired in every braking zone, because a braking zone is precisely where
+#: the car in front is much slower than you — that is what a braking zone is.
+#: The rule was wrong in kind, not in threshold, and no number would have saved
+#: it.
+#:
+#: Crew Chief does not have that rule either. Its "slow car ahead" and "stopped
+#: car ahead" are in `flags/`, not in `spotter/`, alongside `slow_car_in_turn_3`
+#: and `local_yellow_ahead` — they come from the sim saying there is an
+#: incident, and they name the corner it is in. Its spotter proper says only
+#: which side somebody is on.
+#:
+#: So what is left is the one case a braking zone cannot produce: a car that is
+#: barely moving, and has been for long enough that it is not slowing for
+#: anything. The rest belongs with the flags.
+STOPPED_FOR_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
 class Hazard:
-    """Something stationary or much slower on the road ahead."""
+    """Something stationary on the road ahead."""
 
     driver: str
     metres: float
-    stopped: bool
+    stopped: bool = True
+
+
+class Stopped:
+    """How long each car has been standing still.
+
+    A memory, because one sample cannot tell a stopped car from a slow one and
+    the difference is the entire point. Kept here rather than in the
+    notification so the rule and its timing are testable together, with a clock
+    passed in rather than read.
+    """
+
+    def __init__(self, hold: float = STOPPED_FOR_SECONDS) -> None:
+        self._hold = hold
+        self._since: dict[str, float] = {}
+
+    def reset(self) -> None:
+        self._since.clear()
+
+    def update(self, driver: str, speed: float, now: float) -> bool:
+        """Record a car's speed. True once it has been stopped long enough."""
+        if speed > STOPPED_SPEED:
+            self._since.pop(driver, None)
+            return False
+        since = self._since.setdefault(driver, now)
+        return now - since >= self._hold
 
 
 def ahead(own, cars, *, track_length: float = 0.0,
-          metres: float = HAZARD_METRES) -> Hazard | None:
-    """The nearest stopped or much slower car in front, or None.
+          metres: float = HAZARD_METRES, stopped: Stopped | None = None,
+          now: float = 0.0) -> Hazard | None:
+    """The nearest stopped car in front, or None.
 
     Measured **along the track**, not through the air. Two cars either side of
     a hairpin are metres apart in space and half a lap apart on the road, and a
     spotter that cannot tell those apart cries wolf at every corner.
+
+    `stopped` carries how long each car has been stationary. Without one this
+    answers from the single sample, which is what a test that does not care
+    about the timing wants; the notification always passes one.
 
     Nearest first, because only one call can be made and the near one is the
     one about to matter.
@@ -341,7 +427,6 @@ def ahead(own, cars, *, track_length: float = 0.0,
     if own is None:
         return None
     mine = float(getattr(own, "lap_dist", 0.0) or 0.0)
-    my_speed = float(getattr(own, "speed", 0.0) or 0.0)
 
     found: list[Hazard] = []
     for car in cars or ():
@@ -362,10 +447,11 @@ def ahead(own, cars, *, track_length: float = 0.0,
             continue
 
         speed = float(getattr(car, "speed", 0.0) or 0.0)
-        if speed <= STOPPED_SPEED:
-            found.append(Hazard(name, gap, True))
-        elif my_speed - speed >= SLOWER_BY:
-            found.append(Hazard(name, gap, False))
+        if stopped is not None:
+            if stopped.update(name, speed, now):
+                found.append(Hazard(name, gap))
+        elif speed <= STOPPED_SPEED:
+            found.append(Hazard(name, gap))
 
     if not found:
         return None
@@ -376,7 +462,7 @@ def hazard_call(hazard: Hazard | None) -> str | None:
     """What to say about what is up the road."""
     if hazard is None:
         return None
-    return "car stopped ahead" if hazard.stopped else "slower car ahead"
+    return "car stopped ahead"
 
 
 def counts(neighbours: list[Alongside]) -> dict[str, int]:
@@ -398,10 +484,26 @@ def counts(neighbours: list[Alongside]) -> dict[str, int]:
 
 
 def warning(side: str, count: int) -> str:
-    """The standing call for a side that still has somebody on it.
+    """The call for a side somebody has just arrived on.
 
-    What the repeat timer re-says. Counts them, because two cars stacked down
-    one side is a different problem from one — but only cars actually beside
-    you count, so a queue forming behind the one on your door stays "car left".
+    Counts them, because two cars stacked down one side is a different problem
+    from one — but only cars actually beside you count, so a queue forming
+    behind the one on your door stays "car left".
     """
     return f"two cars {side}" if count > 1 else f"car {side}"
+
+
+def standing(side: str, count: int, *, first: bool) -> tuple[str, str]:
+    """(key, what to say) for a side that has somebody on it.
+
+    The key is the **count**, not the words, and that is the whole design. It
+    has to stay the same for as long as the situation does, or the repeat
+    interval never governs anything: a key that changed when the wording did
+    would make the follow-up a brand new call and it would go out on the very
+    next tick, a heartbeat after the arrival.
+
+    Keying on the count instead means one car becoming two *is* a new call, and
+    goes out immediately — which is right, because it is news — while a car
+    simply sitting there repeats on the timer and says `STILL_THERE`.
+    """
+    return f"{side}:{count}", warning(side, count) if first else STILL_THERE

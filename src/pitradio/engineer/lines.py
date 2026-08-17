@@ -225,7 +225,8 @@ class Script:
             self.t("two cars left"), self.t("two cars right"),
             self.t("three wide"), self.t("four wide"),
             self.t("clear left"), self.t("clear right"), self.t("clear"),
-            self.t("car stopped ahead"), self.t("slower car ahead"),
+            self.t("clear all round"), self.t("still there"),
+            self.t("car stopped ahead"),
         ]
 
     def spotter_call(self, call: str) -> Utterance:
@@ -245,8 +246,9 @@ class Script:
             "clear left": self.t("clear left"),
             "clear right": self.t("clear right"),
             "clear": self.t("clear"),
+            "clear all round": self.t("clear all round"),
+            "still there": self.t("still there"),
             "car stopped ahead": self.t("car stopped ahead"),
-            "slower car ahead": self.t("slower car ahead"),
         }
         return [spoken.get(call, call)]
 
@@ -328,7 +330,7 @@ FIXED_LINES = (
     "faster exit", "better entry", "yours",
     "radio check", "car left", "car right", "two cars left", "two cars right",
     "three wide", "four wide", "clear", "clear left", "clear right",
-    "car stopped ahead", "slower car ahead",
+    "clear all round", "still there", "car stopped ahead",
     "{routine} running", "{routine} off",
     "sector {number}", "fastest lap of the session", "has the fastest lap",
     "fastest", "has taken", "best", "down", "up", "is ahead by",

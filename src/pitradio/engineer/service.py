@@ -355,17 +355,21 @@ class EngineerService:
         counted as alongside or not depending on which path built the tick.
         """
         settings = self._plugin_settings(plugin_id)
+        # Every spotter distance from two numbers, so they cannot drift apart:
+        # a car that is alongside, one that has gone clear, one on the same
+        # line and one on another part of the circuit are all statements about
+        # how big the cars are. See `spotter.ranges`.
+        ranges = spotter.ranges(
+            float(settings.get("spotter_car_length") or spotter.DEFAULT_CAR_LENGTH),
+            float(settings.get("spotter_car_width") or spotter.DEFAULT_CAR_WIDTH))
         return routines.Context(
             script=self.script, book=self.book, sectors=self.sectors,
             session=session, standings=standings or Standings(),
             swap_sides=bool(settings.get("spotter_swap_sides")),
-            alongside_metres=float(
-                settings.get("spotter_metres") or spotter.DEFAULT_ALONGSIDE_METRES),
-            width_metres=float(
-                settings.get("spotter_width_metres") or spotter.DEFAULT_WIDTH_METRES),
-            overlap_metres=float(
-                settings.get("spotter_overlap_metres")
-                or spotter.DEFAULT_OVERLAP_METRES),
+            alongside_metres=ranges["metres"],
+            width_metres=ranges["width"],
+            overlap_metres=ranges["overlap"],
+            min_lateral_metres=ranges["min_lateral"],
             own_class_only=bool(self.config.own_class_only),
             threshold=float(self.config.coach_threshold),
             sector_threshold=float(self.config.sector_threshold),

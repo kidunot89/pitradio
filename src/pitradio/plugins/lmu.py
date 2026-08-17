@@ -207,22 +207,21 @@ class LeMansUltimatePlugin(SessionPlugin):
                   "own axes, and that could not be checked without driving"),
         ),
         PluginSetting(
-            key="spotter_metres",
-            label="Spotter overlap (metres)",
+            key="spotter_car_length",
+            label="Spotter: car length (m)",
             kind="int",
-            default=DEFAULT_ALONGSIDE_METRES,
-            help=("how far apart along the track two cars can be and still "
-                  "count as alongside. A Hypercar is about 5m long, so 9m is "
-                  "overlapping bodywork plus a little"),
+            default=5,
+            help=("every spotter distance is worked out from this. Two cars "
+                  "are alongside when their bodywork overlaps, which is a fact "
+                  "about how long they are — 4-5m for most, 2 for a kart"),
         ),
         PluginSetting(
-            key="spotter_width_metres",
-            label="Spotter width (metres)",
+            key="spotter_car_width",
+            label="Spotter: car width (m)",
             kind="int",
-            default=DEFAULT_WIDTH_METRES,
-            help=("how far to the side still counts. Beyond this they are on "
-                  "another part of the circuit — an adjacent straight, or the "
-                  "far side of a hairpin"),
+            default=2,
+            help=("how far apart two cars sit when side by side, and how far "
+                  "out still counts as beside you rather than elsewhere"),
         ),
     )
 

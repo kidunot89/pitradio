@@ -159,19 +159,21 @@ class ProjectCars2Plugin(SessionPlugin):
                   "right. Which side is which depends on the sim's own axes"),
         ),
         PluginSetting(
-            key="spotter_metres",
-            label="Spotter overlap (metres)",
+            key="spotter_car_length",
+            label="Spotter: car length (m)",
             kind="int",
-            default=9,
-            help=("how far apart along the track two cars can be and still "
-                  "count as alongside"),
+            default=5,
+            help=("every spotter distance is worked out from this. Two cars "
+                  "are alongside when their bodywork overlaps, which is a fact "
+                  "about how long they are — 4-5m for most, 2 for a kart"),
         ),
         PluginSetting(
-            key="spotter_width_metres",
-            label="Spotter width (metres)",
+            key="spotter_car_width",
+            label="Spotter: car width (m)",
             kind="int",
-            default=12,
-            help="how far to the side still counts",
+            default=2,
+            help=("how far apart two cars sit when side by side, and how far "
+                  "out still counts as beside you rather than elsewhere"),
         ),
     )
 
