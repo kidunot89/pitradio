@@ -481,10 +481,19 @@ GT3 car asking "who has the fastest lap" means. A class named that nobody is in
 gets told so rather than being quietly answered with the overall figure — a
 wrong answer stated confidently is the failure mode with no symptom.
 
-The questions are listed read-only on the Engineer tab. The phrases a routine
+Each has a tick-box on the Engineer tab and nothing else. The phrases a routine
 answers to are worth putting in your own words; the questions this can answer
 are fixed by what the sim publishes, and an editable box there would imply you
 could invent one.
+
+The switch earns its place for a different reason: **every phrase the engineer
+listens for is a phrase that can be taken out of a message meant for the whole
+session**, and somebody who never asks these has no reason to carry that risk.
+Switching one off removes its phrases from the matcher entirely rather than
+silencing it downstream — otherwise "who has the fastest lap" would still be
+lifted out of the message and then answered with nothing, which is the worst of
+both. Missing from the config means on, so adding a question never needs a
+migration.
 
 ## The spotter, and where its numbers come from
 

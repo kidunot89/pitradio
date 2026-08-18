@@ -1248,3 +1248,23 @@ def test_the_gap_for_clear_is_metres_not_another_car_length():
     call on long after they had gone."""
     kart = spotter.ranges(2.0, 1.5)
     assert kart["metres"] - kart["overlap"] == spotter.GAP_FOR_CLEAR
+
+
+def test_a_question_can_be_switched_off(engineer):
+    """And when it is, its phrases go to the chat box like any other words.
+
+    Silencing it downstream would be worse than leaving it on: the sentence
+    would still be taken out of the message and then answered with nothing."""
+    grid(engineer, ENDURANCE)
+    engineer.store.config.engineer.questions["fastest_lap"] = \
+        config_mod.QuestionConfig(enabled=False)
+
+    assert engineer.handle("Chief, who has the fastest lap") is False
+
+
+def test_switching_one_off_leaves_the_others_alone(engineer):
+    grid(engineer, ENDURANCE)
+    engineer.store.config.engineer.questions["fastest_lap"] = \
+        config_mod.QuestionConfig(enabled=False)
+
+    assert engineer.handle("Chief, what's my best lap") is True

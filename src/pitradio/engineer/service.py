@@ -256,9 +256,19 @@ class EngineerService:
         what confines them to the addressed path — an argument has no end, so
         an unaddressed "fastest sector three in GT3" would otherwise swallow
         any sentence starting with those words. See `phrases.MIN_BARE_WORDS`.
+
+        **A question that is switched off contributes no phrases at all**, so
+        it is not merely silent — the matcher never sees those words and they
+        reach the chat box like any others. Silencing it downstream would leave
+        "who has the fastest lap" being taken out of a message and then
+        answered with nothing, which is the worst of both.
         """
+        configured = self.config.questions or {}
         entries: list[tuple[str, tuple[str, ...]]] = []
         for query_id, spoken in queries.DEFAULT_PHRASES.items():
+            settings = configured.get(query_id)
+            if settings is not None and not settings.enabled:
+                continue
             suffix = " {argument}" if query_id in queries.TAKES_ARGUMENT else ""
             entries.append((query_id, tuple(
                 self.catalogue.translate(phrase) + suffix for phrase in spoken)))

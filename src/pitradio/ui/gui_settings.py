@@ -1478,10 +1478,15 @@ def _build_routines(app, frame) -> None:
 def _build_questions(app, frame) -> None:
     """The things you ask, as opposed to the things you start.
 
-    Read-only, and deliberately. A routine is a thing the engineer *does* and
-    is worth naming in your own words; a question is a question, and the ones
-    it answers are fixed by what the sim publishes. A settings box here would
-    imply you could invent a question it could answer.
+    A switch each, and nothing else. A routine gets its trigger phrases edited
+    because what a routine is *called* is not the routine; a question is a
+    question, and the ones that can be answered are fixed by what the sim
+    publishes. A phrase box here would imply you could invent one.
+
+    The switch earns its place for a different reason: every phrase the
+    engineer listens for is a phrase that can be taken out of a message meant
+    for the whole session, and somebody who never asks these has no reason to
+    carry that risk.
     """
     from pitradio.engineer import queries as queries_mod
 
@@ -1495,7 +1500,8 @@ def _build_questions(app, frame) -> None:
             "running. Anything that follows is read against this session: "
             "\"in GT3\" is a class on the grid, \"sector three\" is a "
             "sector. Say the engineer's name first if a question is not "
-            "recognised on its own."
+            "recognised on its own. Switch one off and its phrases go "
+            "straight to the chat box like any other words."
         ),
         style="Hint.TLabel", wraplength=620, justify="left").pack(anchor="w")
 
@@ -1512,10 +1518,16 @@ def _build_questions(app, frame) -> None:
         ("my_best_lap", t("Your best lap"), t("what you have done so far")),
     )
 
+    cfg = app.store.config.engineer
+    app.v_eng_questions = {}
     for query_id, name, answers in described:
+        stored = (cfg.questions or {}).get(query_id)
         box = ttk.Frame(asking)
         box.pack(fill="x", pady=(10, 0))
-        ttk.Label(box, text=name).pack(anchor="w")
+
+        enabled = tk.BooleanVar(value=stored.enabled if stored else True)
+        ttk.Checkbutton(box, text=name, variable=enabled).pack(anchor="w")
+        app.v_eng_questions[query_id] = enabled
         ttk.Label(box, text=answers, style="Muted.TLabel", wraplength=600,
                   justify="left").pack(anchor="w", padx=(20, 0))
         spoken = queries_mod.DEFAULT_PHRASES.get(query_id, ())
@@ -1693,6 +1705,10 @@ def _apply_engineer(app) -> None:
             end_phrases=_phrase_lines(end_box),
         )
         for routine_id, (enabled, start_box, end_box) in app.v_eng_routines.items()
+    }
+    cfg.questions = {
+        query_id: config_mod.QuestionConfig(enabled=bool(enabled.get()))
+        for query_id, enabled in getattr(app, "v_eng_questions", {}).items()
     }
 
 

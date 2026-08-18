@@ -215,6 +215,23 @@ class NotificationConfig:
 
 
 @dataclass
+class QuestionConfig:
+    """One question the engineer will answer, or will not.
+
+    Nothing but a switch, deliberately. A routine gets its trigger phrases
+    edited because what a routine is *called* is not the routine; a question is
+    a question, and the ones that can be answered are fixed by what the sim
+    publishes. There is nothing here to word differently.
+
+    Worth switching off all the same: every phrase the engineer listens for is
+    a phrase that can be taken out of a message meant for the chat box, and
+    somebody who never asks these has no reason to carry the risk.
+    """
+
+    enabled: bool = True
+
+
+@dataclass
 class RoutineConfig:
     """One on-track routine's settings.
 
@@ -299,6 +316,8 @@ class EngineerConfig:
     notifications: dict[str, NotificationConfig] = field(default_factory=dict)
     #: routine id -> its settings.
     routines: dict[str, RoutineConfig] = field(default_factory=dict)
+    #: question id -> whether it is answered. Missing means yes.
+    questions: dict[str, QuestionConfig] = field(default_factory=dict)
 
     #: Only talk about cars in your own class.
     #:
@@ -715,6 +734,10 @@ def _engineer(raw: Any) -> EngineerConfig:
     cfg.notifications = {
         str(notification_id): _section(NotificationConfig, settings)
         for notification_id, settings in (cfg.notifications or {}).items()
+    }
+    cfg.questions = {
+        str(question_id): _section(QuestionConfig, settings)
+        for question_id, settings in (cfg.questions or {}).items()
     }
     return cfg
 

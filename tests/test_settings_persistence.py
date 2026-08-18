@@ -185,3 +185,29 @@ def test_quitting_does_not_revert_an_earlier_save(app):
     app.quit()
 
     assert reopened(app).trigger_key == "ctrl+f9"
+
+
+def test_a_switched_off_question_survives_a_save(app):
+    """The whole point of the tick-box is that it is still off next session.
+
+    Through the real window rather than the config alone: the tick-box has to
+    exist, be found by the save, and land somewhere the next launch reads."""
+    app.v_eng_questions["fastest_sector"].set(False)
+    gui_settings._save_engineer(app)
+
+    saved = reopened(app).engineer.questions
+    assert saved["fastest_sector"].enabled is False
+    assert saved["fastest_lap"].enabled is True
+
+
+def test_every_question_gets_a_tick_box(app):
+    """Adding one to `queries.DEFAULT_PHRASES` must not need the tab edited
+    too, or the pair drift apart with nothing to say so."""
+    from pitradio.engineer import queries
+
+    assert set(app.v_eng_questions) == set(queries.DEFAULT_PHRASES)
+
+
+def test_a_question_nobody_has_touched_is_answered():
+    """Missing means yes, so adding a question never needs a config migration."""
+    assert config_mod.Config.from_dict({}).engineer.questions == {}
