@@ -72,6 +72,17 @@ through PyAV, which is already a dependency, so this costs the project nothing.
 
 It refuses rather than guesses if fewer than three usable clips come out.
 
+**Check them before spending an hour of GPU on them:**
+
+```bash
+python packaging/prepare_voice.py --verify baseline/Geoff
+```
+
+Every requirement is measured off the file rather than trusted — format, rate,
+channels, length, clipping and signal-to-noise. A clip dropped in by hand from
+an audio editor looks identical in a folder listing and produces a clone that
+is subtly wrong for no visible reason.
+
 **On cloning somebody else.** The generator's README has no ethics or licensing
 section at all — I checked — and actively suggests pulling a voice from a
 YouTube video or imitating "a professional voice actor you choose". That is its

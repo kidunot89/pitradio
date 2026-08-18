@@ -263,18 +263,110 @@ def prepare(audio: np.ndarray, rate: int, *, max_clips: int = MAX_CLIPS,
     return clips[:max_clips]
 
 
+def inspect(path: Path) -> tuple[str, bool]:
+    """(a line describing this clip, whether it is usable).
+
+    Every check is one of the generator's own requirements, measured off the
+    file rather than trusted — a clip that went through the wrong path, or was
+    dropped in by hand from an audio editor, looks identical in a folder
+    listing and produces a clone that is subtly wrong for no visible reason.
+    """
+    import struct
+
+    from pitradio.engineer import speaking
+
+    raw = path.read_bytes()
+    audio, rate = speaking.read_wav(path)
+    if audio.size == 0:
+        return f"{path.name:<10} unreadable", False
+
+    try:
+        tag, channels = struct.unpack("<H", raw[20:22])[0], struct.unpack(
+            "<H", raw[22:24])[0]
+        bits = struct.unpack("<H", raw[34:36])[0]
+    except (struct.error, IndexError):
+        tag, channels, bits = 0, 0, 0
+
+    seconds = audio.size / rate
+    peak = float(np.max(np.abs(audio)))
+    # The quietest tenth of the clip, as a stand-in for the noise floor.
+    frame = max(1, rate // 50)
+    usable = audio[:len(audio) - len(audio) % frame]
+    rms = np.sqrt((usable.reshape(-1, frame) ** 2).mean(axis=1))
+    floor = float(np.percentile(rms, 10)) if rms.size else 0.0
+    snr = 20 * np.log10(peak / max(floor, 1e-6))
+
+    problems = []
+    if tag != 3 or bits != 32:
+        problems.append(f"not 32-bit float (tag {tag}, {bits}-bit)")
+    if channels != 1:
+        problems.append(f"{channels} channels")
+    if rate != TARGET_RATE:
+        problems.append(f"{rate}Hz, wanted {TARGET_RATE}")
+    if peak >= 0.99:
+        problems.append("clipped")
+    if seconds < MIN_CLIP_SECONDS:
+        problems.append("too short")
+    if seconds > MAX_CLIP_SECONDS + 0.1:
+        problems.append(f"{seconds:.0f}s — only the first 10 will be read")
+    if snr < 25:
+        problems.append("noisy")
+
+    line = (f"{path.name:<10} {seconds:5.1f}s {rate:6d}Hz  peak {peak:.2f}  "
+            f"{snr:3.0f}dB  {', '.join(problems) if problems else 'ok'}")
+    return line, not problems
+
+
+def verify(folder: Path) -> int:
+    """Check a baseline folder before anybody spends an hour of GPU on it."""
+    clips = sorted(folder.glob("*.wav"),
+                   key=lambda p: (len(p.stem), p.stem))
+    if not clips:
+        print(f"no clips in {folder}", file=sys.stderr)
+        return 1
+
+    print(f"{'file':<10} {'length':>6} {'rate':>8}  {'peak':<6} {'SNR':>5}  notes")
+    print("-" * 66)
+    total, bad = 0.0, 0
+    for clip in clips:
+        line, fine = inspect(clip)
+        print(line)
+        bad += not fine
+        audio, rate = __import__(
+            "pitradio.engineer.speaking", fromlist=["x"]).read_wav(clip)
+        total += audio.size / rate if rate else 0
+    print("-" * 66)
+    print(f"{len(clips)} clips, {total:.0f}s of speech")
+
+    if len(clips) < 3:
+        print("The generator wants at least three.", file=sys.stderr)
+        return 1
+    if total < 30:
+        print("Under 30 seconds in total — the README's quickstart figure. "
+              "More reference audio gives a better clone.", file=sys.stderr)
+    print("Not usable as-is." if bad else "Ready to generate.")
+    return 1 if bad else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Prepare baseline clips for crew-chief-autovoicepack.")
-    parser.add_argument("sources", nargs="+", type=Path,
+    parser.add_argument("sources", nargs="*", type=Path,
                         help="audio files, in any format FFmpeg reads")
-    parser.add_argument("--name", required=True,
+    parser.add_argument("--verify", type=Path, metavar="FOLDER",
+                        help="check an existing baseline folder and stop")
+    parser.add_argument("--name", default="",
                         help="the voice name; clips go in baseline/<name>/")
     parser.add_argument("--out", type=Path, default=Path("baseline"),
                         help="where the baseline folder lives (default: baseline)")
     parser.add_argument("--max-clips", type=int, default=MAX_CLIPS,
                         help=f"how many clips to write (default: {MAX_CLIPS})")
     args = parser.parse_args(argv)
+
+    if args.verify:
+        return verify(args.verify)
+    if not args.sources:
+        parser.error("give some audio files, or --verify a folder")
 
     tracks: list[np.ndarray] = []
     for source in args.sources:
@@ -291,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
         print("nothing readable to work with", file=sys.stderr)
         return 1
 
+    if not args.name:
+        parser.error("--name is required when preparing clips")
     clips = prepare(np.concatenate(tracks), TARGET_RATE,
                     max_clips=args.max_clips)
     if len(clips) < 3:
