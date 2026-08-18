@@ -165,7 +165,34 @@ middle of a sentence.
 rather than spoken as one phrase — see [engineer.md](engineer.md). Sixty-odd
 number clips cover every lap time there is.
 
-## 4. Install it
+## 4. Throw away the takes it got wrong
+
+**Do this before listening to anything.** XTTS rambles on short text, and its
+own integrity check cannot tell — that check asks whether the audio is valid
+speech, not whether it is the phrase that was asked for. From the first real
+pack generated here, the three takes of "fifteen" came out:
+
+    0.39s    2.54s    12.57s
+
+All three scored 1.00. A pack picks between takes at random, so that is a
+one-in-three chance of twelve seconds of nonsense on a call.
+
+```bash
+python packaging/clean_pack.py voices/Geoff --dry-run   # see what would go
+python packaging/clean_pack.py voices/Geoff
+```
+
+It judges each take against **its siblings** — a phrase recorded three times
+should take about as long three times — and falls back on what the words
+themselves can account for when every take rambled. Nothing is deleted;
+rejected takes move to `<pack>-rejected/` so you can listen to what went.
+
+On that first pack it rejected 97 of 513 takes (19%) and left every one of the
+171 phrases with at least one recording. A phrase is never emptied: no takes
+means falling back to the Windows voice mid-sentence, which is worse than the
+least-bad recording.
+
+## 5. Install it
 
 Drop the folder into the voice packs directory — the Engineer tab's **Open
 folder** button goes straight there — and pick it in the Voice list. Its name is
