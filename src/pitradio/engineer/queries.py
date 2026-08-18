@@ -33,6 +33,7 @@ from pitradio.engineer import phrases
 FASTEST_LAP = "fastest_lap"
 FASTEST_SECTOR = "fastest_sector"
 MY_BEST_LAP = "my_best_lap"
+FUEL_TO_FINISH = "fuel_to_finish"
 
 #: What each query answers to out of the box, before anybody edits them.
 #:
@@ -48,12 +49,19 @@ DEFAULT_PHRASES: dict[str, tuple[str, ...]] = {
     FASTEST_SECTOR: ("who has the fastest sector", "what's the fastest sector",
                      "who's got the fastest sector"),
     MY_BEST_LAP: ("what's my best lap", "how am I doing"),
+    # The argument is when the stop is, and "next lap" is the common case —
+    # which is why it is a phrase of its own rather than something you have to
+    # remember to say a number for on the way to the pit entry.
+    FUEL_TO_FINISH: ("how much fuel do I need to finish the race when I pit",
+                     "how much fuel do I need to finish the race",
+                     "how much fuel do I need",
+                     "fuel to finish"),
 }
 
 #: Whether a query takes an argument at all. `MY_BEST_LAP` does not — there is
 #: only one answer and no class or sector to name — and saying so here keeps it
 #: off the addressed-only path that argument-taking phrases are confined to.
-TAKES_ARGUMENT = frozenset({FASTEST_LAP, FASTEST_SECTOR})
+TAKES_ARGUMENT = frozenset({FASTEST_LAP, FASTEST_SECTOR, FUEL_TO_FINISH})
 
 #: Spoken numbers, for the sector. Whisper writes "sector three" as often as
 #: "sector 3" and both have to land in the same place. One to three, because
@@ -78,6 +86,58 @@ class Ask:
     #: no answer, and inventing the overall one instead would be a wrong answer
     #: stated confidently.
     unknown_class: bool = False
+
+
+#: Numbers a driver says for a lap count, up to a stint's worth.
+_COUNTS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+           "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+           "twelve": 12, "fifteen": 15, "twenty": 20}
+
+#: "next lap", "next time round" — the common case, and the one somebody says
+#: on the way to the pit entry with no time to phrase anything longer.
+_NEXT = ("next lap", "the next lap", "next time round", "next time by",
+         "next time around")
+
+#: "now", "this lap" — the stop is happening on the lap being driven.
+_NOW = ("now", "this lap", "right now", "straight away", "immediately")
+
+
+def pit_in(argument: str) -> float | None:
+    """How many laps until the stop, or None if that was not what was said.
+
+    Nothing at all means the next lap, because that is what somebody asking
+    the question on the way to the pit entry means and making them say it
+    would be pedantry.
+
+    None is the answer for words that are not about when the stop is. It
+    matters: it is what stops "how much fuel do I need to get through this
+    stint on these tyres" being taken as a question about pitting in some
+    number of laps and answered with a percentage.
+    """
+    text = " ".join(phrases.words(argument or "")).strip()
+    if not text:
+        return 1.0
+
+    # Strip the grammar somebody says around it, so "on the next lap" and
+    # "in three laps" both come down to the part that carries the meaning.
+    stripped = re.sub(r"\b(?:when|i|we|pit|stop|box|on|in|at|for|the|a|of)\b",
+                      " ", text)
+    stripped = " ".join(stripped.split())
+
+    if any(phrase in text for phrase in _NEXT):
+        return 1.0
+    if stripped in ("lap", "laps") or any(phrase in text for phrase in _NOW):
+        # "this lap" and "now" both mean the stop is on the lap being driven,
+        # so none of the remaining laps are covered by what is in the tank.
+        return 0.0
+
+    match = re.search(r"\b(\d+)\b", text)
+    if match:
+        return float(match[1])
+    for word, count in _COUNTS.items():
+        if re.search(rf"\b{word}\b", text):
+            return float(count)
+    return None
 
 
 def understood(ask: Ask) -> bool:

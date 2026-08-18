@@ -1522,6 +1522,11 @@ def _build_questions(app, frame) -> None:
          t("who holds a sector. Say which sector, and a class if you want "
            "one other than yours")),
         ("my_best_lap", t("Your best lap"), t("what you have done so far")),
+        ("fuel_to_finish", t("Fuel to finish"),
+         t("what to fill the tank to, as a percentage, for a stop on the "
+           "next lap or however many laps away you say. Needs a lap or two "
+           "of running first, because the burn rate is measured rather than "
+           "assumed")),
     )
 
     cfg = app.store.config.engineer

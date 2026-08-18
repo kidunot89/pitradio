@@ -55,6 +55,13 @@ PROVIDES_SPOTTER = "spotter"
 #: grid needs this as well as `PROVIDES_LAPS`.
 PROVIDES_FIELD = "field"
 
+#: How much fuel is in the tank and how big the tank is.
+#:
+#: Only ever for the player's own car in practice — the sims publish tyre and
+#: fuel telemetry for the car you are driving and nobody else's — which is why
+#: this is separate from `PROVIDES_FIELD`.
+PROVIDES_FUEL = "fuel"
+
 #: Yellow flags, full-course cautions and blue flags.
 #:
 #: Separate from `PROVIDES_POSITIONS` because a sim can publish where every car
@@ -142,6 +149,11 @@ class Car:
     last_sector1: float = 0.0
     last_sector2: float = 0.0
 
+    #: Litres in the tank, and how many it holds. Zero for both means the sim
+    #: did not say — which is every car but your own, in every sim here.
+    fuel: float = 0.0
+    fuel_capacity: float = 0.0
+
     #: The flag being shown to *this* car. Blue is the one that is per-car
     #: rather than per-track: it means somebody quicker is about to arrive,
     #: and only the sim knows who it is being shown to.
@@ -189,6 +201,16 @@ class SessionInfo:
     #: is not the same as an entry that is False — that means the sector is
     #: known to be clear.
     sector_yellow: dict[int, bool] = field(default_factory=dict)
+    #: How the race ends, and it is one or the other.
+    #:
+    #: `max_laps` is zero for a timed race and `ends_at` is zero for a lap one.
+    #: **Never guess the missing one**: LMU writes `INT_MAX` into `mMaxLaps`
+    #: for a timed session, and a fuel calculation that took that at face value
+    #: would ask for two billion laps' worth.
+    max_laps: int = 0
+    #: When the session clock runs out, on the same clock as `elapsed`.
+    ends_at: float = 0.0
+
     #: Whether the whole circuit is under caution. Distinct from a local
     #: yellow in every sector: it changes what the driver may do, not merely
     #: where they must be careful.

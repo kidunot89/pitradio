@@ -29,6 +29,7 @@ from pitradio.plugins import shared_memory
 from pitradio.plugins.base import (
     PROVIDES_FIELD,
     PROVIDES_FLAGS,
+    PROVIDES_FUEL,
     PROVIDES_LAPS,
     PROVIDES_POSITIONS,
     PROVIDES_SECTORS,
@@ -198,6 +199,28 @@ def _full_course_yellow(info) -> bool:
     return phase == PHASE_FULL_COURSE_YELLOW or state > YELLOW_STATE_NONE
 
 
+#: `mMaxLaps` in a timed session. LMU writes `INT_MAX` there rather than zero,
+#: and a fuel calculation that took it at face value would ask for two billion
+#: laps' worth — so anything implausible is read as "no lap limit".
+NO_LAP_LIMIT = 10000
+
+
+def _race_length(info) -> tuple[int, float]:
+    """(laps, when the clock runs out). One of them is always zero.
+
+    A race is decided by one or the other and never both, and saying which is
+    the whole value of reading them together — see `SessionInfo.max_laps`.
+    """
+    try:
+        laps = int(info.mMaxLaps)
+        ends_at = float(info.mEndET)
+    except (AttributeError, TypeError, ValueError):
+        return 0, 0.0
+    if 0 < laps < NO_LAP_LIMIT:
+        return laps, 0.0
+    return 0, max(0.0, ends_at)
+
+
 def _close_mapping(handle, view) -> None:
     shared_memory.close(handle, view)
 
@@ -215,7 +238,7 @@ class LeMansUltimatePlugin(SessionPlugin):
     #: data, which is why this is the sim the engineer was built against.
     provides = frozenset({
         PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS, PROVIDES_FIELD,
-        PROVIDES_FLAGS,
+        PROVIDES_FLAGS, PROVIDES_FUEL,
     })
     settings = (
         PluginSetting(
@@ -424,6 +447,7 @@ class LeMansUltimatePlugin(SessionPlugin):
                 track_length = max(0.0, float(info.mLapDist))
                 elapsed = float(info.mCurrentET)
                 caution = _full_course_yellow(info)
+                max_laps, ends_at = _race_length(info)
             except (AttributeError, ValueError) as exc:
                 self._fail(f"could not read the session block: {exc}")
                 return SessionInfo()
@@ -431,7 +455,8 @@ class LeMansUltimatePlugin(SessionPlugin):
         return SessionInfo(
             key=voice.session_key(address, port), track=track, cars=tuple(cars),
             focus_slot=self._focus_slot(), track_length=track_length,
-            elapsed=elapsed, full_course_yellow=caution)
+            elapsed=elapsed, full_course_yellow=caution,
+            max_laps=max_laps, ends_at=ends_at)
 
     def _focus_slot(self) -> int | None:
         """Which car the camera is on, from the game's own HTTP API.
@@ -476,6 +501,7 @@ class LeMansUltimatePlugin(SessionPlugin):
                 return []
 
             count = max(0, min(count, len(scoring.vehScoringInfo)))
+            fuel = self._own_fuel()
             cars: list[Car] = []
             for index in range(count):
                 vehicle = scoring.vehScoringInfo[index]
@@ -493,6 +519,12 @@ class LeMansUltimatePlugin(SessionPlugin):
                     position=(float(vehicle.mPos.x), float(vehicle.mPos.y),
                               float(vehicle.mPos.z)),
                     is_player=bool(vehicle.mIsPlayer),
+                    # Only ever the player's own car: the telemetry block
+                    # covers the car you are driving and nobody else's, so
+                    # every other entry stays at zero rather than borrowing
+                    # somebody's tank.
+                    fuel=fuel[0] if int(vehicle.mID) == fuel[2] else 0.0,
+                    fuel_capacity=fuel[1] if int(vehicle.mID) == fuel[2] else 0.0,
                     lap_dist=float(vehicle.mLapDist),
                     speed=_speed(vehicle.mLocalVel),
                     laps=max(0, int(vehicle.mTotalLaps)),
@@ -516,6 +548,32 @@ class LeMansUltimatePlugin(SessionPlugin):
                     last_sector2=max(0.0, float(vehicle.mLastSector2)),
                 ))
             return cars
+
+    def _own_fuel(self) -> tuple[float, float, int]:
+        """(litres, capacity, whose) for the car being driven here.
+
+        The third is the scoring `mID` the first two belong to, because the
+        telemetry array is indexed by `playerVehicleIdx` while the scoring
+        array is not — they are two orderings of the same session, and `mID` is
+        the only thing that means the same in both. Attaching fuel by position
+        would put the player's tank on whichever car happened to be scored in
+        that slot.
+
+        (0, 0, -1) when the block says nothing, which no car matches.
+        """
+        try:
+            telemetry = self._data.telemetry
+            if not bool(telemetry.playerHasVehicle):
+                return 0.0, 0.0, -1
+            index = int(telemetry.playerVehicleIdx)
+            if not 0 <= index < len(telemetry.telemInfo):
+                return 0.0, 0.0, -1
+            own = telemetry.telemInfo[index]
+            return (max(0.0, float(own.mFuel)),
+                    max(0.0, float(own.mFuelCapacity)),
+                    int(own.mID))
+        except (AttributeError, TypeError, ValueError):
+            return 0.0, 0.0, -1
 
     def status(self) -> str:
         if not self.is_connected():

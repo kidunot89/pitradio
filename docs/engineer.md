@@ -562,3 +562,42 @@ wording would make the follow-up a new call, due on the very next tick.
 `three_wide_on_inside`. Which side is inside is a fact about the banking, which
 none of the sims here publish and which Crew Chief keeps per-track. A guess at
 it is a call that is confidently the wrong way round.
+
+### Fuel
+
+"How much fuel do I need to finish the race when I pit on the next lap", or
+"...when I pit in five laps". **The answer is a percentage**, because that is
+the number on the sim's own fuel screen and the driver has about four seconds
+on the way to the pit entry to dial it in. Litres are the working.
+
+**Consumption is measured, never assumed.** A car's use depends on the circuit,
+the fuel map, the traffic and how the person is driving it, so litres-per-lap
+here is what *this* car has been using over *these* laps — a short rolling
+average, so it follows a change of fuel map rather than being dragged back by a
+whole stint. Until a lap has been completed there is no answer and it says so.
+A fuel number invented from nothing is the one wrong answer here that ends
+somebody's race.
+
+Three details that would otherwise be rediscovered:
+
+* **The laps before the stop are not fuelled for.** What is in the tank now
+  covers those. Only the ones after it are the question, which is why this
+  never reads the current level.
+* **`mMaxLaps` is `INT_MAX` in a timed session.** Taken at face value it asks
+  for two billion laps' worth. `SessionInfo` carries `max_laps` *or* `ends_at`,
+  never both, and the plugin decides which — the engineer never guesses the
+  missing one. A timed race divides the remaining clock by the driver's own
+  best lap and rounds **up**, because the flag falls at the end of the lap you
+  are on when the clock runs out.
+* **A fill above the tank's capacity is reported, not clipped.** It means the
+  stop cannot be the last one, and a driver told "one hundred percent" without
+  being told that plans a race that does not work.
+
+Everything else rounds towards more fuel: running out is a retirement and
+carrying a spare litre is a tenth a lap.
+
+Fuel reaches `Car` for **the player's car only** — the sims publish tank
+telemetry for the car you are driving and nobody else's — and it is attached by
+matching `mID`, because LMU's telemetry array is indexed by
+`playerVehicleIdx` while the scoring array is not. Attaching by position would
+put your tank on whichever car happened to be scored in that slot.

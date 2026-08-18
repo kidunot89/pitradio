@@ -1268,3 +1268,85 @@ def test_switching_one_off_leaves_the_others_alone(engineer):
         config_mod.QuestionConfig(enabled=False)
 
     assert engineer.handle("Chief, what's my best lap") is True
+
+
+# -- fuel -----------------------------------------------------------------
+
+
+def burn(engineer, *, laps, fuel_left, capacity=100.0, max_laps=0,
+         ends_at=0.0, elapsed=0.0):
+    """One frame with the player's tank at a given level."""
+    engineer.plugins.session = SessionInfo(
+        track="Sebring", track_length=TRACK, elapsed=elapsed,
+        max_laps=max_laps, ends_at=ends_at,
+        cars=(replace(car("Me", player=True, laps=laps, last_lap=100.0),
+                      fuel=fuel_left, fuel_capacity=capacity),))
+    engineer._tick()
+
+
+def test_the_fuel_answer_needs_a_lap_of_running_first(engineer):
+    """The burn rate is measured, never assumed. A number invented from
+    nothing is the one wrong answer here that ends somebody's race."""
+    burn(engineer, laps=0, fuel_left=100.0, max_laps=20)
+    engineer.speaker.said.clear()
+
+    assert engineer.handle("Chief, how much fuel do I need") is True
+    assert "fuel" in engineer.speaker.spoken()
+
+
+def test_the_fill_is_a_percentage_of_the_tank(engineer):
+    """Which is the number on the sim's own fuel screen, and what somebody on
+    the way to the pit entry has four seconds to dial in."""
+    burn(engineer, laps=0, fuel_left=100.0, max_laps=20)
+    burn(engineer, laps=1, fuel_left=95.0, max_laps=20)
+    burn(engineer, laps=2, fuel_left=90.0, max_laps=20)
+    engineer.speaker.said.clear()
+
+    engineer.handle("Chief, how much fuel do I need to finish the race "
+                    "when I pit on the next lap")
+    # Two laps done of twenty, so eighteen left; the stop is next time round,
+    # leaving seventeen to fuel for. 17 x 5L + 1L margin = 86L of a 100L tank.
+    assert "fill to eighty six percent" in engineer.speaker.spoken()
+
+
+def test_pitting_later_asks_for_less(engineer):
+    burn(engineer, laps=0, fuel_left=100.0, max_laps=20)
+    burn(engineer, laps=1, fuel_left=95.0, max_laps=20)
+    engineer.speaker.said.clear()
+
+    engineer.handle("Chief, how much fuel do I need to finish the race "
+                    "when I pit in five laps")
+    # One lap done of twenty, stopping in five, so fourteen to fuel for.
+    assert "fill to seventy one percent" in engineer.speaker.spoken()
+    assert "fourteen laps" in engineer.speaker.spoken()
+
+
+def test_a_timed_race_works_off_the_clock(engineer):
+    """LMU writes INT_MAX into `mMaxLaps` for a timed session, so the lap
+    count has to come from what is left of the clock."""
+    for lap, level in ((0, 100.0), (1, 95.0)):
+        burn(engineer, laps=lap, fuel_left=level, max_laps=2147483647,
+             ends_at=1000.0, elapsed=lap * 100.0)
+    engineer.speaker.said.clear()
+
+    engineer.handle("Chief, how much fuel do I need")
+    said = engineer.speaker.spoken()
+    assert "percent" in said and "two billion" not in said
+
+
+def test_a_tank_that_will_not_reach_the_end_is_said_so(engineer):
+    burn(engineer, laps=0, fuel_left=75.0, capacity=75.0, max_laps=60)
+    burn(engineer, laps=1, fuel_left=72.0, capacity=75.0, max_laps=60)
+    engineer.speaker.said.clear()
+
+    engineer.handle("Chief, how much fuel do I need")
+    assert "percent" not in engineer.speaker.spoken()
+
+
+def test_a_fuel_question_that_is_not_one_reaches_the_chat_box(engineer):
+    """Its argument is when the stop is, not anything else — so this is a
+    sentence, and it belongs in the message."""
+    burn(engineer, laps=1, fuel_left=95.0, max_laps=20)
+    assert engineer.handle(
+        "how much fuel do I need to get through this stint on these tyres"
+    ) is False

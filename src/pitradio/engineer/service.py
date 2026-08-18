@@ -39,6 +39,9 @@ from pitradio.engineer import (
     spotter,
     tts,
 )
+from pitradio.engineer import (
+    fuel as fuel_mod,
+)
 from pitradio.plugins.base import SessionInfo, Standings
 
 log = logging.getLogger(__name__)
@@ -77,6 +80,10 @@ class EngineerService:
 
         self.book = coaching.LapBook()
         self.sectors = sectors.SectorBook()
+        #: What the car burns a lap, learned from the tank. Fed on the same
+        #: tick as the books, so a fuel answer and a lap answer can never come
+        #: from two different moments of the session.
+        self.fuel = fuel_mod.Usage()
         self.routines = {routine.id: routine for routine in routines.build()}
         self.active: routines.Routine | None = None
         #: The always-on behaviours. A routine brings its own runner, so the
@@ -274,6 +281,48 @@ class EngineerService:
                 self.catalogue.translate(phrase) + suffix for phrase in spoken)))
         return tuple(entries)
 
+    def _answer_fuel(self, command: phrases.Command, context) -> None:
+        """What to fill the tank to for a stop this many laps away.
+
+        The laps that matter are the ones *after* the stop — what is in the
+        tank now covers the ones before it — so this never needs to read the
+        current level, only what the car burns and how much race is left.
+        """
+        laps = queries.pit_in(command.argument)
+        own = context.own_car()
+        if laps is None or own is None:
+            self.say(self.script.no_fuel_data_yet(), urgent=True)
+            return
+
+        session = context.session
+        remaining = fuel_mod.laps_left(
+            laps_done=own.laps, max_laps=session.max_laps,
+            elapsed=session.elapsed, ends_at=session.ends_at,
+            lap_time=self._reference_lap(own))
+        need = fuel_mod.needed(
+            remaining=remaining, pit_in=laps,
+            per_lap=self.fuel.per_lap, capacity=own.fuel_capacity)
+        if need is None:
+            self.say(self.script.no_fuel_data_yet(), urgent=True)
+            return
+        if need.capped:
+            self.say(self.script.fuel_will_not_reach(), urgent=True)
+            return
+        self.say(self.script.fuel_answer(need.percent, need.laps), urgent=True)
+
+    def _reference_lap(self, own) -> float:
+        """A lap time to divide the remaining clock by, in a timed race.
+
+        The driver's own best, because the question is how many laps *they*
+        will get through — not the leader, who may be in a faster class and
+        would make the answer short by a lap on an endurance grid. Their last
+        lap is the fallback while no best exists yet.
+        """
+        best = self.book.best_for(own.driver)
+        if best is not None and best.lap_time > 0:
+            return best.lap_time
+        return float(getattr(own, "last_lap", 0.0) or 0.0)
+
     def _query_is_real(self, command: phrases.Command) -> bool:
         """Whether an unaddressed question was really one.
 
@@ -287,6 +336,11 @@ class EngineerService:
         """
         if command.routine not in queries.DEFAULT_PHRASES or command.addressed:
             return True
+        if command.routine == queries.FUEL_TO_FINISH:
+            # Its argument is when the stop is, not a class — so "how much fuel
+            # do I need to get through this stint on these tyres" is not a
+            # question this can answer and belongs in the chat box.
+            return queries.pit_in(command.argument) is not None
         classes = {car.vehicle_class for car in self._context().session.cars
                    if car.vehicle_class}
         return queries.understood(queries.parse(command.argument, classes))
@@ -311,6 +365,10 @@ class EngineerService:
         # about the race they are in. `own_class_only` off means they have
         # already said they want the overall picture.
         wanted = ask.vehicle_class or context.my_class()
+
+        if command.routine == queries.FUEL_TO_FINISH:
+            self._answer_fuel(command, context)
+            return
 
         if command.routine == queries.MY_BEST_LAP:
             own = context.own_car()
@@ -596,6 +654,9 @@ class EngineerService:
 
         finished_lap = None
         finished_sectors = []
+        own = session.player()
+        if own is not None and own.fuel_capacity:
+            self.fuel.observe(own.laps, own.fuel)
         for car in session.cars:
             lap = self.book.observe(car, session.elapsed)
             if lap is not None and car.is_player:

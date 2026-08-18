@@ -362,6 +362,46 @@ class Script:
     def best_lap_answer(self, seconds: float) -> Utterance:
         return [self.t("your best"), self.lap_time(seconds)]
 
+    def fuel_answer(self, percent: float, laps: float) -> Utterance:
+        """The fill for a stop, as the sim's own screen wants it.
+
+        A percentage, because that is the number on the fuel screen and the
+        driver has about four seconds to dial it in. The lap count comes after
+        it so the short answer is heard first — somebody on the way to the pit
+        entry who catches only the first two words has still got what they
+        needed.
+        """
+        return [self.t("fill to"), self.percent(percent),
+                self.t("for"), self.number(int(laps)), self.t("laps")]
+
+    def fuel_will_not_reach(self) -> Utterance:
+        """A full tank is not enough, which is a different answer.
+
+        Not "one hundred percent": that would be heard as an answer to the
+        question asked, and the driver would plan a race on one stop that
+        needs two.
+        """
+        return [self.t("fill it"), self.t("that won't reach the end")]
+
+    def no_fuel_data_yet(self) -> Utterance:
+        """Nothing has been burnt yet, so nothing can be worked out.
+
+        Said rather than guessed at. A fuel number invented from nothing is the
+        one wrong answer here that ends somebody's race.
+        """
+        return [self.t("no fuel data yet")]
+
+    def percent(self, value: float) -> str:
+        """A tank fill, as words in English and digits elsewhere.
+
+        The same rule as every other number here: number grammar is
+        per-language, and doing it half-well produces confident nonsense in
+        somebody's own language.
+        """
+        if not self.catalogue.english:
+            return f"{int(value)}%"
+        return f"{self.number(int(value))} percent"
+
     def no_time_yet(self, vehicle_class: str = "") -> Utterance:
         """Nobody has set one. An answer, and not the same as saying nothing."""
         if vehicle_class:
@@ -413,6 +453,8 @@ FIXED_LINES = (
     "{routine} running", "{routine} off",
     "sector {number}", "fastest lap of the session", "has the fastest lap",
     "in", "your best", "no time in", "no time yet", "nobody is in that class",
+    "fill to", "for", "laps", "fill it", "that won't reach the end",
+    "no fuel data yet",
     "fastest", "has taken", "best", "down", "up", "is ahead by",
     "you are ahead by", "has no time in", "yet", "which sector?",
     "give me a lap to find the sectors",
