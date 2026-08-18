@@ -1350,3 +1350,22 @@ def test_a_fuel_question_that_is_not_one_reaches_the_chat_box(engineer):
     assert engineer.handle(
         "how much fuel do I need to get through this stint on these tyres"
     ) is False
+
+
+def test_a_fuel_question_with_a_stop_in_it_is_not_read_as_a_class(engineer):
+    """**The bug an exercise run caught.**
+
+    "when I pit on the next lap" went through the class parser before the fuel
+    branch was ever reached, so every properly phrased fuel question came back
+    "nobody is in that class". Only the bare form, with no argument at all,
+    ever produced an answer — which is the form nobody uses.
+    """
+    burn(engineer, laps=0, fuel_left=100.0, max_laps=20)
+    burn(engineer, laps=1, fuel_left=95.0, max_laps=20)
+    engineer.speaker.said.clear()
+
+    assert engineer.handle("Chief, how much fuel do I need to finish the race "
+                           "when I pit on the next lap") is True
+    said = engineer.speaker.spoken()
+    assert "class" not in said
+    assert "percent" in said

@@ -353,6 +353,16 @@ class EngineerService:
         session.
         """
         context = self._context()
+
+        # **Fuel first, before anything reads the argument as a class.** Its
+        # argument is when the stop is — "on the next lap", "in five laps" —
+        # and running that through the class parser first made every properly
+        # phrased fuel question come back "nobody is in that class". Only the
+        # bare form, with no argument at all, ever reached the fuel answer.
+        if command.routine == queries.FUEL_TO_FINISH:
+            self._answer_fuel(command, context)
+            return
+
         classes = {car.vehicle_class for car in context.session.cars
                    if car.vehicle_class}
         ask = queries.parse(command.argument, classes)
@@ -365,10 +375,6 @@ class EngineerService:
         # about the race they are in. `own_class_only` off means they have
         # already said they want the overall picture.
         wanted = ask.vehicle_class or context.my_class()
-
-        if command.routine == queries.FUEL_TO_FINISH:
-            self._answer_fuel(command, context)
-            return
 
         if command.routine == queries.MY_BEST_LAP:
             own = context.own_car()
