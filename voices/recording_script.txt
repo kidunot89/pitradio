@@ -1,0 +1,175 @@
+PitRadio engineer - recording script
+171 phrases. Read each one plainly, as on a radio.
+============================================================
+
+  1. nothing in it
+  2. half a second
+  3. a tenth
+  4. tenths
+  5. one second
+  6. seconds
+  7. point
+  8. oh
+  9. percent
+ 10. turn
+ 11. sector
+ 12. go ahead
+ 13. say again
+ 14. standing down
+ 15. targeting
+ 16. best lap
+ 17. has no lap on record yet
+ 18. I can't find
+ 19. no reference lap yet; keep going
+ 20. that's your best
+ 21. last lap
+ 22. was faster on the exit
+ 23. had a better entry
+ 24. you were faster on the exit
+ 25. you had a better entry
+ 26. faster exit
+ 27. better entry
+ 28. yours
+ 29. radio check
+ 30. car left
+ 31. car right
+ 32. three wide you're on the left
+ 33. three wide you're on the right
+ 34. in the middle
+ 35. hold your line
+ 36. clear
+ 37. clear left
+ 38. clear right
+ 39. clear all round
+ 40. still there
+ 41. car stopped ahead
+ 42. full course yellow
+ 43. green flag
+ 44. blue flag
+ 45. car stopped in
+ 46. clear to go
+ 47. hold
+ 48. fastest lap of the session
+ 49. has the fastest lap
+ 50. in
+ 51. your best
+ 52. no time in
+ 53. no time yet
+ 54. nobody is in that class
+ 55. fill to
+ 56. for
+ 57. laps
+ 58. fill it
+ 59. that won't reach the end
+ 60. no fuel data yet
+ 61. fastest
+ 62. has taken
+ 63. best
+ 64. down
+ 65. up
+ 66. is ahead by
+ 67. you are ahead by
+ 68. has no time in
+ 69. yet
+ 70. which sector?
+ 71. give me a lap to find the sectors
+ 72. zero
+ 73. one
+ 74. two
+ 75. three
+ 76. four
+ 77. five
+ 78. six
+ 79. seven
+ 80. eight
+ 81. nine
+ 82. ten
+ 83. eleven
+ 84. twelve
+ 85. thirteen
+ 86. fourteen
+ 87. fifteen
+ 88. sixteen
+ 89. seventeen
+ 90. eighteen
+ 91. nineteen
+ 92. twenty
+ 93. twenty one
+ 94. twenty two
+ 95. twenty three
+ 96. twenty four
+ 97. twenty five
+ 98. twenty six
+ 99. twenty seven
+100. twenty eight
+101. twenty nine
+102. thirty
+103. thirty one
+104. thirty two
+105. thirty three
+106. thirty four
+107. thirty five
+108. thirty six
+109. thirty seven
+110. thirty eight
+111. thirty nine
+112. forty
+113. forty one
+114. forty two
+115. forty three
+116. forty four
+117. forty five
+118. forty six
+119. forty seven
+120. forty eight
+121. forty nine
+122. fifty
+123. fifty one
+124. fifty two
+125. fifty three
+126. fifty four
+127. fifty five
+128. fifty six
+129. fifty seven
+130. fifty eight
+131. fifty nine
+132. sixty
+133. sixty one
+134. sixty two
+135. sixty three
+136. sixty four
+137. sixty five
+138. sixty six
+139. sixty seven
+140. sixty eight
+141. sixty nine
+142. seventy
+143. seventy one
+144. seventy two
+145. seventy three
+146. seventy four
+147. seventy five
+148. seventy six
+149. seventy seven
+150. seventy eight
+151. seventy nine
+152. eighty
+153. eighty one
+154. eighty two
+155. eighty three
+156. eighty four
+157. eighty five
+158. eighty six
+159. eighty seven
+160. eighty eight
+161. eighty nine
+162. ninety
+163. ninety one
+164. ninety two
+165. ninety three
+166. ninety four
+167. ninety five
+168. ninety six
+169. ninety seven
+170. ninety eight
+171. ninety nine

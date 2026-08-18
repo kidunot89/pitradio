@@ -67,6 +67,7 @@ class App:
         hook=None,
         plugins=None,
         voice=None,
+        engineer=None,
         use_tray: bool = True,
     ):
         self.root = root
@@ -81,6 +82,7 @@ class App:
         self.plugins = plugins
         # None in --gui-only and in tests; every use site copes, like the rest.
         self.voice = voice
+        self.engineer = engineer
         self.tray = None
         self._quitting = False
         self._log_lines = 0
@@ -192,6 +194,7 @@ class App:
         gui_settings.build_vocabulary_tab(self)
         gui_settings.build_audio_tab(self)
         gui_settings.build_voice_tab(self)
+        gui_settings.build_engineer_tab(self)
         gui_settings.build_history_tab(self)
         gui_settings.build_updates_tab(self)
 
@@ -631,13 +634,23 @@ class App:
             log.debug("could not persist window geometry", exc_info=True)
 
         for component in (self.tray, self.checker, self.worker, self.voice,
-                          self.hook, self.plugins):
+                          self.engineer, self.hook, self.plugins):
             if component is None:
                 continue
             try:
                 component.stop()
             except Exception:
                 log.debug("stopping %s failed", component, exc_info=True)
+
+        # Last, and after everything that might still be talking: the output
+        # holds the device open for the life of the app, so it is the one
+        # thing that has to be handed back rather than left to the interpreter.
+        try:
+            from pitradio import speech
+
+            speech.close_output()
+        except Exception:
+            log.debug("closing the audio output failed", exc_info=True)
 
         self.root.quit()
         self.root.destroy()

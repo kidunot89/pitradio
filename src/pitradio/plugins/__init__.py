@@ -14,18 +14,28 @@ from __future__ import annotations
 
 import logging
 
+from pitradio.plugins.ams2 import Automobilista2Plugin
+from pitradio.plugins.assetto import AssettoCorsaPlugin
 from pitradio.plugins.base import (
     PluginSetting,
     SessionInfo,
     SessionPlugin,
     Standings,
 )
+from pitradio.plugins.iracing import IRacingPlugin
 from pitradio.plugins.lmu import LeMansUltimatePlugin
+from pitradio.plugins.projectcars2 import ProjectCars2Plugin
 
 log = logging.getLogger(__name__)
 
 #: Every plugin that ships. Add new sims here.
-BUILTIN: tuple[type[SessionPlugin], ...] = (LeMansUltimatePlugin,)
+#:
+#: Automobilista 2 is listed before the Project CARS plugin it inherits from,
+#: because `for_executable` returns the first match and both would claim an
+#: AMS2 executable if the order were the other way round.
+BUILTIN: tuple[type[SessionPlugin], ...] = (
+    LeMansUltimatePlugin, IRacingPlugin, AssettoCorsaPlugin,
+    Automobilista2Plugin, ProjectCars2Plugin)
 
 
 class PluginRegistry:
@@ -84,8 +94,12 @@ class PluginRegistry:
         return plugin.id if plugin else ""
 
     def choices(self) -> list[tuple[str, str]]:
-        """(id, name) for the profile editor's plugin picker."""
-        return [("", "(automatic)")] + [(p.id, p.name) for p in self.plugins]
+        """(id, label) for the profile editor's plugin picker.
+
+        The label, not the name: a plugin nobody has been able to run against
+        its game says so here, which is the one place somebody is choosing it.
+        """
+        return [("", "(automatic)")] + [(p.id, p.label()) for p in self.plugins]
 
     def drivers_for(self, plugin_id: str | None) -> list[str]:
         """Driver names from the profile's plugin, or an empty list.
@@ -170,6 +184,36 @@ class PluginRegistry:
                 return plugin.id, session
         return "", SessionInfo()
 
+    def provides_for(self, plugin_id: str | None) -> frozenset[str]:
+        """What this sim can tell the engineer, or nothing.
+
+        Nothing is the safe answer: a behaviour whose data is absent is skipped
+        rather than left switched on and silent, and silence nobody can explain
+        is indistinguishable from the feature being broken.
+        """
+        plugin = self.by_id(plugin_id)
+        return getattr(plugin, "provides", frozenset()) if plugin else frozenset()
+
+    def any_telemetry(self) -> tuple[str, SessionInfo]:
+        """(plugin id, session) for whichever sim is publishing cars.
+
+        The engineer's equivalent of `any_session`, and separate from it on
+        purpose: that one answers "is there a room to be in", which needs a
+        game server, and this one answers "is there a car on a track", which
+        does not. Asking the voice question here would leave the engineer
+        silent in exactly the session — offline practice — where a coaching
+        routine is most wanted.
+        """
+        for plugin in self.plugins:
+            try:
+                session = plugin.session()
+            except Exception:
+                log.exception("plugin %s failed while reading the session", plugin.name)
+                continue
+            if session.has_data:
+                return plugin.id, session
+        return "", SessionInfo()
+
     def positions_for(self, plugin_id: str | None) -> dict[int, str]:
         """The overall order alone, for callers that want nothing else."""
         return self.standings_for(plugin_id).overall
@@ -214,13 +258,16 @@ class PluginRegistry:
         return rows
 
     def describe(self) -> list[tuple[str, str]]:
-        """(name, status) for the GUI's plugin list."""
+        """(label, status) for the GUI's plugin list."""
         rows = []
         for plugin in self.plugins:
             try:
-                rows.append((plugin.name, plugin.status()))
+                status = plugin.status()
             except Exception as exc:
-                rows.append((plugin.name, f"error: {type(exc).__name__}: {exc}"))
+                status = f"error: {type(exc).__name__}: {exc}"
+            if plugin.experimental and plugin.experimental_note:
+                status = f"{status} — {plugin.experimental_note}"
+            rows.append((plugin.label(), status))
         return rows
 
 

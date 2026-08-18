@@ -84,5 +84,20 @@
     "add_names_to_vocabulary": true,
     "max_names": 40,
     "match_first_names": true
+  },
+  "engineer": {
+    "enabled": false,
+    "persona": "chief",
+    "name": "",
+    "voice": "",
+    "voice_pack": "",
+    "rate": null,
+    "volume": 0.9,
+    "output_device": null,
+    "language": "",
+    "notifications": {},
+    "routines": {},
+    "coach_threshold": 0.08,
+    "sector_threshold": 0.15
   }
 }

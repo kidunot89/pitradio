@@ -232,17 +232,34 @@ def cmd_self_test() -> int:
         # ModuleNotFoundError and the real modules were never checked at all.
         "pitradio", "pitradio.config", "pitradio.paths", "pitradio.state",
         "pitradio.keys", "pitradio.languages", "pitradio.mentions",
-        "pitradio.gestures", "pitradio.i18n", "pitradio.speech",
+        "pitradio.gestures", "pitradio.i18n", "pitradio.speech", "pitradio.audio",
         "pitradio.updater", "pitradio.worker",
         "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
         "pitradio.ui.gui", "pitradio.ui.gui_settings", "pitradio.ui.gui_language",
         "pitradio.ui.theme", "pitradio.ui.logo", "pitradio.ui.tray",
         "pitradio.input", "pitradio.ui",
         "pitradio.plugins", "pitradio.plugins.base", "pitradio.plugins.lmu",
+        "pitradio.plugins.iracing", "pitradio.plugins.irsdk",
+        "pitradio.plugins.assetto", "pitradio.plugins.acpmf",
+        "pitradio.plugins.projectcars2", "pitradio.plugins.pcars2",
+        "pitradio.plugins.ams2", "pitradio.plugins.derive",
+        "pitradio.plugins.shared_memory",
         # Voice. `net` imports websocket-client lazily so a build without it
         # still runs, which means nothing at module scope proves it was
         # bundled — exactly how av.utils went missing from v0.1.0.
         "pitradio.voice", "pitradio.net", "pitradio.endpoints",
+        # The engineer. Its speech host is a subprocess rather than an import,
+        # so nothing here proves it can talk — but a dropped module would take
+        # the whole feature out silently, which is what this catches.
+        "pitradio.engineer", "pitradio.engineer.service",
+        "pitradio.engineer.routines", "pitradio.engineer.notifications",
+        "pitradio.engineer.coaching", "pitradio.engineer.sectors",
+        "pitradio.engineer.lines", "pitradio.engineer.phrases",
+        "pitradio.engineer.packs",
+        "pitradio.engineer.speaking", "pitradio.engineer.spotter",
+        "pitradio.engineer.rejoin", "pitradio.engineer.flags",
+        "pitradio.engineer.queries", "pitradio.engineer.fuel",
+        "pitradio.engineer.tts",
     ]
 
     failures: list[tuple[str, str]] = []
@@ -348,6 +365,130 @@ def cmd_list_devices() -> int:
             out(f"  {index}: {label}")
         out()
     return 0
+
+
+def cmd_telemetry(seconds: float, interval: float) -> int:
+    """Print what the connected sim is actually publishing.
+
+    The engineer reads a dozen fields per car and every one of them is wrong in
+    a way that produces no error: a lap distance that never moves, a speed
+    stuck at zero, sector indices that never change, positions that are all the
+    same point. Each of those makes a *behaviour* go quiet, and a quiet
+    engineer looks identical whichever field is at fault.
+
+    So this shows the numbers. Start the sim, get on track, run this, and it
+    says what is arriving — which turns "the engineer does nothing" into a
+    question with an answer.
+    """
+    import time
+
+    from pitradio import plugins as plugins_mod
+    from pitradio.plugins import base
+
+    registry = plugins_mod.PluginRegistry()
+    registry.start_all()
+
+    out(f"plugins: {', '.join(p.label() for p in registry.plugins) or '(none)'}")
+    for plugin in registry.plugins:
+        supplies = ", ".join(sorted(plugin.provides)) or "(nothing declared)"
+        out(f"  {plugin.label()}: {plugin.status()}")
+        out(f"    provides: {supplies}")
+        if plugin.experimental and plugin.experimental_note:
+            out(f"    note: {plugin.experimental_note}")
+    out()
+
+    deadline = time.monotonic() + max(0.0, seconds)
+    seen = False
+    frames = 0
+    #: What the last frame looked like. **Whether this changes is the whole
+    #: check.** A block that is being published but never updated reads as a
+    #: perfectly healthy session — every field plausible, the sim connected —
+    #: and the engineer is silent because nothing ever moves. Printing five
+    #: identical snapshots and leaving somebody to compare them by eye is not
+    #: a diagnostic.
+    previous: tuple | None = None
+    moved = False
+
+    while True:
+        plugin_id, session = registry.any_telemetry()
+        if session.has_data:
+            seen = True
+            frames += 1
+            current = _signature(session)
+            changed = previous is not None and current != previous
+            moved = moved or changed
+            # The first frame always, and after that only what is different.
+            if previous is None or changed:
+                _print_frame(plugin_id, session, registry)
+            previous = current
+        else:
+            out("no sim publishing — is the game running and on track?")
+
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(max(0.1, interval))
+
+    registry.stop_all()
+    if not seen:
+        out("\nNothing was read. The engineer would be silent for the same reason.")
+        return 1
+
+    if frames > 1 and not moved:
+        out(f"\nNothing changed across {frames} reads, including the sim's own "
+            f"clock.\nThe block is published but is not being updated — the "
+            f"game is paused, sitting\nin a menu, or the session has ended. "
+            f"Get on track and run this again.\n"
+            f"The engineer would be silent here, and this is why.")
+        return 1
+
+    out("\nLap distance, speed and the sim clock are all moving.")
+    out("Watch the sector column change three times a lap and the engineer has "
+        "everything it needs.")
+    # Named so a reader knows which capability each column proves.
+    out(f"positions -> spotter, laps -> lap times and the trainers, "
+        f"sectors -> sector calls  ({base.PROVIDES_POSITIONS}/"
+        f"{base.PROVIDES_LAPS}/{base.PROVIDES_SECTORS})")
+    return 0
+
+
+def _signature(session) -> tuple:
+    """What has to change between reads for the sim to be live.
+
+    The session clock is in here as well as the cars: a paused game keeps
+    publishing positions that look entirely reasonable, and the clock is the
+    field that gives it away.
+    """
+    return (
+        round(session.elapsed, 3),
+        tuple((car.driver, round(car.lap_dist, 2), round(car.speed, 2),
+               car.laps, car.sector, round(car.position[0], 2))
+              for car in session.cars),
+    )
+
+
+def _print_frame(plugin_id: str, session, registry) -> None:
+    """One snapshot of every car, as the engineer sees it."""
+    standings = registry.standings_for(plugin_id)
+    out(f"[{plugin_id}] track={session.track!r} length={session.track_length:.0f}m "
+        f"elapsed={session.elapsed:.1f}s cars={len(session.cars)} "
+        f"key={'yes' if session.key else 'no (offline/single player)'}")
+    out(f"  {'driver':<22}{'pos':>4}{'lapdist':>9}{'speed':>7}{'lap':>5}"
+        f"{'sec':>4}{'last lap':>10}{'best lap':>10}  pits  world x/y/z")
+    for car in session.cars:
+        marker = "*" if car.is_player else " "
+        x, y, z = car.position
+        out(f" {marker}{car.driver[:21]:<22}{car.place:>4}{car.lap_dist:>9.1f}"
+            f"{car.speed:>7.1f}{car.laps:>5}{car.sector:>4}"
+            f"{car.last_lap:>10.3f}{car.best_lap:>10.3f}"
+            f"{'  yes ' if car.in_pits else '   no '}"
+            f"{x:>9.1f}{y:>7.1f}{z:>9.1f}")
+
+    if standings.by_class:
+        for name, order in standings.by_class.items():
+            leaders = ", ".join(f"P{place} {driver}"
+                                for place, driver in sorted(order.items())[:3])
+            out(f"  class {name}: {leaders}")
+    out()
 
 
 # -- GUI-only preview ----------------------------------------------------
@@ -484,6 +625,15 @@ def run(args) -> int:
     voice_service = net_mod.VoiceService(store, registry)
     worker.voice = voice_service
 
+    # Built even when the engineer is switched off, for the same reason as
+    # voice: the service reads the config on every poll, so turning it on in
+    # the window works without a restart. Switched off it is one sleeping
+    # thread.
+    from pitradio.engineer import service as engineer_mod
+
+    engineer = engineer_mod.EngineerService(store, registry)
+    worker.engineer = engineer
+
     def is_busy() -> bool:
         """True when a sim is focused, so updates can wait."""
         try:
@@ -501,7 +651,7 @@ def run(args) -> int:
         root, store, app_state, __version__,
         worker=worker, checker=checker, recorder=recorder,
         transcriber=transcriber, hook=hook, plugins=registry,
-        voice=voice_service, use_tray=not args.no_tray,
+        voice=voice_service, engineer=engineer, use_tray=not args.no_tray,
     )
 
     if checker is not None:
@@ -511,6 +661,7 @@ def run(args) -> int:
 
     worker.start()
     voice_service.start()
+    engineer.start()
     hook.start()
     if not hook.wait_until_ready(5.0):
         log.error("the keyboard hook did not come up; the trigger key will do nothing")
@@ -566,6 +717,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="list audio devices and exit")
     parser.add_argument("--self-test", action="store_true",
                         help="load every component and exit; verifies a packaged build")
+    parser.add_argument("--telemetry", nargs="?", const=10.0, type=float,
+                        metavar="SECONDS",
+                        help="print what the sim is publishing, for this many "
+                             "seconds (default 10), then exit")
+    parser.add_argument("--telemetry-interval", type=float, default=1.0,
+                        metavar="SECONDS",
+                        help="seconds between telemetry snapshots (default 1)")
     parser.add_argument("--gui-only", action="store_true",
                         help="open the window with no hook, audio or model (layout preview)")
     parser.add_argument("--no-tray", action="store_true",
@@ -583,6 +741,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_devices:
         setup_logging(None, args.verbose)
         return cmd_list_devices()
+
+    if args.telemetry is not None:
+        setup_logging(None, args.verbose)
+        return cmd_telemetry(args.telemetry, args.telemetry_interval)
 
     if args.self_test:
         setup_logging(None, args.verbose)

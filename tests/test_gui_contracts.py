@@ -35,6 +35,7 @@ COLLABORATORS = {
     "checker": ("src/pitradio/updater.py", "UpdateChecker"),
     "plugins": ("src/pitradio/plugins/__init__.py", "PluginRegistry"),
     "voice": ("src/pitradio/net.py", "VoiceService"),
+    "engineer": ("src/pitradio/engineer/service.py", "EngineerService"),
 }
 
 

@@ -997,7 +997,7 @@ def build_audio_tab(app) -> None:
     outputs.pack(fill="x", pady=(10, 0))
     app.output_devices = speech.list_devices("output")
     app.v_output = tk.StringVar(
-        value=_device_label(app.output_devices, cfg.cues.output_device))
+        value=_device_label(app.output_devices, cfg.audio.output_device))
     _row(outputs, 0, t("Output device"),
          ttk.Combobox(outputs, textvariable=app.v_output, state="readonly",
                       values=["(system default)"] + [label for _i, label in app.output_devices]))
@@ -1012,19 +1012,46 @@ def build_audio_tab(app) -> None:
     ttk.Button(footer, text=t("Save"), command=lambda: _save_audio(app)).pack(anchor="e")
 
 
+DEFAULT_DEVICE = "(system default)"
+
+
 def _device_label(devices, spec) -> str:
+    """The row to show for a stored choice.
+
+    Handles a stored *name* (what is written now) and a stored *index* (what
+    older configs hold), so upgrading does not silently reset somebody's
+    device to the default.
+    """
     if spec is None or spec == "":
-        return "(system default)"
+        return DEFAULT_DEVICE
     for index, label in devices:
-        if spec == index or (isinstance(spec, str) and spec.lower() in label.lower()):
+        if isinstance(spec, int) and not isinstance(spec, bool):
+            if spec == index:
+                return label
+            continue
+        if speech.matches_device(spec, index, "output"):
             return label
-    return "(system default)"
+        if str(spec).lower() in label.lower():
+            return label
+    return DEFAULT_DEVICE
 
 
-def _device_from_label(devices, label: str):
-    for index, name in devices:
-        if name == label:
-            return index
+def _device_from_label(devices, label: str, kind: str = "output"):
+    """What to store for a chosen row: the device's **name**, not its index.
+
+    Windows renumbers audio devices whenever the set of them changes, so an
+    index saved today points somewhere else tomorrow — silently, because sound
+    going to the wrong device raises nothing. A name survives that.
+
+    **The fullest name, not whichever row was clicked.** MME truncates every
+    device name to 31 characters, so picking the MME row and storing its name
+    writes a truncation that can only ever match MME again — and MME is the one
+    host API whose writes go nowhere while a game holds the endpoint. See
+    `speech.MME_NAME_LIMIT`.
+    """
+    for index, shown in devices:
+        if shown == label:
+            return speech.canonical_name(index, kind) or index
     return None
 
 
@@ -1041,7 +1068,9 @@ def _save_audio(app) -> None:
     cfg = app.store.config
     cfg.audio.gain = min(10.0, max(0.1, round(float(app.v_gain.get()), 2)))
     cfg.audio.input_device = _device_from_label(app.input_devices, app.v_input.get())
-    cfg.cues.output_device = _device_from_label(app.output_devices, app.v_output.get())
+    # One device for the whole app — cues, voice and the engineer.
+    cfg.audio.output_device = _device_from_label(
+        app.output_devices, app.v_output.get())
     app.save_config()
 
 
@@ -1060,14 +1089,14 @@ def _play_test_cue(app) -> None:
         # A test button should make a sound even when cues are switched off;
         # that is what the user is asking to hear.
         enabled=True,
-        output_device=_device_from_label(app.output_devices, app.v_output.get()),
         start_hz=_as_int(app.v_cue_start, saved.start_hz),
         stop_hz=_as_int(app.v_cue_stop, saved.stop_hz),
         duration_ms=_as_int(app.v_cue_ms, saved.duration_ms),
         volume=min(1.0, max(0.0, _as_float(app.v_cue_vol, saved.volume))),
     )
-    log.info("test cue on device %r", cue.output_device)
-    speech.play_cue(cue, cue.start_hz)
+    device = _device_from_label(app.output_devices, app.v_output.get())
+    log.info("test cue on device %r", device)
+    speech.play_cue(cue, cue.start_hz, device)
 
 
 def set_level(app, rms: float) -> None:
@@ -1164,14 +1193,12 @@ def build_voice_tab(app) -> None:
          t("separate from sending, so you can go quiet without going deaf — "
            "or the reverse"))
 
-    app.voice_devices = speech.list_devices("output")
-    app.v_voice_output = tk.StringVar(
-        value=_device_label(app.voice_devices, cfg.voice.output_device))
-    _row(hearing, 1, t("Output device"),
-         ttk.Combobox(hearing, textvariable=app.v_voice_output, state="readonly",
-                      values=["(system default)"]
-                             + [label for _i, label in app.voice_devices]),
-         t("your headset, not the sim's output"))
+    # No device picker here. There is one output device for the whole app and
+    # it lives on the Audio tab — three pickers meant three chances to send
+    # sound somewhere nobody was listening, which is silent when it happens.
+    ttk.Label(hearing, text=t("Plays on the output device set in the Audio tab."),
+              style="Muted.TLabel").grid(row=1, column=0, columnspan=3,
+                                         sticky="w", pady=(2, 4))
 
     app.v_voice_volume = tk.DoubleVar(value=cfg.voice.volume)
     app.v_voice_volume_label = tk.StringVar(value=_percent(cfg.voice.volume))
@@ -1232,13 +1259,482 @@ def _save_voice(app) -> None:
     cfg.voice.enabled = bool(app.v_voice_enabled.get())
     cfg.voice.playback = bool(app.v_voice_playback.get())
     cfg.voice.display_name = app.v_voice_name.get().strip()
-    cfg.voice.output_device = _device_from_label(
-        app.voice_devices, app.v_voice_output.get())
     cfg.voice.volume = min(1.0, max(0.0, round(float(app.v_voice_volume.get()), 2)))
     cfg.voice.max_age_seconds = max(
         0.1, _as_float(app.v_voice_max_age, cfg.voice.max_age_seconds))
     cfg.voice.relay = app.v_voice_relay.get().strip()
     app.save_config()
+
+
+# -- Engineer ------------------------------------------------------------
+
+
+def build_engineer_tab(app) -> None:
+    """The named voice that talks back.
+
+    Laid out as three questions in the order somebody asks them: who is this,
+    what does it sound like, and what does it tell me. The routines go last
+    because they are the part you configure once and then talk to.
+    """
+    frame, footer = scrolling_tab(app, t("Engineer"))
+    cfg = app.store.config.engineer
+
+    who = ttk.LabelFrame(frame, text=t("Who"), padding=10)
+    who.pack(fill="x")
+    app.engineer_frame = who
+
+    app.v_eng_enabled = tk.BooleanVar(value=cfg.enabled)
+    _row(who, 0, t("Engineer on"),
+         ttk.Checkbutton(who, variable=app.v_eng_enabled),
+         t("off until you switch it on; nothing is spoken until you do"))
+
+    app.v_eng_name = tk.StringVar(value=cfg.name)
+    _row(who, 1, t("Called"), _entry(who, app.v_eng_name),
+         t("what it answers to. \"Chief, target P3\""))
+
+    app.v_eng_terse = tk.BooleanVar(value=cfg.terse)
+    _row(who, 2, t("Keep it short"),
+         ttk.Checkbutton(who, variable=app.v_eng_terse),
+         t("\"Tandy, faster exit, two tenths\" rather than the full sentence"))
+
+    app.v_eng_language = tk.StringVar(value=_engineer_language_label(cfg.language))
+    _row(who, 3, t("Speaks"),
+         ttk.Combobox(who, textvariable=app.v_eng_language, state="readonly", width=18,
+                      values=[label for _code, label in _engineer_languages()]),
+         t("follows the transcription language, because that is the language "
+           "your commands arrive in"))
+
+    sound = ttk.LabelFrame(frame, text=t("Voice"), padding=10)
+    sound.pack(fill="x", pady=(10, 0))
+
+    # Filled in from a thread; asking Windows what speech voices it has means
+    # starting a process, and doing that while the window is being built shows
+    # up as the app taking a second longer to open.
+    app.engineer_voices = []
+    app.v_eng_voice = tk.StringVar(
+        value=cfg.fallback_voice or t("(let Windows choose)"))
+    app.engineer_voice_box = ttk.Combobox(
+        sound, textvariable=app.v_eng_voice, state="readonly", width=32,
+        values=[t("(let Windows choose)")])
+    _row(sound, 1, t("Fallback voice"), app.engineer_voice_box,
+         t("used only for driver names, which no pack can contain"))
+
+    app.engineer_packs = _voice_packs()
+    app.v_eng_pack = tk.StringVar(value=cfg.voice_pack or t("(no pack)"))
+    _row(sound, 0, t("Voice"),
+         ttk.Combobox(sound, textvariable=app.v_eng_pack, state="readonly", width=32,
+                      values=[t("(no pack)"), *app.engineer_packs]),
+         t("a recorded voice pack — the only thing that sounds like a person"))
+
+    app.v_eng_rate = tk.StringVar(value="" if cfg.rate is None else str(cfg.rate))
+    _row(sound, 2, t("Pace"), _entry(sound, app.v_eng_rate, width=8),
+         t("-10 to 10 for the fallback voice; blank is the default of "
+           "3, which is brisk. A voice pack is recorded and cannot be sped up"))
+
+    # Same as voice: the device is the app's, set once on the Audio tab.
+    ttk.Label(sound, text=t("Speaks on the output device set in the Audio tab."),
+              style="Muted.TLabel").grid(row=3, column=0, columnspan=3,
+                                         sticky="w", pady=(2, 4))
+
+    app.v_eng_volume = tk.DoubleVar(value=cfg.volume)
+    app.v_eng_volume_label = tk.StringVar(value=_percent(cfg.volume))
+    volume_row = ttk.Frame(sound)
+    ttk.Scale(volume_row, from_=0.0, to=1.0, orient="horizontal", length=240,
+              variable=app.v_eng_volume,
+              command=lambda _v: app.v_eng_volume_label.set(
+                  _percent(app.v_eng_volume.get()))).pack(side="left")
+    ttk.Label(volume_row, textvariable=app.v_eng_volume_label,
+              width=6).pack(side="left", padx=6)
+    _row(sound, 4, t("Volume"), volume_row)
+
+    buttons = ttk.Frame(sound)
+    ttk.Button(buttons, text=t("Test"), command=lambda: _test_engineer(app)).pack(side="left")
+    ttk.Button(buttons, text=t("Open voice pack folder"),
+               command=_open_voice_packs).pack(side="left", padx=6)
+    ttk.Button(buttons, text=t("Write phrase list"),
+               command=lambda: _write_phrase_list(app)).pack(side="left")
+    buttons.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+    ttk.Label(
+        sound,
+        text=t(
+            "A voice pack is a folder of recorded phrases — the layout Crew "
+            "Chief uses, so a pack generated with crew-chief-autovoicepack "
+            "drops straight in. Names and lap times are not in any pack and "
+            "are always spoken by the Windows voice."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").grid(
+        row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+    _build_behaviours(app, frame)
+    _build_routines(app, frame)
+    _build_questions(app, frame)
+
+    ttk.Button(footer, text=t("Save"), command=lambda: _save_engineer(app)).pack(anchor="e")
+    _load_engineer_voices(app)
+
+
+def _build_behaviours(app, frame) -> None:
+    """The things it says without being asked.
+
+    Separate from routines because they are a separate idea: a behaviour is on
+    for as long as the engineer is, and a routine is started by speaking and
+    stands down again. Each behaviour carries its own **repeat** interval,
+    which is what makes the spotter keep telling you a car is still there
+    rather than mentioning it once as it arrives.
+    """
+    from pitradio.engineer import notifications as notifications_mod
+
+    behaviours = ttk.LabelFrame(frame, text=t("Behaviours"), padding=10)
+    behaviours.pack(fill="x", pady=(10, 0))
+    app.behaviours_frame = behaviours
+
+    ttk.Label(
+        behaviours,
+        text=t(
+            "These run whenever the engineer does. Repeat is how many seconds "
+            "before it says the same thing again while it is still true — 0 "
+            "says it once. A car alongside is worth repeating; a lap time is "
+            "not."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").grid(
+        row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+    stored_all = app.store.config.engineer.notifications or {}
+    app.v_eng_notifications = {}
+    row = 1
+    for (identifier, name, description, default_on, default_repeat,
+         repeat_help) in notifications_mod.describe():
+        stored = stored_all.get(identifier)
+        enabled = tk.BooleanVar(
+            value=default_on if stored is None else bool(stored.enabled))
+        repeat = tk.StringVar(
+            value=str(default_repeat if stored is None else stored.repeat_seconds))
+
+        controls = ttk.Frame(behaviours)
+        ttk.Checkbutton(controls, variable=enabled).pack(side="left")
+        ttk.Label(controls, text=t("repeat")).pack(side="left", padx=(12, 4))
+        _entry(controls, repeat, 6).pack(side="left")
+        ttk.Label(controls, text=t("s")).pack(side="left", padx=(3, 0))
+        _row(behaviours, row, name, controls, repeat_help)
+
+        ttk.Label(behaviours, text=description, style="Muted.TLabel",
+                  wraplength=600, justify="left").grid(
+            row=row + 1, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        app.v_eng_notifications[identifier] = (enabled, repeat)
+        row += 2
+
+    ttk.Label(
+        behaviours,
+        text=t(
+            "If the spotter calls \"left\" for a car on your right, turn on "
+            "\"Swap spotter sides\" in Profiles, under the game's plugin "
+            "settings. Which way round it is depends on the sim, and it could "
+            "not be checked without a car on a track."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").grid(
+        row=row, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+
+def _build_routines(app, frame) -> None:
+    """The things you start by saying something."""
+    from pitradio.engineer import routines as routines_mod
+
+    cfg = app.store.config.engineer
+    running = ttk.LabelFrame(frame, text=t("Routines"), padding=10)
+    running.pack(fill="x", pady=(10, 0))
+    app.routines_frame = running
+
+    ttk.Label(
+        running,
+        text=t(
+            "Say a start phrase while driving and the routine begins; say its "
+            "end phrase, or just \"stop\", and it stands down. Put your own "
+            "words in — one per line — and they replace the defaults. A phrase "
+            "ending in a {placeholder} takes whatever you say next as its "
+            "parameters."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").pack(anchor="w")
+
+    app.v_eng_routines = {}
+    for (routine_id, name, description, defaults, ends,
+         parameters) in routines_mod.describe():
+        stored = (cfg.routines or {}).get(routine_id)
+        box = ttk.Frame(running)
+        box.pack(fill="x", pady=(12, 0))
+
+        enabled = tk.BooleanVar(value=stored.enabled if stored else True)
+        ttk.Checkbutton(box, text=name, variable=enabled).pack(anchor="w")
+        ttk.Label(box, text=description, style="Muted.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", padx=(20, 0))
+        if parameters:
+            ttk.Label(box, text=t("Takes: {parameters}", parameters=parameters),
+                      style="Muted.TLabel", wraplength=600,
+                      justify="left").pack(anchor="w", padx=(20, 0))
+
+        start_box = _phrase_box(
+            app, box, t("Starts on"),
+            stored.phrases if stored and stored.phrases else defaults)
+        end_box = _phrase_box(
+            app, box, t("Ends on"),
+            stored.end_phrases if stored and stored.end_phrases else ends)
+        app.v_eng_routines[routine_id] = (enabled, start_box, end_box)
+
+
+def _build_questions(app, frame) -> None:
+    """The things you ask, as opposed to the things you start.
+
+    A switch each, and nothing else. A routine gets its trigger phrases edited
+    because what a routine is *called* is not the routine; a question is a
+    question, and the ones that can be answered are fixed by what the sim
+    publishes. A phrase box here would imply you could invent one.
+
+    The switch earns its place for a different reason: every phrase the
+    engineer listens for is a phrase that can be taken out of a message meant
+    for the whole session, and somebody who never asks these has no reason to
+    carry that risk.
+    """
+    from pitradio.engineer import queries as queries_mod
+
+    asking = ttk.LabelFrame(frame, text=t("Questions"), padding=10)
+    asking.pack(fill="x", pady=(10, 0))
+
+    ttk.Label(
+        asking,
+        text=t(
+            "Ask while driving and you get one answer — nothing starts "
+            "running. Anything that follows is read against this session: "
+            "\"in GT3\" is a class on the grid, \"sector three\" is a "
+            "sector. Say the engineer's name first if a question is not "
+            "recognised on its own. Switch one off and its phrases go "
+            "straight to the chat box like any other words."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").pack(anchor="w")
+
+    # Built here rather than held at module level so every string is a literal
+    # the extractor can find — translations come from the same catalogue as
+    # everything else in the window.
+    described = (
+        ("fastest_lap", t("Fastest lap"),
+         t("who has the quickest lap of the session. Name a class to ask "
+           "about that one instead of your own")),
+        ("fastest_sector", t("Fastest sector"),
+         t("who holds a sector. Say which sector, and a class if you want "
+           "one other than yours")),
+        ("my_best_lap", t("Your best lap"), t("what you have done so far")),
+        ("fuel_to_finish", t("Fuel to finish"),
+         t("what to fill the tank to, as a percentage, for a stop on the "
+           "next lap or however many laps away you say. Needs a lap or two "
+           "of running first, because the burn rate is measured rather than "
+           "assumed")),
+    )
+
+    cfg = app.store.config.engineer
+    app.v_eng_questions = {}
+    for query_id, name, answers in described:
+        stored = (cfg.questions or {}).get(query_id)
+        box = ttk.Frame(asking)
+        box.pack(fill="x", pady=(10, 0))
+
+        enabled = tk.BooleanVar(value=stored.enabled if stored else True)
+        ttk.Checkbutton(box, text=name, variable=enabled).pack(anchor="w")
+        app.v_eng_questions[query_id] = enabled
+        ttk.Label(box, text=answers, style="Muted.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", padx=(20, 0))
+        spoken = queries_mod.DEFAULT_PHRASES.get(query_id, ())
+        ttk.Label(box, text=" / ".join(f'"{phrase}"' for phrase in spoken),
+                  style="Muted.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", padx=(20, 0))
+
+
+def _phrase_box(app, parent, label: str, lines_: tuple[str, ...]):
+    """A small multi-line field of trigger phrases, one per line."""
+    ttk.Label(parent, text=label, style="Muted.TLabel").pack(
+        anchor="w", padx=(20, 0), pady=(6, 0))
+    text = tk.Text(parent, height=3, wrap="none",
+                   **theme.text_options(app.palette), font=theme.MONO_FONT,
+                   padx=6, pady=4)
+    text.insert("1.0", "\n".join(lines_))
+    text.pack(fill="x", padx=(20, 0))
+    return text
+
+
+def _engineer_languages() -> list[tuple[str, str]]:
+    """(code, label), with "follow the transcription language" first."""
+    from pitradio import languages as languages_mod
+
+    choices = [("", t("Follow transcription"))]
+    for code in i18n.available():
+        choices.append((code, languages_mod.language_name(code)))
+    return choices
+
+
+def _engineer_language_label(code: str) -> str:
+    return dict(_engineer_languages()).get(code, _engineer_languages()[0][1])
+
+
+def _engineer_language_code(label: str) -> str:
+    for code, text in _engineer_languages():
+        if text == label:
+            return code
+    return ""
+
+
+def _voice_packs() -> list[str]:
+    from pitradio.engineer import packs
+
+    try:
+        return [pack.name for pack in packs.discover(paths.voice_pack_dir())]
+    except Exception as exc:
+        log.debug("could not list voice packs: %s", exc)
+        return []
+
+
+def _open_voice_packs() -> None:
+    open_folder(paths.voice_pack_dir())
+
+
+def _write_phrase_list(app) -> None:
+    """Write the phrase inventory a voice-pack generator needs.
+
+    Generated from the app rather than kept by hand, so it can never drift from
+    what the engineer actually says. Written in the engineer's own language,
+    because a pack is recorded in the language it will be spoken in.
+    """
+    from pitradio import i18n as i18n_mod
+    from pitradio.engineer import lines, packs
+
+    catalogue = i18n_mod.Catalogue.for_setting(
+        _engineer_language_code(app.v_eng_language.get()) or "en")
+    target = paths.voice_pack_dir() / "phrase_inventory.csv"
+    try:
+        spoken = lines.vocabulary(catalogue)
+        packs.inventory([(packs.slug(line), line) for line in spoken], target)
+    except OSError as exc:
+        messagebox.showerror(t("PitRadio"), f"Could not write the phrase list:\n{exc}")
+        return
+    log.info("wrote the engineer's phrase list to %s", target)
+    open_folder(target.parent)
+
+
+def _load_engineer_voices(app) -> None:
+    """Ask Windows what speech voices exist, off the UI thread.
+
+    Starting the speech host takes the best part of a second. Doing it while
+    the tab is being built would show up as the whole window opening slowly,
+    for a dropdown almost nobody touches.
+    """
+    def work() -> None:
+        from pitradio.engineer import tts
+
+        try:
+            found = tts.installed_voices()
+        except Exception as exc:
+            log.debug("could not list speech voices: %s", exc)
+            found = []
+        try:
+            app.root.after(0, lambda: _fill_engineer_voices(app, found))
+        except Exception:
+            # The window went away while the host was starting. Marshalling
+            # onto a destroyed root raises RuntimeError rather than TclError,
+            # from this thread, where nothing would catch it.
+            log.debug("the voice list arrived after the window closed")
+
+    threading.Thread(target=work, name="engineer-voices", daemon=True).start()
+
+
+def _fill_engineer_voices(app, found) -> None:
+    if not found:
+        return
+    app.engineer_voices = found
+    try:
+        app.engineer_voice_box.configure(
+            values=[t("(let Windows choose)"), *[voice.label for voice in found]])
+    except tk.TclError:
+        # The window closed while the host was starting.
+        log.debug("the voice list arrived after the tab went away")
+
+
+def _engineer_voice_name(app) -> str:
+    """The chosen voice's real name, not the label with its details on."""
+    chosen = app.v_eng_voice.get()
+    for voice in app.engineer_voices:
+        if voice.label == chosen:
+            return voice.name
+    return "" if chosen == t("(let Windows choose)") else chosen
+
+
+def _test_engineer(app) -> None:
+    """Speak a line with what is selected right now, saved or not."""
+    if app.engineer is None:
+        messagebox.showinfo(
+            t("PitRadio"),
+            t("The engineer isn't running in this mode, so there is nothing to "
+              "hear."))
+        return
+    _apply_engineer(app)
+    threading.Thread(target=app.engineer.say_test, name="engineer-test",
+                     daemon=True).start()
+
+
+def _apply_engineer(app) -> None:
+    """Copy the tab's fields onto the live config, without saving.
+
+    Split from `_save_engineer` so Test can hear an unsaved change. Reading
+    from a config captured when the tab was built would test whatever was
+    configured at startup, forever — the same trap the cue test fell into.
+    """
+    cfg = app.store.config.engineer
+    cfg.enabled = bool(app.v_eng_enabled.get())
+    cfg.name = app.v_eng_name.get().strip()
+    cfg.language = _engineer_language_code(app.v_eng_language.get())
+    cfg.fallback_voice = _engineer_voice_name(app)
+    pack = app.v_eng_pack.get()
+    cfg.voice_pack = "" if pack == t("(no pack)") else pack
+    cfg.terse = bool(app.v_eng_terse.get())
+    rate = str(app.v_eng_rate.get()).strip()
+    try:
+        cfg.rate = max(-10, min(10, int(rate))) if rate else None
+    except ValueError:
+        cfg.rate = None
+    cfg.volume = min(1.0, max(0.0, round(float(app.v_eng_volume.get()), 2)))
+    from pitradio import config as config_mod
+
+    cfg.notifications = {
+        identifier: config_mod.NotificationConfig(
+            enabled=bool(enabled.get()),
+            repeat_seconds=max(0.0, _as_float(repeat, 0.0)),
+        )
+        for identifier, (enabled, repeat) in app.v_eng_notifications.items()
+    }
+
+    cfg.routines = {
+        routine_id: config_mod.RoutineConfig(
+            enabled=bool(enabled.get()),
+            phrases=_phrase_lines(start_box),
+            end_phrases=_phrase_lines(end_box),
+        )
+        for routine_id, (enabled, start_box, end_box) in app.v_eng_routines.items()
+    }
+    cfg.questions = {
+        query_id: config_mod.QuestionConfig(enabled=bool(enabled.get()))
+        for query_id, enabled in getattr(app, "v_eng_questions", {}).items()
+    }
+
+
+def _phrase_lines(text) -> list[str]:
+    return [line.strip() for line in text.get("1.0", "end").splitlines()
+            if line.strip()]
+
+
+def _save_engineer(app) -> None:
+    _apply_engineer(app)
+    app.save_config()
+    if app.engineer is not None:
+        # Applied now rather than left to the next poll: someone who has just
+        # changed the voice is about to press Test, and a persona that takes
+        # effect a tenth of a second later still reads as "it did not work".
+        app.engineer.refresh_voice(force=True)
 
 
 # -- History -------------------------------------------------------------

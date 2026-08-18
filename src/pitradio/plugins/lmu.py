@@ -25,7 +25,14 @@ import urllib.request
 from pathlib import Path
 
 from pitradio import voice
+from pitradio.plugins import shared_memory
 from pitradio.plugins.base import (
+    PROVIDES_FIELD,
+    PROVIDES_FLAGS,
+    PROVIDES_FUEL,
+    PROVIDES_LAPS,
+    PROVIDES_POSITIONS,
+    PROVIDES_SECTORS,
     Car,
     PluginSetting,
     SessionInfo,
@@ -48,6 +55,14 @@ FILE_MAP_READ = 0x0004
 #: Roughly the car behind and the one you are catching. Named here rather than
 #: written into the setting so the number has somewhere to be explained.
 DEFAULT_PROXIMITY_METRES = 200
+
+#: The spotter's window, per sim, because cars are not the same length
+#: everywhere. A Hypercar is about 5m, so this is overlapping bodywork plus a
+#: little either way.
+DEFAULT_ALONGSIDE_METRES = 9
+#: How far to the side still counts as beside you rather than on another part
+#: of the circuit.
+DEFAULT_WIDTH_METRES = 12
 
 # -- which car is on screen ----------------------------------------------
 #
@@ -107,35 +122,12 @@ def focus_slot(standings) -> int | None:
 def _open_existing_mapping(name: str, size: int):
     """Open a shared memory block only if something else already published it.
 
-    Deliberately not mmap.mmap(fileno=0, tagname=...): on Windows that calls
-    CreateFileMapping, which *creates* the block when it is absent. With LMU
-    closed that fabricated a page-file-backed block named LMU_Data full of
-    zeros, so the plugin reported itself connected to a session that did not
-    exist — and left a phantom mapping under the game's own name.
-
-    OpenFileMappingW only ever opens; it fails when the game is not running,
-    which is the answer we actually want.
+    The implementation moved to `shared_memory` the moment a second sim needed
+    it, along with the explanation of why it must never be `mmap.mmap` — a rule
+    that is silent when broken, and so is exactly the wrong thing to have two
+    copies of.
     """
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenFileMappingW.argtypes = (
-        wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
-    kernel32.OpenFileMappingW.restype = wintypes.HANDLE
-    kernel32.MapViewOfFile.argtypes = (
-        wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
-        ctypes.c_size_t)
-    kernel32.MapViewOfFile.restype = ctypes.c_void_p
-
-    handle = kernel32.OpenFileMappingW(FILE_MAP_READ, False, name)
-    if not handle:
-        return None
-
-    view = kernel32.MapViewOfFile(handle, FILE_MAP_READ, 0, 0, size)
-    if not view:
-        kernel32.CloseHandle(handle)
-        return None
-    return handle, view
+    return shared_memory.open_existing(name, size)
 
 
 def _text(raw: bytes) -> str:
@@ -147,15 +139,90 @@ def _text(raw: bytes) -> str:
     return raw.decode("utf-8", "replace").strip("\x00").strip()
 
 
-def _close_mapping(handle, view) -> None:
+def _speed(local_velocity) -> float:
+    """How fast a car is going, in metres per second.
+
+    The block publishes velocity in the car's own axes rather than a scalar, so
+    speed is the length of that vector. Taking the longitudinal component alone
+    would read low through a slide, which is exactly where somebody is losing
+    the time a coaching routine is meant to find.
+    """
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        if view:
-            kernel32.UnmapViewOfFile(ctypes.c_void_p(view))
-        if handle:
-            kernel32.CloseHandle(handle)
-    except Exception:
-        log.debug("releasing the LMU mapping failed", exc_info=True)
+        return float((local_velocity.x ** 2 + local_velocity.y ** 2
+                      + local_velocity.z ** 2) ** 0.5)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
+#: `mFlag` is per car and, per the block's own comment, currently only ever
+#: green or blue.
+BLUE_FLAG = 6
+
+#: `mGamePhase` when the whole circuit is under caution.
+PHASE_FULL_COURSE_YELLOW = 6
+
+#: `mYellowFlagState`: anything above this is a caution in progress. 0 is no
+#: flag and -1 is invalid; 1 (pending) onwards all mean one is running.
+YELLOW_STATE_NONE = 0
+
+
+# **`mSectorFlag` is not read, and deliberately.** The layout describes it as
+# "whether there are any local yellows at the moment in each sector", which
+# would be exactly what a spotter wants. Against a live session it reads
+# `[11, 11, 1]` — under a green flag, with `mGamePhase` at 5 and
+# `mYellowFlagState` at 0, and with the fields either side of it (`mNumVehicles`
+# 56, `mCurrentET`, `mInRealtime`) all correct, so this is not an offset that
+# has slipped. LMU publishes something else there.
+#
+# Read as booleans those values mean "a local yellow in all three sectors, at
+# all times", which is the kind of confident garbage that is worse than no
+# feature: it would put a permanent yellow on the whole circuit and there would
+# be nothing in the app to point at. Local yellows are derived from cars that
+# have actually stopped instead — see `engineer/flags.py`.
+
+
+def _full_course_yellow(info) -> bool:
+    """Whether the whole circuit is under caution.
+
+    Two fields, because they answer slightly different questions and either
+    alone has a hole. `mGamePhase` is the state the session is *in*, and
+    `mYellowFlagState` is what the caution is *doing* — pits closed, lead lap,
+    resume. A caution that is winding down leaves the phase behind before the
+    state clears, and a pending one raises the state before the phase moves.
+    """
+    try:
+        phase = int(info.mGamePhase)
+        state = ord(info.mYellowFlagState) if isinstance(
+            info.mYellowFlagState, bytes) else int(info.mYellowFlagState)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return phase == PHASE_FULL_COURSE_YELLOW or state > YELLOW_STATE_NONE
+
+
+#: `mMaxLaps` in a timed session. LMU writes `INT_MAX` there rather than zero,
+#: and a fuel calculation that took it at face value would ask for two billion
+#: laps' worth — so anything implausible is read as "no lap limit".
+NO_LAP_LIMIT = 10000
+
+
+def _race_length(info) -> tuple[int, float]:
+    """(laps, when the clock runs out). One of them is always zero.
+
+    A race is decided by one or the other and never both, and saying which is
+    the whole value of reading them together — see `SessionInfo.max_laps`.
+    """
+    try:
+        laps = int(info.mMaxLaps)
+        ends_at = float(info.mEndET)
+    except (AttributeError, TypeError, ValueError):
+        return 0, 0.0
+    if 0 < laps < NO_LAP_LIMIT:
+        return laps, 0.0
+    return 0, max(0.0, ends_at)
+
+
+def _close_mapping(handle, view) -> None:
+    shared_memory.close(handle, view)
 
 
 class LeMansUltimatePlugin(SessionPlugin):
@@ -163,9 +230,16 @@ class LeMansUltimatePlugin(SessionPlugin):
     name = "Le Mans Ultimate"
     executables = ("le mans ultimate.exe",)
     description = (
-        "Reads the driver list from LMU's shared memory, so names are "
-        "transcribed correctly and can be turned into mentions."
+        "Reads the driver list, lap and sector times and every car's position "
+        "from LMU's shared memory — names for mentions, and everything the "
+        "engineer needs."
     )
+    #: All of it. The block carries every car's world position, lap and sector
+    #: data, which is why this is the sim the engineer was built against.
+    provides = frozenset({
+        PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS, PROVIDES_FIELD,
+        PROVIDES_FLAGS, PROVIDES_FUEL,
+    })
     settings = (
         PluginSetting(
             key="positions",
@@ -192,6 +266,32 @@ class LeMansUltimatePlugin(SessionPlugin):
             default=DEFAULT_PROXIMITY_METRES,
             help=("how near counts. 200m is roughly the car behind you and the "
                   "one you are catching; a lap of Daytona is 5,700m"),
+        ),
+        PluginSetting(
+            key="spotter_swap_sides",
+            label="Swap spotter sides",
+            kind="bool",
+            default=False,
+            help=("turn this on if the engineer's spotter says \"left\" for a "
+                  "car on your right. Which side is which depends on the sim's "
+                  "own axes, and that could not be checked without driving"),
+        ),
+        PluginSetting(
+            key="spotter_car_length",
+            label="Spotter: car length (m)",
+            kind="int",
+            default=5,
+            help=("every spotter distance is worked out from this. Two cars "
+                  "are alongside when their bodywork overlaps, which is a fact "
+                  "about how long they are — 4-5m for most, 2 for a kart"),
+        ),
+        PluginSetting(
+            key="spotter_car_width",
+            label="Spotter: car width (m)",
+            kind="int",
+            default=2,
+            help=("how far apart two cars sit when side by side, and how far "
+                  "out still counts as beside you rather than elsewhere"),
         ),
     )
 
@@ -341,13 +441,22 @@ class LeMansUltimatePlugin(SessionPlugin):
                 address = int(info.mServerPublicIP)
                 port = int(info.mServerPort)
                 track = _text(info.mTrackName)
+                # The lap length and the session clock, read in the same lock
+                # as the cars above. The engineer compares one car's position
+                # against another's, and two reads would be two moments.
+                track_length = max(0.0, float(info.mLapDist))
+                elapsed = float(info.mCurrentET)
+                caution = _full_course_yellow(info)
+                max_laps, ends_at = _race_length(info)
             except (AttributeError, ValueError) as exc:
                 self._fail(f"could not read the session block: {exc}")
                 return SessionInfo()
 
         return SessionInfo(
             key=voice.session_key(address, port), track=track, cars=tuple(cars),
-            focus_slot=self._focus_slot())
+            focus_slot=self._focus_slot(), track_length=track_length,
+            elapsed=elapsed, full_course_yellow=caution,
+            max_laps=max_laps, ends_at=ends_at)
 
     def _focus_slot(self) -> int | None:
         """Which car the camera is on, from the game's own HTTP API.
@@ -392,6 +501,7 @@ class LeMansUltimatePlugin(SessionPlugin):
                 return []
 
             count = max(0, min(count, len(scoring.vehScoringInfo)))
+            fuel = self._own_fuel()
             cars: list[Car] = []
             for index in range(count):
                 vehicle = scoring.vehScoringInfo[index]
@@ -409,8 +519,62 @@ class LeMansUltimatePlugin(SessionPlugin):
                     position=(float(vehicle.mPos.x), float(vehicle.mPos.y),
                               float(vehicle.mPos.z)),
                     is_player=bool(vehicle.mIsPlayer),
+                    # Only ever the player's own car: the telemetry block
+                    # covers the car you are driving and nobody else's, so
+                    # every other entry stays at zero rather than borrowing
+                    # somebody's tank.
+                    fuel=fuel[0] if int(vehicle.mID) == fuel[2] else 0.0,
+                    fuel_capacity=fuel[1] if int(vehicle.mID) == fuel[2] else 0.0,
+                    lap_dist=float(vehicle.mLapDist),
+                    speed=_speed(vehicle.mLocalVel),
+                    laps=max(0, int(vehicle.mTotalLaps)),
+                    # Negative is how the block says "no time", and letting
+                    # that through would make every car's best lap beat every
+                    # real one.
+                    last_lap=max(0.0, float(vehicle.mLastLapTime)),
+                    best_lap=max(0.0, float(vehicle.mBestLapTime)),
+                    in_pits=bool(vehicle.mInPits),
+                    in_garage=bool(vehicle.mInGarageStall),
+                    # 6 is blue, and 0 is green; the block's comment says
+                    # those are the only two it currently shows.
+                    blue_flag=int(vehicle.mFlag) == BLUE_FLAG,
+                    # mSector numbers its sectors 0=third, 1=first, 2=second.
+                    # Passed through as the block reports it rather than
+                    # normalised here, so the one place that has to know the
+                    # convention is the module that documents it.
+                    sector=int(vehicle.mSector),
+                    cur_sector1=max(0.0, float(vehicle.mCurSector1)),
+                    cur_sector2=max(0.0, float(vehicle.mCurSector2)),
+                    last_sector1=max(0.0, float(vehicle.mLastSector1)),
+                    last_sector2=max(0.0, float(vehicle.mLastSector2)),
                 ))
             return cars
+
+    def _own_fuel(self) -> tuple[float, float, int]:
+        """(litres, capacity, whose) for the car being driven here.
+
+        The third is the scoring `mID` the first two belong to, because the
+        telemetry array is indexed by `playerVehicleIdx` while the scoring
+        array is not — they are two orderings of the same session, and `mID` is
+        the only thing that means the same in both. Attaching fuel by position
+        would put the player's tank on whichever car happened to be scored in
+        that slot.
+
+        (0, 0, -1) when the block says nothing, which no car matches.
+        """
+        try:
+            telemetry = self._data.telemetry
+            if not bool(telemetry.playerHasVehicle):
+                return 0.0, 0.0, -1
+            index = int(telemetry.playerVehicleIdx)
+            if not 0 <= index < len(telemetry.telemInfo):
+                return 0.0, 0.0, -1
+            own = telemetry.telemInfo[index]
+            return (max(0.0, float(own.mFuel)),
+                    max(0.0, float(own.mFuelCapacity)),
+                    int(own.mID))
+        except (AttributeError, TypeError, ValueError):
+            return 0.0, 0.0, -1
 
     def status(self) -> str:
         if not self.is_connected():

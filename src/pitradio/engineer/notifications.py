@@ -1,0 +1,775 @@
+"""Behaviours: the things the engineer says without being asked.
+
+A notification watches one condition and says one thing when it is met. They
+are switched on and off individually in Settings → Engineer, and they run for
+as long as the engineer does — unlike a routine, which is started by voice and
+stands down again.
+
+**Every notification has a repeat interval**, and it is the part worth
+understanding. A call is identified by a *key*, not by the moment it happened:
+
+* A key that has not been said before is said immediately.
+* A key already said is said again once the repeat interval has passed — which
+  is what makes the spotter keep telling you there is still a car there.
+* A **different** key jumps the interval, because it is new information. A car
+  arriving on your left while one sits on your right is not a repeat.
+
+Set the interval to zero and a call is made once per change and never repeated.
+That is right for a lap time, which does not become more true, and wrong for a
+car alongside, which stops being true without anything happening.
+
+Routines are built out of these — see [routines.py](routines.py). A routine
+running is a set of notifications with the routine's own conditions and
+messages, which is why this file has no idea routines exist.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+
+from pitradio.engineer import coaching, rejoin, spotter
+from pitradio.engineer import flags as flags_mod
+from pitradio.plugins import base
+
+log = logging.getLogger(__name__)
+
+#: Ids are stored in config; never rename one in place.
+SPOTTER = "spotter"
+LAP_TIME = "lap_time"
+FASTEST_LAP = "fastest_lap"
+FASTEST_SECTOR = "fastest_sector"
+SECTOR_PERFORMANCE = "sector_performance"
+FLAGS = "flags"
+
+
+@dataclass(frozen=True)
+class Call:
+    """Something to say, and what would count as saying it again.
+
+    `key` is the identity of the call rather than of the event. Two arrivals of
+    a car on the left are the same key and are subject to the repeat interval;
+    a car on the left and a car on the right are different keys and neither
+    waits for the other.
+    """
+
+    key: str
+    utterance: list[str]
+    urgent: bool = False
+
+
+class Notification:
+    """One thing the engineer watches. Subclasses override `check`."""
+
+    #: Stored in config; never rename one in place.
+    id: str = ""
+    name: str = "unnamed"
+    description: str = ""
+    #: Seconds before the same call is worth making again. Zero means never —
+    #: say it once per change and then stay quiet.
+    default_repeat: float = 0.0
+    #: Whether it is on for a fresh install.
+    default_enabled: bool = True
+    #: Shown in the tab next to the repeat box, so the number has a meaning.
+    repeat_help: str = ""
+    #: What the sim has to supply for this to work at all — the PROVIDES_*
+    #: names from `plugins.base`. A behaviour whose data is missing is skipped,
+    #: because a tick-box that is on and permanently silent looks exactly like
+    #: a bug.
+    requires: tuple[str, ...] = ()
+
+    def supported(self, provided) -> bool:
+        """Whether the current sim can supply what this needs.
+
+        `provided` of None means "nobody said", which is treated as yes — that
+        is a plugin written before capabilities existed, and switching its
+        behaviours off would be a silent regression.
+        """
+        if provided is None:
+            return True
+        return all(need in provided for need in self.requires)
+
+    def missing(self, provided) -> str:
+        """What this sim lacks, for the log line.
+
+        A method rather than a subtraction at the call site, because a
+        notification that overrides `supported` — one that can work more than
+        one way — knows what it wanted and the runner does not.
+        """
+        return ", ".join(sorted(set(self.requires) - set(provided or ())))
+
+    def reset(self) -> None:
+        """Forget everything. A new session, or the notification being switched
+        off and on again."""
+
+    def check(self, context) -> list[Call]:
+        """What to say right now, if anything. Must be quick and must not raise."""
+        return []
+
+
+class Runner:
+    """Holds the notifications and decides which of their calls actually go out.
+
+    The repeat logic lives here rather than in each notification, so a new one
+    gets it for free and cannot get it subtly wrong. `now` is passed in rather
+    than read, so the timing is testable without sleeping.
+    """
+
+    def __init__(self, notifications: list[Notification] | None = None) -> None:
+        self.notifications = list(notifications or [])
+        #: (notification id, call key) -> when it was last said.
+        self._said: dict[tuple[str, str], float] = {}
+        #: Behaviours already reported as unsupported, so the log says it once
+        #: per session rather than ten times a second.
+        self._unsupported: set[str] = set()
+
+    def reset(self) -> None:
+        self._said.clear()
+        self._unsupported.clear()
+        for notification in self.notifications:
+            try:
+                notification.reset()
+            except Exception:
+                log.exception("resetting %s failed", notification.id)
+
+    def due(self, notification: Notification, call: Call, now: float,
+            repeat: float) -> bool:
+        """Whether this call is worth making at this moment."""
+        stamp = self._said.get((notification.id, call.key))
+        if stamp is None:
+            return True
+        if repeat <= 0:
+            return False
+        return now - stamp >= repeat
+
+    def run(self, context, now: float, settings, provided=None) -> list[Call]:
+        """Every call that should go out this tick, in order.
+
+        `settings` answers `enabled(id)` and `repeat(id)`, so the runner does
+        not have to know what a config looks like — which is what lets a
+        routine supply its own without inventing a config section.
+
+        `provided` is what the current sim can actually supply. A behaviour
+        needing something absent is skipped **and said so once**, because the
+        alternative is a tick-box that is on, looks fine and is permanently
+        silent — which is indistinguishable from a bug, and is how somebody
+        ends up filing one.
+        """
+        due: list[Call] = []
+        for notification in self.notifications:
+            if not settings.enabled(notification.id):
+                continue
+            if not notification.supported(provided):
+                if notification.id not in self._unsupported:
+                    self._unsupported.add(notification.id)
+                    log.info(
+                        "%s is on but this sim does not publish %s; it will "
+                        "stay quiet", notification.name,
+                        notification.missing(provided))
+                continue
+            try:
+                calls = notification.check(context)
+            except Exception:
+                # One notification failing must not silence the others, and
+                # certainly must not take the poll thread down.
+                log.exception("notification %s failed", notification.id)
+                continue
+
+            repeat = settings.repeat(notification.id)
+            for call in calls or []:
+                if not call.utterance or not self.due(notification, call, now, repeat):
+                    continue
+                self._said[(notification.id, call.key)] = now
+                due.append(call)
+        return due
+
+    def forget(self, notification_id: str) -> None:
+        """Drop a notification's history, so its next call is immediate."""
+        for key in [k for k in self._said if k[0] == notification_id]:
+            del self._said[key]
+
+
+# -- the behaviours that ship ---------------------------------------------
+
+
+class SpotterNotification(Notification):
+    """Cars alongside, and the sides that have gone clear again.
+
+    Repeats by default, because a car alongside stops being there without
+    anything happening — and a driver holding a line for somebody who left two
+    corners ago is worse off than one who was never told.
+    """
+
+    id = SPOTTER
+    name = "Spotter"
+    description = ("Calls cars alongside, and calls each side clear once they "
+                   "have gone.")
+    default_repeat = 3.0
+    default_enabled = False
+    repeat_help = "how often it repeats while a car is still there"
+
+    def supported(self, provided) -> bool:
+        """Either route will do, so this cannot use a plain `requires`.
+
+        Most sims hand over every car's world position and the geometry works
+        it out. iRacing hands over none — only how far round the lap each car
+        is, which cannot answer "who is beside me" on a circuit that doubles
+        back — but publishes its own left/right call, which is a *better*
+        answer than any geometry because it comes from the real car bodies
+        rather than from a point and an assumed width.
+        """
+        if provided is None:
+            return True
+        return (base.PROVIDES_POSITIONS in provided
+                or base.PROVIDES_SPOTTER in provided)
+
+    def missing(self, provided) -> str:
+        return f"{base.PROVIDES_POSITIONS} or {base.PROVIDES_SPOTTER}"
+
+    def __init__(self) -> None:
+        self._heading = spotter.Heading()
+        self._sides: frozenset[str] = frozenset()
+        self._stopped = spotter.Stopped()
+        #: When each side first appeared, and when it last went empty. Crew
+        #: Chief's `spotter_overlap_delay` and `spotter_clear_delay`: two cars
+        #: at the same corner cross in and out of overlap as they breathe, and
+        #: without a settling time the spotter chatters.
+        self._since: dict[str, float] = {}
+        self._empty_since: dict[str, float] = {}
+        #: The situation that is actually being called, which lags the measured
+        #: one by those delays.
+        self._called: dict[str, int] = {}
+
+    def reset(self) -> None:
+        self._heading.reset()
+        self._sides = frozenset()
+        self._stopped.reset()
+        self._since.clear()
+        self._empty_since.clear()
+        self._called.clear()
+
+    def check(self, context) -> list[Call]:
+        own = context.own_car()
+        if own is None:
+            self.reset()
+            return []
+
+        if context.session.full_course_yellow:
+            # **Silent under caution.** Crew Chief's `fcy_stop_spotter_
+            # immediately`, on by default. Under a full-course yellow the whole
+            # field is bunched at a crawl, permanently overlapping, and every
+            # call would be true and useless. The flags behaviour has the only
+            # thing worth saying at that point.
+            self.reset()
+            return []
+
+        if float(getattr(own, "speed", 0.0) or 0.0) < spotter.MIN_SPEED:
+            # In the pit lane, on the grid, or crawling out of a spin. The cars
+            # around you are stationary or passing at walking pace, and a
+            # spotter that calls those is one nobody leaves switched on.
+            self.reset()
+            return []
+
+        measured = self._tally(context, own)
+        if measured is None:
+            return []
+
+        tally = self._settled(measured, context.session.elapsed)
+        now = frozenset(tally)
+        changes = spotter.calls(tally, self._sides)
+        self._sides = now
+
+        # An arrival and the repeats that follow it are **one call under one
+        # key**, from `spotter.arrival_key`. Two keys would mean the repeat was
+        # a new call the moment the wording changed, and a new call is due
+        # immediately — so "car left" would be followed by "still there" a tick
+        # later instead of three seconds later.
+        calls: list[Call] = []
+        arrived = False
+        for side, text, urgent in changes:
+            if text.startswith("clear"):
+                calls.append(Call(f"{side}:{text}",
+                                  context.script.spotter_call(text), urgent))
+                continue
+            arrived = True
+            calls.append(Call(spotter.arrival_key(tally),
+                              context.script.spotter_call(text), urgent))
+
+        # A situation that has not changed still gets a standing call, which
+        # the repeat interval decides the fate of. Without this the spotter
+        # says "car left" once and then nothing for as long as they sit there —
+        # and with the arrival's own wording it would say "car left" over and
+        # over, which is what `spotter.standing` exists to stop.
+        held = spotter.standing(tally)
+        if held is not None and not arrived:
+            key, text = held
+            calls.append(Call(key, context.script.spotter_call(text),
+                              urgent=True))
+
+        # What is up the road, which the sides say nothing about. A car that
+        # has been *stationary* for a second is the hazard a spotter exists
+        # for: the one you cannot see coming and cannot do anything about
+        # late. Note what is deliberately not here — a car merely slower than
+        # you. That fired on every braking zone, and it is not what Crew Chief
+        # does either; see `spotter.STOPPED_FOR_SECONDS`.
+        hazard = spotter.ahead(own, context.session.cars,
+                               track_length=context.session.track_length,
+                               stopped=self._stopped, now=context.session.elapsed)
+        text = spotter.hazard_call(hazard)
+        if text:
+            calls.append(Call(f"ahead:{text}",
+                              context.script.spotter_call(text), urgent=True))
+        return calls
+
+    def _settled(self, measured: dict[str, int], now: float) -> dict[str, int]:
+        """What to actually call, once the delays have had their say.
+
+        Crew Chief has two and they are deliberately different lengths. The
+        overlap delay is short because a warning that is late is worthless; the
+        clear delay is longer because it can afford to be sure — a driver who
+        holds their line a tenth longer than necessary has lost nothing, and
+        one who is told the track is clear a tenth too early has lost rather
+        more.
+        """
+        for side in (spotter.LEFT, spotter.RIGHT):
+            if side in measured:
+                # **Present with a count of zero is not absent.** That is a car
+                # held in view by the wider range: the side is still occupied,
+                # it is simply not a second car alongside. Reading it as empty
+                # is what made the all-clear fire while somebody was still
+                # there — see `spotter.counts`.
+                count = measured[side] or self._called.get(side, 1)
+                self._empty_since.pop(side, None)
+                since = self._since.setdefault(side, now)
+                if now - since >= spotter.OVERLAP_DELAY:
+                    self._called[side] = count
+                continue
+
+            self._since.pop(side, None)
+            if side not in self._called:
+                continue
+            empty = self._empty_since.setdefault(side, now)
+            if now - empty >= spotter.CLEAR_DELAY:
+                self._called.pop(side, None)
+                self._empty_since.pop(side, None)
+        return dict(self._called)
+
+    def _tally(self, context, own) -> dict[str, int] | None:
+        """side -> how many cars, from whichever route this sim supports.
+
+        None means "cannot say this tick" — no heading yet, on the geometry
+        route — which is different from an empty tally, which means the sides
+        are genuinely clear and is a call in its own right.
+        """
+        said = context.session.alongside
+        if said is not None:
+            # The sim did its own spotting. Nothing to compute and nothing to
+            # get the handedness of wrong.
+            return dict(said)
+
+        facing = self._heading.update(own.position)
+        if facing is None:
+            # Not enough ground covered for the axes to mean anything. Saying
+            # nothing is right: a heading guessed from a stationary car turns
+            # the car in front into the car beside.
+            return None
+
+        others = {name: position
+                  for name, position in context.session.positions().items()
+                  if name != own.driver}
+        return spotter.counts(spotter.alongside(
+            own.position, facing, others,
+            # How fast everybody is going, so a car flying past on a lapping
+            # run is not called as one sitting alongside — see
+            # `spotter.MAX_CLOSING_SPEED`.
+            speeds={car.driver: car.speed for car in context.session.cars
+                    if car.driver},
+            my_speed=float(getattr(own, "speed", 0.0) or 0.0),
+            # Per-sim, from the plugin's settings: a prototype and a GT car are
+            # different lengths, and sims disagree about where a car's origin
+            # sits, so a number that suits one game is wrong in the next.
+            metres=context.alongside_metres,
+            width=context.width_metres,
+            swap=context.swap_sides,
+            overlap=context.overlap_metres,
+            min_lateral=context.min_lateral_metres,
+            # What is already being called. A car keeps its call out to the
+            # wider range; a new one has to come properly alongside first.
+            holding=self._sides))
+
+
+class LapTimeNotification(Notification):
+    """The lap you have just completed."""
+
+    id = LAP_TIME
+    name = "Lap time"
+    description = "Reads your lap out at the line, and says when it was your best."
+    default_repeat = 0.0
+    repeat_help = "a lap time does not become more true; leave this at 0"
+    requires = (base.PROVIDES_LAPS,)
+
+    def check(self, context) -> list[Call]:
+        finished = context.finished_lap
+        if finished is None:
+            return []
+        best = context.book.best_for(finished.driver)
+        return [Call(
+            f"lap:{finished.driver}:{finished.lap_time:.3f}",
+            context.script.lap_time_call(
+                finished.lap_time,
+                personal_best=best is not None and best is finished),
+        )]
+
+
+class FastestLapNotification(Notification):
+    """Somebody has taken the fastest lap of the session.
+
+    Anybody's, not only yours. Who is quickest and by how much is the thing a
+    driver most often asks the pit wall about, and it is the one number that
+    changes what a stint is for.
+    """
+
+    id = FASTEST_LAP
+    name = "New fastest lap"
+    description = ("Says when anybody sets the fastest lap of the session, and "
+                   "what it was.")
+    default_repeat = 0.0
+    repeat_help = "each new fastest lap is said once"
+    # The field as well as the laps: a sim that times only the player's car has
+    # a field of one, and this would fire every time you beat your own best and
+    # call it the fastest lap of the session.
+    requires = (base.PROVIDES_LAPS, base.PROVIDES_FIELD)
+
+    def __init__(self) -> None:
+        self._holder = ""
+        self._time = 0.0
+
+    def reset(self) -> None:
+        self._holder, self._time = "", 0.0
+
+    def check(self, context) -> list[Call]:
+        fastest = context.book.fastest(context.my_class())
+        if fastest is None or fastest.lap_time <= 0:
+            return []
+        if self._time and fastest.lap_time >= self._time:
+            return []
+
+        # The very first lap of a session is not somebody "taking" the fastest
+        # lap, it is the only lap. Recorded so the next one is a comparison,
+        # but not announced as an event.
+        first = not self._time
+        self._holder, self._time = fastest.driver, fastest.lap_time
+        if first:
+            return []
+
+        own = context.own_car()
+        mine = own is not None and own.driver == fastest.driver
+        return [Call(
+            f"fastest:{fastest.driver}:{fastest.lap_time:.3f}",
+            context.script.fastest_lap_call(
+                fastest.driver, fastest.lap_time, mine=mine),
+        )]
+
+
+class FastestSectorNotification(Notification):
+    """Somebody has taken a sector.
+
+    Three times a lap rather than once, which is what makes it worth having:
+    it tells you where the lap is being won while there is still a lap left to
+    use it on.
+    """
+
+    id = FASTEST_SECTOR
+    name = "New fastest sector"
+    description = "Says when anybody takes the fastest time in a sector."
+    default_repeat = 0.0
+    default_enabled = False
+    repeat_help = "each new fastest sector is said once"
+    requires = (base.PROVIDES_SECTORS, base.PROVIDES_FIELD)
+
+    def __init__(self) -> None:
+        self._seen: set[int] = set()
+
+    def reset(self) -> None:
+        self._seen.clear()
+
+    def check(self, context) -> list[Call]:
+        wanted = context.my_class()
+        calls: list[Call] = []
+        for finished in context.finished_sectors:
+            # In your class if that is what was asked for, overall otherwise.
+            if not (finished.class_best if wanted else finished.session_best):
+                continue
+            if wanted and finished.vehicle_class != wanted:
+                continue
+            # As with the fastest lap: the first time anybody sets a sector it
+            # is the only time, not a record being taken.
+            if finished.sector not in self._seen:
+                self._seen.add(finished.sector)
+                continue
+            own = context.own_car()
+            mine = own is not None and own.driver == finished.driver
+            calls.append(Call(
+                f"sector:{finished.sector}:{finished.driver}:{finished.seconds:.3f}",
+                context.script.fastest_sector_call(
+                    finished.driver, finished.sector, finished.seconds, mine=mine),
+            ))
+        return calls
+
+
+class SectorPerformanceNotification(Notification):
+    """How your sector went, against your own best.
+
+    Against your own rather than the session's, because that is the comparison
+    a driver can do something with on the next lap. Somebody else being three
+    seconds quicker in sector one is information; being a tenth off your own is
+    an instruction.
+    """
+
+    id = SECTOR_PERFORMANCE
+    name = "Sector performance"
+    description = ("At each sector, says how it compared with your best time in "
+                   "that sector.")
+    default_repeat = 0.0
+    default_enabled = False
+    repeat_help = "each sector is judged once, as you leave it"
+    requires = (base.PROVIDES_SECTORS,)
+
+    def check(self, context) -> list[Call]:
+        own = context.own_car()
+        if own is None:
+            return []
+
+        calls: list[Call] = []
+        for finished in context.finished_sectors:
+            if finished.driver != own.driver:
+                continue
+            if finished.personal_best:
+                calls.append(Call(
+                    f"pb:{finished.sector}:{finished.seconds:.3f}",
+                    context.script.sector_best_call(
+                        finished.sector, finished.seconds),
+                ))
+                continue
+            # Nothing to compare against yet, so nothing worth saying.
+            if not finished.previous:
+                continue
+            if abs(finished.delta) < context.sector_threshold:
+                continue
+            calls.append(Call(
+                f"sector:{finished.sector}:{finished.seconds:.3f}",
+                context.script.sector_delta_call(finished.sector, finished.delta),
+            ))
+        return calls
+
+
+#: Every behaviour that ships, in the order the tab shows them. Static, like
+#: plugins and routines, because a compiled build cannot discover a class it
+#: never imports.
+class FlagNotification(Notification):
+    """What has happened to the track, rather than who is beside you.
+
+    The division is Crew Chief's and it is the right one: `car_left` and
+    `still_there` are spotter calls about geometry, while `local_yellow_ahead`
+    and `stopped_car_in_turn_3` are flag calls about the circuit. Deriving the
+    second from the first is what put a warning in every braking zone.
+
+    Three things, in the order they interrupt: whether the session is under
+    caution, whether there is a car stopped on the road in front, and — when
+    you are the one who has stopped — whether there is room to pull out.
+    """
+
+    id = FLAGS
+    name = "Flags and incidents"
+    description = ("Calls full-course yellows and the green, cars stopped on "
+                   "the road ahead, and when it is safe to rejoin.")
+    #: The flags themselves are said once each, on the edge. This governs the
+    #: rejoin call, which is the one thing here worth repeating: a driver
+    #: waiting to pull out is waiting for it to change.
+    default_repeat = 2.0
+    default_enabled = False
+    repeat_help = ("a flag is said when it changes; this is how often the "
+                   "rejoin call repeats while you are waiting")
+    requires = (base.PROVIDES_POSITIONS,)
+
+    def supported(self, provided) -> bool:
+        """Positions are enough. Flags from the sim are a bonus.
+
+        The incidents and the rejoin advice are derived from where cars are and
+        how fast they are going, which every sim here publishes. A sim that
+        also reports a full-course caution gets those calls as well; one that
+        does not still gets the two that matter most.
+        """
+        if provided is None:
+            return True
+        return base.PROVIDES_POSITIONS in provided
+
+    def __init__(self) -> None:
+        self._incidents = flags_mod.Incidents()
+        self._watch = flags_mod.Watch()
+        #: The reference lap the corner numbers came from, and them. Held
+        #: because `find_corners` resamples a whole lap and this runs several
+        #: times a second.
+        self._reference: object = None
+        self._corners: list = []
+        #: Whether this car has turned a wheel yet.
+        #:
+        #: Sitting on the grid before the lights is stationary, on the racing
+        #: line, with the whole field behind — which is every input the rejoin
+        #: advice looks at, and it would say "hold" every two seconds until the
+        #: start. Stopping only means something once you have been going.
+        self._moved = False
+
+    def reset(self) -> None:
+        self._incidents.reset()
+        self._watch.reset()
+        self._reference, self._corners = None, []
+        self._moved = False
+
+    def check(self, context) -> list[Call]:
+        own = context.own_car()
+        if own is None:
+            self.reset()
+            return []
+
+        session = context.session
+        calls: list[Call] = []
+
+        # The caution, first: it changes what the driver may do, and everything
+        # else is advice about a lap they may not be about to drive.
+        text = self._watch.caution_changed(bool(session.full_course_yellow))
+        if text:
+            calls.append(Call(f"caution:{text}",
+                              context.script.flag_call(text), urgent=True))
+
+        if own.blue_flag:
+            text = self._watch.blue_changed(True)
+            if text:
+                calls.append(Call("blue", context.script.flag_call(text)))
+        else:
+            self._watch.blue_changed(False)
+
+        stopped = self._incidents.update(session.cars, session.elapsed)
+        self._watch.forget(stopped)
+
+        if float(getattr(own, "speed", 0.0) or 0.0) > rejoin.SAFE_SPEED:
+            self._moved = True
+
+        if self._moved and not own.in_pits and self._stationary(own):
+            # **You are the incident.** Calling the cars going past would be
+            # describing your own predicament back to you; the only useful
+            # thing now is whether there is room to go. Not in the pit lane,
+            # where being stationary is the point, and not before the car has
+            # ever moved — see `_moved`.
+            return calls + self._rejoin(context, own)
+
+        found = flags_mod.incidents(
+            own, session.cars, stopped, track_length=session.track_length,
+            corner_at=self._corner_at(context))
+        text = self._watch.incident_call(flags_mod.nearest_ahead(found))
+        if text:
+            calls.append(Call(f"incident:{text}",
+                              context.script.flag_call(text), urgent=True))
+        return calls
+
+    @staticmethod
+    def _stationary(own) -> bool:
+        return float(getattr(own, "speed", 0.0) or 0.0) <= spotter.STOPPED_SPEED
+
+    def _corner_at(self, context):
+        """The lap book's corner numbering, or None until a lap exists.
+
+        The book's, so a driver hears one set of corner numbers rather than the
+        coaching routines using one and the flags another. Recomputed only when
+        the reference lap itself changes — finding corners resamples the whole
+        lap, and this is on a tick.
+        """
+        reference = context.book.fastest()
+        if reference is None:
+            return None
+        if reference is not self._reference:
+            self._reference = reference
+            self._corners = coaching.find_corners(reference)
+        if not self._corners:
+            return None
+        return lambda distance: coaching.corner_at(self._corners, distance)
+
+    def _rejoin(self, context, own) -> list[Call]:
+        verdict = rejoin.safe_to_rejoin(
+            own, context.session.cars,
+            track_length=context.session.track_length)
+        if verdict.clear:
+            # Keyed on "clear" alone, so it is said once when the track opens
+            # up rather than every tick until the car is moving.
+            return [Call("rejoin:clear",
+                         context.script.rejoin_call(True), urgent=True)]
+        return [Call("rejoin:wait", context.script.rejoin_call(False),
+                     urgent=True)]
+
+
+BUILTIN: tuple[type[Notification], ...] = (
+    LapTimeNotification,
+    FastestLapNotification,
+    FastestSectorNotification,
+    SectorPerformanceNotification,
+    SpotterNotification,
+    FlagNotification,
+)
+
+
+def build() -> list[Notification]:
+    """One instance of each, skipping any that will not construct."""
+    made: list[Notification] = []
+    for cls in BUILTIN:
+        try:
+            made.append(cls())
+        except Exception:
+            log.exception("could not create notification %s", getattr(cls, "id", cls))
+    return made
+
+
+def describe() -> list[tuple[str, str, str, bool, float, str]]:
+    """(id, name, description, default enabled, default repeat, repeat help)."""
+    return [(cls.id, cls.name, cls.description, cls.default_enabled,
+             cls.default_repeat, cls.repeat_help) for cls in BUILTIN]
+
+
+@dataclass
+class Settings:
+    """What the runner asks about each notification.
+
+    An object rather than the config itself, so a routine can supply its own
+    without there being a config section for it — which is what makes a routine
+    "a set of notifications" rather than a second mechanism.
+    """
+
+    on: dict[str, bool] = field(default_factory=dict)
+    intervals: dict[str, float] = field(default_factory=dict)
+    #: Used for any id not named above. A routine turns everything it owns on.
+    default_on: bool = False
+    default_interval: float = 0.0
+
+    def enabled(self, notification_id: str) -> bool:
+        return bool(self.on.get(notification_id, self.default_on))
+
+    def repeat(self, notification_id: str) -> float:
+        return float(self.intervals.get(notification_id, self.default_interval))
+
+    @classmethod
+    def from_config(cls, engineer_cfg) -> Settings:
+        """The Behaviours section of the Engineer tab, as the runner wants it.
+
+        Defaults come from the notification classes, so a behaviour added in a
+        later version appears without every existing config being rewritten —
+        the same rule plugin settings follow.
+        """
+        on: dict[str, bool] = {}
+        intervals: dict[str, float] = {}
+        stored = getattr(engineer_cfg, "notifications", None) or {}
+        for identifier, _name, _help, default_on, default_repeat, _hint in describe():
+            settings = stored.get(identifier)
+            on[identifier] = (default_on if settings is None
+                              else bool(settings.enabled))
+            intervals[identifier] = (default_repeat if settings is None
+                                     else float(settings.repeat_seconds))
+        return cls(on, intervals)

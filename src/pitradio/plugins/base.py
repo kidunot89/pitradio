@@ -23,6 +23,54 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
+# -- what a sim can tell us ----------------------------------------------
+#
+# Sims do not expose the same things, and the differences are not small. LMU
+# publishes every car's world position, which is what makes a spotter possible;
+# iRacing publishes how far round the lap each car is and nothing about where
+# that is in space, so the same calculation cannot be done at all — it has its
+# own left/right field instead.
+#
+# A plugin therefore says what it can supply, and a behaviour that needs
+# something absent is **skipped rather than run**. The alternative is a
+# tick-box that is on, looks fine, and never says anything — which is
+# indistinguishable from the feature being broken.
+
+#: Every car's world position, in metres. Needed by the spotter's geometry and
+#: by proximity voice.
+PROVIDES_POSITIONS = "positions"
+#: Lap counts and lap times per car.
+PROVIDES_LAPS = "laps"
+#: Sector index and the cumulative splits, so sector times can be derived.
+PROVIDES_SECTORS = "sectors"
+#: A left/right call the sim makes itself, for sims that do that rather than
+#: handing over positions.
+PROVIDES_SPOTTER = "spotter"
+#: Lap data for cars *other than the player's*, and names to attach it to.
+#:
+#: The distinction is not pedantry. Assetto Corsa publishes every car's world
+#: position but lap times for the player alone, and no driver names at all — so
+#: "somebody has taken the fastest lap of the session" would fire when you beat
+#: your own, naming a field of one. Anything comparing you to the rest of the
+#: grid needs this as well as `PROVIDES_LAPS`.
+PROVIDES_FIELD = "field"
+
+#: How much fuel is in the tank and how big the tank is.
+#:
+#: Only ever for the player's own car in practice — the sims publish tyre and
+#: fuel telemetry for the car you are driving and nobody else's — which is why
+#: this is separate from `PROVIDES_FIELD`.
+PROVIDES_FUEL = "fuel"
+
+#: Yellow flags, full-course cautions and blue flags.
+#:
+#: Separate from `PROVIDES_POSITIONS` because a sim can publish where every car
+#: is and still say nothing about whether the marshals have a flag out — and
+#: the difference matters: a stopped car is a fact about one car, a yellow is a
+#: fact about a piece of track, and only the sim knows the second one.
+PROVIDES_FLAGS = "flags"
+
+
 @dataclass(frozen=True)
 class PluginSetting:
     """One option a plugin exposes, rendered in the profile editor.
@@ -61,6 +109,63 @@ class Car:
     position: tuple[float, float, float] = (0.0, 0.0, 0.0)
     is_player: bool = False
 
+    # -- where they are in the lap ---------------------------------------
+    #
+    # Added for the engineer, which needs to know how a lap is going rather
+    # than only who is in it. All of it comes from the same read as the fields
+    # above, because it has to: a car's distance round the lap and its speed
+    # are only comparable if they were true at the same instant, and a second
+    # read is a different instant.
+
+    #: Metres round the lap. The x-axis of everything the coaching routine does.
+    lap_dist: float = 0.0
+    #: Metres per second.
+    speed: float = 0.0
+    #: Laps completed, which is how the end of one is detected.
+    laps: int = 0
+    #: Seconds. Zero means "no valid lap", not "instant lap" — an out lap, a
+    #: lap that was still running, or a car that has just joined.
+    last_lap: float = 0.0
+    best_lap: float = 0.0
+    #: Between pit entry and pit exit. A lap with any of this in it is not a
+    #: lap anybody should be measured against.
+    in_pits: bool = False
+
+    # -- sectors ----------------------------------------------------------
+    #
+    # Sector times are what a driver actually compares themselves on, and a
+    # sector is short enough to remember what you did in it. The sim publishes
+    # them cumulatively, so sector 2 is "sector 1 plus sector 2" and sector 3
+    # is only knowable once the lap is done — `engineer/sectors.py` untangles
+    # that, and nothing else should have to.
+
+    #: Which sector the car is in. The sim's own numbering, which is not the
+    #: obvious one: **0 is sector 3**, 1 is sector 1, 2 is sector 2.
+    sector: int = 0
+    #: Cumulative splits for the lap in progress. Zero means "not set yet".
+    cur_sector1: float = 0.0
+    cur_sector2: float = 0.0
+    #: Cumulative splits for the last completed lap.
+    last_sector1: float = 0.0
+    last_sector2: float = 0.0
+
+    #: Whether the car is sitting in its garage stall.
+    #:
+    #: Distinct from `in_pits`, which covers the whole pit lane: a car serving
+    #: a stop is in the pits and very much racing, while a car in the stall has
+    #: been parked by somebody who walked away from the wheel.
+    in_garage: bool = False
+
+    #: Litres in the tank, and how many it holds. Zero for both means the sim
+    #: did not say — which is every car but your own, in every sim here.
+    fuel: float = 0.0
+    fuel_capacity: float = 0.0
+
+    #: The flag being shown to *this* car. Blue is the one that is per-car
+    #: rather than per-track: it means somebody quicker is about to arrive,
+    #: and only the sim knows who it is being shown to.
+    blue_flag: bool = False
+
 
 @dataclass(frozen=True)
 class SessionInfo:
@@ -78,6 +183,54 @@ class SessionInfo:
     #: Slot of the car the camera is on, when the sim will say. Not the same as
     #: the player's own car — see `listener`.
     focus_slot: int | None = None
+    #: Metres in a lap. The engineer uses it to tell a full recorded lap from a
+    #: partial one; zero means the sim did not say, and a lap is then kept on
+    #: the sim's own word alone.
+    track_length: float = 0.0
+    #: The session clock, in seconds. **Not** wall time: lap traces are
+    #: compared against each other, so what matters is that every sample in a
+    #: session came off the same clock, and the sim's own is the only one that
+    #: is true for the cars as well as for us.
+    elapsed: float = 0.0
+    #: Which sides have cars on them right now, as **the sim itself says**:
+    #: side name -> how many. None means "the sim does not do this", and the
+    #: spotter works it out from world positions instead.
+    #:
+    #: This exists for iRacing, which publishes no other-car world positions at
+    #: all — only how far round the lap each one is — and so cannot be given a
+    #: geometric spotter. It does publish `CarLeftRight`, which is a better
+    #: answer than any geometry: it is the sim's own, computed from the real
+    #: car bodies rather than from a point and a guessed width.
+    alongside: dict[str, int] | None = None
+
+    #: Which sectors have a local yellow out, indexed **the way a person counts
+    #: them**: 1, 2, 3. Empty when the sim does not publish flags at all, which
+    #: is not the same as an entry that is False — that means the sector is
+    #: known to be clear.
+    sector_yellow: dict[int, bool] = field(default_factory=dict)
+    #: How the race ends, and it is one or the other.
+    #:
+    #: `max_laps` is zero for a timed race and `ends_at` is zero for a lap one.
+    #: **Never guess the missing one**: LMU writes `INT_MAX` into `mMaxLaps`
+    #: for a timed session, and a fuel calculation that took that at face value
+    #: would ask for two billion laps' worth.
+    max_laps: int = 0
+    #: When the session clock runs out, on the same clock as `elapsed`.
+    ends_at: float = 0.0
+
+    #: Whether the sim is paused, as far as anything here can tell.
+    #:
+    #: **Worked out from the clock, not from a phase field.** LMU's
+    #: `mGamePhase` read 5 — green flag — throughout a session that was sitting
+    #: paused in the garage, with `mCurrentET` frozen at 2218.0. The phase says
+    #: what kind of session it is, not whether it is running. A clock that has
+    #: stopped is the honest signal, and it is the same signal in every sim.
+    paused: bool = False
+
+    #: Whether the whole circuit is under caution. Distinct from a local
+    #: yellow in every sector: it changes what the driver may do, not merely
+    #: where they must be careful.
+    full_course_yellow: bool = False
 
     def player(self) -> Car | None:
         """The car belonging to this installation, driven or not."""
@@ -124,6 +277,17 @@ class SessionInfo:
                 return watched
         return self.player() if self.driving() else None
 
+    @property
+    def has_data(self) -> bool:
+        """Whether the sim is telling us about cars at all.
+
+        Not the same question as `__bool__`, which asks whether there is a
+        *room* to be in. Voice needs a server; the engineer does not — a
+        practice session on your own is the most likely place to want a
+        coaching routine, and it has no server and never will.
+        """
+        return bool(self.cars)
+
     def __bool__(self) -> bool:
         return bool(self.key)
 
@@ -152,6 +316,18 @@ class Standings:
         return bool(self.overall or self.by_class)
 
 
+# -- what a sim is able to tell us ---------------------------------------
+#
+# Sims do not publish the same things, and the differences are not small. LMU
+# hands over every car's world position; iRacing hands over how far round the
+# lap each car is and nothing about where that is in space. A spotter can be
+# built from the first and not from the second.
+#
+# So a plugin says what it has, and the engineer asks before relying on it.
+# The alternative — every behaviour reading zeros and quietly saying nothing —
+# is indistinguishable from the feature being broken, which is the failure mode
+# this whole codebase keeps trying to avoid.
+
 class SessionPlugin:
     """Base for a per-sim data source. Subclasses override what they can."""
 
@@ -168,9 +344,28 @@ class SessionPlugin:
     description: str = ""
     #: Options shown in the profile editor when this plugin is assigned.
     settings: tuple[PluginSetting, ...] = ()
+    #: What this sim can tell the engineer — see the PROVIDES_* constants.
+    #: Empty by default, so a plugin that says nothing gets no behaviours
+    #: rather than behaviours that quietly do nothing.
+    provides: frozenset[str] = frozenset()
+    #: Whether nobody has been able to run this against the game it reads.
+    #:
+    #: A stronger statement than "not tested yet". Every reader here is checked
+    #: against a block built by hand, which catches a wrong width or a bad
+    #: sentinel and cannot catch a wrong *assumption* about what a sim puts in
+    #: a field — and only a copy of the game settles that. A plugin nobody
+    #: working on this owns is one where that will not happen on its own, so it
+    #: says so in the picker rather than looking like the others.
+    experimental: bool = False
+    #: Why, in one line, shown beside the label.
+    experimental_note: str = ""
 
     def defaults(self) -> dict[str, Any]:
         return {setting.key: setting.default for setting in self.settings}
+
+    def label(self) -> str:
+        """How the plugin is named in the profile editor."""
+        return f"{self.name} (experimental)" if self.experimental else self.name
 
     def serves(self, executable: str | None) -> bool:
         return (executable or "").strip().lower() in self.executables

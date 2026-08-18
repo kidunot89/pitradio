@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "enabled": true,
+  "trigger_key": "shift+f10",
+  "review": {
+    "tap_ms": 300,
+    "double_tap_ms": 350,
+    "send_key": "",
+    "clear_key": ""
+  },
+  "mentions": {
+    "enabled": true,
+    "prefix": "@",
+    "fuzzy": false,
+    "threshold": 0.85,
+    "match_first_names": true,
+    "add_names_to_vocabulary": true,
+    "max_names": 40
+  },
+  "audio": {
+    "input_device": "Microphone (PRO X 2 LIGHTSPEED)",
+    "output_device": "3 - HISENSE (2- AMD High Definition Audio Device)",
+    "samplerate": 16000,
+    "channels": 1,
+    "min_clip_seconds": 0.3,
+    "max_clip_seconds": 30.0,
+    "gain": 1.0
+  },
+  "whisper": {
+    "model": "small.en",
+    "device": "cpu",
+    "compute_type": "int8",
+    "cpu_threads": 0,
+    "beam_size": 5,
+    "language": "en",
+    "vad_filter": true,
+    "initial_prompt": "PitRadio, GitHub, kidunot89, Le Mans, Hyperpole, Hypercar, LMP2, LMDh, GT3, Porsche 963, Ferrari 499P, Toyota GR010, Cadillac V-Series.R, BMW M Hybrid, Peugeot 9X8, Mulsanne, Tertre Rouge, Arnage, Porsche Curves, Indianapolis, Ford Chicanes, Eau Rouge, Raidillon, Blanchimont, Pouhon, Les Combes, Maggotts, Becketts, Copse, Stowe, 130R, Degner, Spoon, box this lap, full course yellow, safety car, slow zone, double stint, undercut, overcut, out lap, in lap, apex, understeer, oversteer, dirty air, slipstream, blue flag, penalty, drive through, stop and go, pit window, tyre pressures, brake bias, traction control, fuel saving, lift and coast, delta, purple sector.",
+    "languages": {
+      "en": "small"
+    }
+  },
+  "cues": {
+    "enabled": true,
+    "start_hz": 880,
+    "stop_hz": 620,
+    "duration_ms": 60,
+    "volume": 0.25
+  },
+  "voice": {
+    "enabled": false,
+    "relay": "",
+    "playback": true,
+    "volume": 0.8,
+    "max_age_seconds": 20.0,
+    "display_name": ""
+  },
+  "engineer": {
+    "enabled": true,
+    "name": "Bono",
+    "voice_pack": "",
+    "fallback_voice": "Microsoft David Desktop",
+    "rate": 4,
+    "terse": true,
+    "volume": 0.69,
+    "language": "en",
+    "notifications": {
+      "lap_time": {
+        "enabled": true,
+        "repeat_seconds": 0.0
+      },
+      "fastest_lap": {
+        "enabled": true,
+        "repeat_seconds": 0.0
+      },
+      "fastest_sector": {
+        "enabled": true,
+        "repeat_seconds": 0.0
+      },
+      "sector_performance": {
+        "enabled": true,
+        "repeat_seconds": 0.0
+      },
+      "spotter": {
+        "enabled": true,
+        "repeat_seconds": 2.0
+      },
+      "flags": {
+        "enabled": true,
+        "repeat_seconds": 2.0
+      }
+    },
+    "routines": {
+      "hot_lap_trainer": {
+        "enabled": true,
+        "phrases": [
+          "begin hot lap trainer {target}",
+          "start hot lap trainer {target}",
+          "hot lap trainer {target}"
+        ],
+        "end_phrases": [
+          "end hot lap trainer",
+          "stop hot lap trainer"
+        ]
+      },
+      "sector_trainer": {
+        "enabled": true,
+        "phrases": [
+          "begin sector trainer {target}",
+          "start sector trainer {target}",
+          "sector trainer {target}"
+        ],
+        "end_phrases": [
+          "end sector trainer",
+          "stop sector trainer"
+        ]
+      }
+    },
+    "questions": {
+      "fastest_lap": {
+        "enabled": true
+      },
+      "fastest_sector": {
+        "enabled": true
+      },
+      "my_best_lap": {
+        "enabled": true
+      }
+    },
+    "own_class_only": true,
+    "coach_threshold": 0.08,
+    "sector_threshold": 0.15
+  },
+  "gui": {
+    "start_minimized": false,
+    "geometry": "1148x646+263+103",
+    "log_lines": 400,
+    "theme": "system",
+    "language": "system",
+    "debug": false
+  },
+  "updates": {
+    "repo": "kidunot89/pitradio",
+    "check_on_start": true,
+    "check_interval_hours": 24,
+    "auto_install": false
+  },
+  "default_profile": {
+    "pre_keys": [
+      "enter"
+    ],
+    "post_keys": [
+      "enter"
+    ],
+    "abort_keys": [
+      "escape"
+    ],
+    "pre_delay_ms": 350,
+    "post_delay_ms": 80,
+    "key_hold_ms": 40,
+    "key_gap_ms": 40,
+    "type_delay_ms": 8,
+    "max_chars": 200,
+    "text_mode": "unicode",
+    "auto_send": true,
+    "plugin": "",
+    "plugin_settings": {}
+  },
+  "profiles": {
+    "le mans ultimate.exe": {
+      "pre_keys": [
+        "enter"
+      ],
+      "post_keys": [
+        "enter"
+      ],
+      "abort_keys": [
+        "escape"
+      ],
+      "pre_delay_ms": 350,
+      "post_delay_ms": 80,
+      "key_hold_ms": 40,
+      "key_gap_ms": 40,
+      "type_delay_ms": 8,
+      "max_chars": 200,
+      "text_mode": "unicode",
+      "auto_send": true,
+      "plugin": "lmu",
+      "plugin_settings": {}
+    }
+  }
+}

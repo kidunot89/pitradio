@@ -46,13 +46,46 @@ def _sd():
     return sounddevice
 
 
+def device_label(index: int, name: str, channels: int, api: str = "") -> str:
+    """How one device is named in a picker.
+
+    **The index leads, and that is the point.** Windows lists the same physical
+    device once per host API — MME, DirectSound, WASAPI, WDM-KS — under the
+    same name, so a machine with one headset shows four identical rows:
+
+        Speakers (PRO X 2 LIGHTSPEED) (2ch)
+        Speakers (PRO X 2 LIGHTSPEED) (2ch)
+        ...
+
+    A picker that maps the chosen *text* back to a device then resolves every
+    one of them to the first, so choosing the third silently selects the first
+    and the sound comes out somewhere the user did not pick. That is not a
+    hypothetical: it is what sent the engineer into a Steam virtual microphone
+    on the machine this was written on, with everything looking correct.
+    """
+    detail = f"{channels}ch, {api}" if api else f"{channels}ch"
+    return f"[{index}] {name} ({detail})"
+
+
 def list_devices(kind: str = "input") -> list[tuple[int, str]]:
-    """(index, label) for every device with channels of the requested kind."""
+    """(index, label) for every device with channels of the requested kind.
+
+    Labels are unique, because a caller has to be able to get back from one to
+    the device the user actually pointed at. See `device_label`.
+    """
     try:
         sd = _sd()
         field = "max_input_channels" if kind == "input" else "max_output_channels"
+        apis = {}
+        try:
+            apis = {index: api["name"]
+                    for index, api in enumerate(sd.query_hostapis())}
+        except Exception:
+            # Costs the host API in the label, not the label itself.
+            log.debug("could not enumerate host APIs", exc_info=True)
         return [
-            (index, f"{info['name']} ({info[field]}ch)")
+            (index, device_label(index, info["name"], info[field],
+                                 apis.get(info.get("hostapi"), "")))
             for index, info in enumerate(sd.query_devices())
             if info[field] > 0
         ]
@@ -61,18 +94,200 @@ def list_devices(kind: str = "input") -> list[tuple[int, str]]:
         return []
 
 
+def device_name(index: int, kind: str = "output") -> str:
+    """The bare name of a device, for storing a choice by.
+
+    **Names are stored, not indices.** Windows renumbers audio devices whenever
+    the set of them changes — a headset powering off, Steam starting, an HDMI
+    display waking — so an index saved on Tuesday points at a different device
+    on Wednesday. Nothing errors: the sound simply comes out somewhere else,
+    which is indistinguishable from the feature being broken. That is exactly
+    how the engineer ended up talking into a Steam virtual microphone.
+    """
+    try:
+        info = _sd().query_devices(index)
+        return str(info["name"])
+    except Exception:
+        log.debug("could not name device %r", index, exc_info=True)
+        return ""
+
+
+#: Which Windows sound API to prefer when a device appears under several.
+#:
+#: Every endpoint is listed once per host API, and they are not equivalent.
+#: **MME is the legacy WaveOut path**: when a game holds the endpoint in WASAPI
+#: exclusive mode, writes to the MME view succeed and go nowhere — no error, no
+#: sound, and nothing in any log. WASAPI shared mode is built to mix with other
+#: applications, which is exactly the situation this app is always in: it talks
+#: over a running game.
+#:
+#: Ordered best first. Anything unlisted sorts last but is still usable.
+_HOST_API_PREFERENCE = ("Windows WASAPI", "Windows DirectSound", "MME",
+                        "Windows WDM-KS")
+
+
+def host_api_of(index: Any) -> str:
+    """Which Windows sound API a device index is reached through, or "".
+
+    Worth knowing outside this module: WASAPI is the only one that takes a
+    shared-versus-exclusive setting, and handing that setting to any other host
+    API is an error rather than a no-op. See `audio._open_stream`.
+    """
+    try:
+        sd = _sd()
+        info = sd.query_devices(index if index is not None else None, "output")
+        return str(sd.query_hostapis()[info["hostapi"]]["name"])
+    except Exception:
+        log.debug("could not name the host API of %r", index, exc_info=True)
+        return ""
+
+
+def _api_rank(index: int, kind: str) -> int:
+    try:
+        sd = _sd()
+        info = sd.query_devices(index)
+        name = sd.query_hostapis()[info["hostapi"]]["name"]
+    except Exception:
+        return len(_HOST_API_PREFERENCE)
+    try:
+        return _HOST_API_PREFERENCE.index(name)
+    except ValueError:
+        return len(_HOST_API_PREFERENCE)
+
+
+#: How long a name MME will give you. Windows' legacy WaveOut API carries the
+#: name in a fixed 32-byte field, so every device is truncated to 31
+#: characters — and it is truncated *silently*, with nothing to say the name is
+#: not the whole name.
+#:
+#: **This is what made the TV go quiet.** The picker stored
+#: `3 - HISENSE (2- AMD High Defini`, which is the MME truncation of
+#: `3 - HISENSE (2- AMD High Definition Audio Device)`. Matching that on
+#: equality can only ever find the MME entry, so the host API preference below
+#: never got a chance to prefer WASAPI — and MME is precisely the path whose
+#: writes succeed and produce no sound while the endpoint is held elsewhere,
+#: which is what happens the moment the TV is also the system default and a
+#: game is playing through it. No error, no log line, no sound.
+MME_NAME_LIMIT = 31
+
+
+def _matches(stored: str, name: str) -> bool:
+    """Whether a stored choice names this device.
+
+    Prefix as well as equality, in both directions: the stored name may be an
+    MME truncation of a fuller one, or it may be the fuller one and this device
+    the MME view of it. Either way they are the same physical endpoint, and
+    which API it is reached through is `_api_rank`'s business, not this one's.
+    """
+    if stored == name:
+        return True
+    shorter, longer = sorted((stored, name), key=len)
+    return (len(shorter) >= MME_NAME_LIMIT and longer.startswith(shorter))
+
+
 def resolve_device(spec: Any, kind: str = "input") -> Any:
-    """Accept an index, a substring of the device name, or None for default."""
+    """A device index for a stored choice, or None for the system default.
+
+    Accepts a name (what is stored now), an index (what older configs hold),
+    or None. A name that no longer matches anything falls back to the default
+    and **says so**, because a device that has been unplugged is the other way
+    this goes quiet without explanation.
+    """
     if spec is None or spec == "":
         return None
-    if isinstance(spec, int):
+
+    devices = list_devices(kind)
+    if isinstance(spec, int) and not isinstance(spec, bool):
+        # An index from a config written before names were stored. Honoured,
+        # but it means whatever it means today.
         return spec
-    needle = str(spec).lower()
-    for index, label in list_devices(kind):
-        if needle in label.lower():
-            return index
-    log.warning("no %s device matching %r; falling back to the default", kind, spec)
+
+    needle = str(spec).strip().lower()
+    named = [index for index, _label in devices
+             if _matches(needle, device_name(index, kind).strip().lower())]
+    if named:
+        # The same endpoint appears under every host API. Which one is picked
+        # decides whether the engineer can be heard over a game — see
+        # _HOST_API_PREFERENCE — so every API's view of it has to be a
+        # candidate here, which is the whole reason `_matches` forgives the
+        # MME truncation.
+        return min(named, key=lambda index: _api_rank(index, kind))
+
+    loose = [index for index, label in devices if needle in label.lower()]
+    if loose:
+        return min(loose, key=lambda index: _api_rank(index, kind))
+
+    log.warning("no %s device named %r any more; using the system default. "
+                "Available: %s", kind, spec,
+                ", ".join(label for _i, label in devices) or "(none)")
     return None
+
+
+def matches_device(spec: Any, index: int, kind: str = "output") -> bool:
+    """Whether a stored choice names this device, truncation and all.
+
+    The picker needs the same question `resolve_device` asks, or a config
+    holding an MME truncation shows "(system default)" in the box while the
+    sound goes somewhere else entirely.
+    """
+    if spec is None or spec == "":
+        return False
+    return _matches(str(spec).strip().lower(),
+                    device_name(index, kind).strip().lower())
+
+
+def canonical_name(index: int, kind: str = "output") -> str:
+    """The fullest name this endpoint has under any host API.
+
+    What a picker should *store*. Choosing the MME row and saving its name
+    writes a truncation, and while `resolve_device` now forgives that, a config
+    file that says what the device is actually called is worth more than one
+    that says what WaveOut could fit in 32 bytes.
+    """
+    name = device_name(index, kind)
+    if not name:
+        return name
+    folded = name.strip().lower()
+    candidates = [device_name(other, kind)
+                  for other, _label in list_devices(kind)]
+    longest = max(
+        (other for other in candidates
+         if other and _matches(folded, other.strip().lower())),
+        key=len, default=name)
+    return longest
+
+
+def device_samplerate(index: Any) -> int:
+    """What rate a device says it runs at, or 0 if it will not say.
+
+    **Advisory only, and no longer on the playing path.** What
+    `query_devices` reports and what the endpoint will actually accept are not
+    always the same number, and being wrong is a hard refusal rather than a
+    resample — so `audio.Output` opens the stream and reads the rate back off
+    it instead. This is kept for the settings screen, where an approximate
+    answer is worth more than none.
+    """
+    try:
+        info = _sd().query_devices(index if index is not None else None, "output")
+        return int(float(info["default_samplerate"]))
+    except Exception:
+        log.debug("could not read the rate of device %r", index, exc_info=True)
+        return 0
+
+
+def resample(audio: np.ndarray, source: int, target: int) -> np.ndarray:
+    """Linear resampling between two rates.
+
+    Crude and entirely adequate for speech: the alternative is a resampling
+    dependency for a difference nobody can hear over an engine.
+    """
+    if source <= 0 or target <= 0 or source == target or audio.size == 0:
+        return audio
+    count = round(audio.size * target / source)
+    if count <= 0:
+        return np.zeros(0, dtype=np.float32)
+    position = np.linspace(0.0, audio.size - 1, count, dtype=np.float64)
+    return np.interp(position, np.arange(audio.size), audio).astype(np.float32)
 
 
 # -- capture -------------------------------------------------------------
@@ -158,28 +373,41 @@ class Recorder:
 # -- cues ----------------------------------------------------------------
 
 
-def play_cue(cue_cfg, frequency: int) -> None:
+#: What a cue is generated at, before it is resampled to the device's rate.
+CUE_RATE = 44100
+
+
+def cue_tone(cue_cfg, frequency: int, rate: int = CUE_RATE) -> np.ndarray:
+    """The beep itself, as samples. Pure, so the shaping can be tested."""
+    samples = int(rate * cue_cfg.duration_ms / 1000)
+    if samples <= 0:
+        return np.zeros(0, dtype=np.float32)
+    t = np.linspace(0.0, cue_cfg.duration_ms / 1000, samples, endpoint=False)
+    wave = (np.sin(2 * np.pi * frequency * t) * cue_cfg.volume).astype(np.float32)
+    # Fade the edges, otherwise the discontinuity clicks louder than the tone.
+    fade = max(1, samples // 20)
+    wave[:fade] *= np.linspace(0.0, 1.0, fade)
+    wave[-fade:] *= np.linspace(1.0, 0.0, fade)
+    return wave
+
+
+def play_cue(cue_cfg, frequency: int, device: Any = None) -> None:
     """Short sine beep, fire-and-forget.
 
     Played on the same tick recording starts, so a faint tone can land at the
     head of the clip. Whisper's VAD discards it; anyone bothered can point cues
     at a different output device or turn them off.
+
+    **Through the app's one output, not `sd.play`.** This built a 44.1kHz tone
+    and handed it straight to PortAudio; WASAPI shared mode accepts only the
+    endpoint's own rate and refuses anything else outright, so on a 48kHz
+    device every cue failed with `Invalid sample rate [PaErrorCode -9997]` —
+    caught here and logged at debug level, which is to say not at all. A beep
+    has no business having its own opinion about sample rates.
     """
     if not cue_cfg.enabled:
         return
-    try:
-        sd = _sd()
-        rate = 44100
-        samples = int(rate * cue_cfg.duration_ms / 1000)
-        t = np.linspace(0.0, cue_cfg.duration_ms / 1000, samples, endpoint=False)
-        wave = (np.sin(2 * np.pi * frequency * t) * cue_cfg.volume).astype(np.float32)
-        # Fade the edges, otherwise the discontinuity clicks louder than the tone.
-        fade = max(1, samples // 20)
-        wave[:fade] *= np.linspace(0.0, 1.0, fade)
-        wave[-fade:] *= np.linspace(1.0, 0.0, fade)
-        sd.play(wave, rate, device=resolve_device(cue_cfg.output_device, "output"))
-    except Exception as exc:
-        log.debug("cue playback failed: %s", exc)
+    play_clip(cue_tone(cue_cfg, frequency), CUE_RATE, 1.0, device)
 
 
 # -- voice clips ---------------------------------------------------------
@@ -216,28 +444,84 @@ def from_pcm16(payload: bytes) -> np.ndarray:
     return (samples.astype(np.float32) / 32767.0).copy()
 
 
-def play_clip(audio: np.ndarray, rate: int, voice_cfg) -> None:
-    """Play a received clip. Blocking, so callers give it its own thread.
+def play_clip(audio: np.ndarray, rate: int, volume: float = 1.0,
+              device: Any = None) -> None:
+    """Play a clip. Blocking, so callers give it its own thread.
 
     Blocking on purpose: two clips played at once are unintelligible, and
     queueing them is what makes a radio a radio. The caller owning the queue is
     what keeps that decision out of here.
+
+    The device is passed in rather than read off a feature's config, because
+    there is one output device for the whole app — see `AudioConfig` for why
+    that stopped being per-feature.
+
+    A thin wrapper over `audio.Output` now. Resolving the device, negotiating
+    a rate and recovering from a failure all belong to a stream that stays
+    open: doing them per clip meant re-negotiating with a busy endpoint per
+    clip, which is a coin toss the app kept losing. See the module docstring
+    in [audio.py](audio.py).
     """
-    if audio is None or audio.size == 0:
-        return
-    try:
-        sd = _sd()
-        volume = min(1.0, max(0.0, float(voice_cfg.volume)))
-        sd.play(
-            (audio * volume).astype(np.float32),
-            int(rate) or 16000,
-            device=resolve_device(voice_cfg.output_device, "output"),
-        )
-        sd.wait()
-    except Exception as exc:
-        # A missing or busy output device must not end the playback thread;
-        # the next clip may well work.
-        log.debug("clip playback failed: %s", exc)
+    output(device).play(audio, rate, volume=volume)
+
+
+def stop_playback() -> None:
+    """Cut whatever is playing, now.
+
+    For one case only: a warning that arrives while something less urgent is
+    still talking. A spotter call is about a car that is beside you *at this
+    moment*, and waiting politely for a lap time to finish reading is how it
+    arrives after the corner — which is worse than not making it, because the
+    driver acts on it late.
+
+    **No longer `sd.stop()`**, which reached past every queue in this app and
+    stopped the *device*, taking anything else being played with it. What is
+    playing belongs to the output, and dropping it is the output's business.
+    """
+    _output().stop()
+
+
+#: The app's one output.
+#:
+#: One, because there is one output device for the whole app — see
+#: `AudioConfig` — and a second stream on the same endpoint is one more thing
+#: for the game to compete with.
+_OUTPUT: Any = None
+_OUTPUT_LOCK = threading.Lock()
+
+#: A one-element list, so the output's device callable reads the current value
+#: without this module needing a `global` on the playing path.
+_OUTPUT_DEVICE: list[Any] = [None]
+
+
+def _output():
+    global _OUTPUT
+    with _OUTPUT_LOCK:
+        if _OUTPUT is None:
+            from pitradio import audio
+
+            _OUTPUT = audio.Output(lambda: _OUTPUT_DEVICE[0])
+        return _OUTPUT
+
+
+def output(device: Any = None):
+    """The app's output, pointed at this device.
+
+    Callers each read the device off the live config and pass it in, so the
+    window can change it without anybody holding a stale handle. `Output`
+    reopens the stream only when the answer actually changes.
+    """
+    _OUTPUT_DEVICE[0] = device
+    return _output()
+
+
+def close_output() -> None:
+    """Let go of the device. For the way out, and for tests."""
+    global _OUTPUT
+    with _OUTPUT_LOCK:
+        if _OUTPUT is not None:
+            _OUTPUT.close()
+            _OUTPUT = None
 
 
 # -- transcription -------------------------------------------------------

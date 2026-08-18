@@ -23,6 +23,8 @@ python -m pitradio --check-config    # validate config, resolve every key name
 python -m pitradio --list-devices    # audio devices
 python -m pitradio --gui-only        # window with no hook/audio/model
 python -m pitradio --self-test       # import every component + open a Tk window
+python -m pitradio --telemetry       # what the sim is publishing, for 10s
+python packaging/engineer_demo.py     # hear the engineer against a fake session
 pytest -q                             # test suite (runs on any platform)
 pytest tests/test_updater.py -q       # one file
 pytest -q -k checksum                 # one case
@@ -84,6 +86,7 @@ src/pitradio/            the app, as a package
   input/                 winapi hook inject
   ui/                    gui gui_settings gui_language tray
   plugins/               per-sim session data
+  engineer/              the voice that talks back; see docs/engineer.md
 vendor/                  third-party modules that are deliberately not deps
 packaging/               build, installer, icon, checksums
 tests/
@@ -126,6 +129,10 @@ Four threads, and mixing them up is how this breaks:
 | hook | `WH_KEYBOARD_LL` + its `GetMessageW` pump |
 | worker | audio, transcription, injection — everything slow |
 | tray | pystray's blocking `run()` |
+
+Voice and the engineer add two more each — a relay/poll thread and a playback
+thread — for the same reason: the hook has a deadline, the worker is holding
+somebody's trigger, and the GUI owns the widgets. None of them may block those.
 
 **Controllers are not read at all.** PitRadio once had four joystick backends
 — SDL3, SDL2, XInput and the legacy multimedia API — merged and deduplicated
@@ -191,6 +198,20 @@ produces a bug with no error message.
   logs and the model cache to `%LOCALAPPDATA%` — see [paths.py](paths.py). Under
   Program Files, writes land in UAC's VirtualStore and hot-reload silently stops
   working.
+- **All sound leaves through one held-open stream.** [audio.py](src/pitradio/audio.py)
+  owns it; nothing else calls `sd.play`. Three separate silences came from not
+  doing this. WASAPI shared mode accepts *only* the endpoint's configured rate
+  and refuses anything else outright, so the rate is read back off the opened
+  stream rather than asked of `query_devices` — what that reports and what the
+  endpoint accepts are not always the same number. Shared mode is requested
+  explicitly (`WasapiSettings(exclusive=False)`), because a dictation app that
+  seized an output device would silence the game it exists to talk over. And
+  opening a WASAPI endpoint is a negotiation rather than a function call, so
+  doing it per beep was rolling the dice per beep.
+- **MME truncates every device name to 31 characters, silently.** A config
+  holding one can only ever match MME again, and MME's writes succeed and
+  produce no sound while another process holds the endpoint. `speech._matches`
+  forgives the truncation so the host API preference gets to prefer WASAPI.
 - **The self-updater exits before the installer runs.** Inno's
   `/CLOSEAPPLICATIONS` uses the Windows Restart Manager, which needs the target
   to register and answer shutdown requests; a tkinter app does neither, so Setup
@@ -357,11 +378,105 @@ pins the two together.
 
 ## Sim plugins
 
-`plugins/` supplies per-sim session data; today just the driver list.
+`plugins/` supplies per-sim session data: the driver list, the standings, and
+everything the engineer reads.
 **Registration is static** (`BUILTIN` in `plugins/__init__.py`) because Nuitka
 cannot follow a runtime-discovered import — a build that scanned a directory
 would ship with no plugins and no error. Adding a sim is one module plus one
 line; see [plugins/README.md](plugins/README.md).
+
+**Opening the block goes through `shared_memory.open_existing`, never
+`mmap.mmap(tagname=…)`.** On Windows mmap *creates* the mapping when it is
+absent, which fabricates a page-file block of zeros under the game's own name —
+so the plugin reports itself connected to a session that does not exist. One
+shared helper because the rule is silent when broken and two copies of it would
+drift; `test_the_lmu_plugin_never_creates_the_mapping` walks every plugin's AST
+for `tagname=`.
+
+**Sims differ more than they look, and a plugin says so.** LMU publishes every
+car's world position; **iRacing publishes none** — only `CarIdxLapDistPct`, how
+far round the lap each car is — so a geometric spotter cannot be built for it
+at all. It publishes `CarLeftRight` instead, its own call from the real car
+bodies, which is a better answer than the geometry rather than a worse one.
+That is why `SessionInfo.alongside` exists and why `SpotterNotification`
+overrides `supported` to accept either route.
+
+iRacing also publishes **no speed for any car but the player's**, so
+`iracing.Speeds` derives it from lap distance over the session clock. The guard
+there is a *speed* check, not a distance one: a car sent to the pits jumps
+hundreds of metres between reads and comes out of the subtraction as a
+well-formed enormous speed — a teleport from 4000m to 100m wrapped to 1100m and
+read as 1100 m/s.
+
+**iRacing sector times are not implemented**, and the plugin does not claim
+`PROVIDES_SECTORS`. `SplitTimeInfo` gives the boundaries but iRacing publishes
+no per-car splits, so they would have to be timed in the plugin. Until then the
+sector behaviours are skipped with a line in the log, which is the whole point
+of the capability gate.
+
+The iRacing session string is YAML and is parsed by hand in `irsdk.py` rather
+than with a dependency. It has one shape a flat stack-based parser gets wrong,
+and it is the one the driver list is in: iRacing indents a list **level with
+the key that introduced it**, so "less indented, close the block" would drop
+every driver.
+
+**Assetto Corsa is the most limited of the three, and the shape follows from
+it.** `acpmf_static`/`graphics`/`physics` give every car's world position, and
+lap data for the player *only* — no driver names for anybody else at all. So
+the trainers work against your own best lap, which is what a practice session
+is anyway, and standings and mentions cannot work. It does not claim
+`PROVIDES_FIELD`, which is what stops "somebody has taken the fastest lap"
+firing when you beat your own with a field of one.
+
+Three things in `acpmf.py` are the traps: strings are **UTF-16** (`wchar_t`),
+so decoding as UTF-8 yields a first letter and rubbish; "no time" is a
+**sentinel of 99999999ms**, which left alone becomes an eleven-hour best lap
+that the trainers then target; and the layout stops at the fields the three
+games agree on, because past `sectorCount` sits a `bool` whose padding is a
+compiler's business and one byte shifts everything after it. `plausible()`
+refuses pages whose values are not Assetto Corsa-shaped, turning a layout
+change into "not connected" rather than confident nonsense.
+
+Track length there is **measured, not read**: distance covered over fraction of
+a lap covered, which holds whether `distanceTraveled` counts the lap or the
+session, and avoids an offset nobody can check. `elapsed` is the **current lap
+time**, because these pages have no session clock — only the time *left*, which
+counts down and is zero in a lap-limited race. A per-lap clock is not a
+compromise: a trace is one lap and every question asked of it is a subtraction
+between two points on the same one.
+
+**The Project CARS block covers three games**, which is why `pcars2.py` reads
+only the *head* of it: the participant array gives names, world positions, lap
+distance in metres, place and lap counts, and everything past it — the timing
+arrays — is where the layout is least certain from outside. `ParticipantInfo`
+has a `bool` then a 64-byte name then a float array, so the name ends at 65 and
+the position starts at **68**; the offsets are written out rather than summed
+because three bytes of padding turns a grid into noise that still looks like
+numbers.
+
+Lap times there are a **stopwatch**, not a field: the clock when the lap
+counter went up minus the clock when it last did. That clock is this machine's,
+so a lap spanning a pause comes out long — which fails safe, since an inflated
+lap never becomes a reference. Their sector enum could not be pinned down, so
+`PROVIDES_SECTORS` is not claimed.
+
+**Automobilista 2 is a subclass with its own id**, not a shared entry. A
+profile picks a plugin by name and should be able to name the game being run;
+plugin settings are stored against the id, so the two get separate spotter
+geometry; and AMS2 has been diverging from the Project CARS API, so the
+override has somewhere to live. It is listed **before** its parent in
+`BUILTIN`, because `for_executable` returns the first match and the generic one
+would otherwise claim AMS2's executables.
+
+`derive.Speeds` is shared by iRacing and the Project CARS plugins, both of
+which publish distance and no usable speed. The lap book records nothing from a
+stationary car, so a speed left at zero means no trace samples at all and a
+trainer that never sees a lap.
+
+**Only LMU has been run against its game.** Every other reader is tested
+against a block built by hand, which catches a wrong width, a bad sentinel,
+a mis-decoded string or a padding mistake, and cannot catch a wrong assumption
+about what the sim puts in a field. `--telemetry` is how that gets settled.
 
 Which plugin a game uses lives on the **profile**, not the plugin, so one plugin
 can serve several games. `executables` on the plugin only pre-fills the picker.
@@ -395,6 +510,113 @@ vendored rather than depended on. A wrong field offset produces plausible
 garbage instead of an error, so the layout is worth taking from a maintained
 source — and it is pure Python, so vendoring costs no bundling risk. Pinned at
 commit `3968c15`.
+
+## The engineer
+
+`engineer/` is a named voice that watches the sim and talks back — lap times, a
+spotter, and routines started by saying a phrase.
+[docs/engineer.md](docs/engineer.md) is the guide; this is what would otherwise
+be rediscovered.
+
+**A command must never be invented.** The trigger key is the one that sends
+messages to the whole session, so `EngineerService.handle` returning True throws
+somebody's words away. Two narrow paths in: addressed by name, or the whole
+sentence is a phrase. **A phrase taking a `{driver}` argument is only ever
+matched on the addressed path** — its argument has no end, so unaddressed
+"target time is a twenty three" was swallowed whole and never reached the chat
+box. `worker._for_engineer` swallows every exception and returns False for the
+same reason: a fault in an optional feature must not cost a message.
+
+**Corners are found in the data, not looked up.** A track map would need a file
+per circuit, would go stale on layout changes, and would leave the feature
+working on four tracks. A corner is where the reference lap slowed and sped up
+again, which holds everywhere; the cost is that they are numbered, not named.
+
+**Time is read off the trace, never integrated.** Each sample carries the sim's
+clock as well as the distance, so a segment time is one subtraction between
+interpolated points. Integrating ds/v would accumulate every sample's error, and
+at the rate the scoring block publishes that error is larger than the
+differences being reported. `time_between` returns None across a gap rather than
+interpolating over it — a plausible number here is indistinguishable from a real
+one and would be acted on.
+
+**Silence is the default.** Below `coach_threshold` there is no call. An
+engineer that speaks at every corner is one nobody listens to.
+
+**TTS is a PowerShell host, not a binding.** `System.Speech` is on every Windows
+10/11 machine; `pywin32` and `comtypes` are two more native dependencies in a
+build that has already shipped four releases broken by one. It is passed as
+`-EncodedCommand` so execution policy cannot block it, base64 in both directions
+so an accented driver name and a `C:\Users\José` temp path both survive the
+console code page, and it **synthesises to a WAV** rather than speaking — that
+is what gives the engineer the same output-device setting as voice chat instead
+of landing on whatever Windows considers default mid-race.
+
+[docs/voicepacks.md](docs/voicepacks.md) is how to generate one, including the
+reference-audio spec, the phrase list and renting a GPU;
+[packaging/prepare_voice.py](packaging/prepare_voice.py) turns any recording
+into clips the generator accepts.
+
+**Voice packs use Crew Chief's folder layout**, so a `crew-chief-autovoicepack`
+output drops straight in. Phrase ids are *derived* from the words
+(`slug("two tenths")` → `two_tenths`), so nothing maintains a mapping and a pack
+built for an older version keeps working. `speaking.read_wav` is hand-rolled
+because `wave` raises on IEEE float, which is exactly what that generator emits.
+
+**Four personas, not four recordings.** A generated pack is 1-2GB; four would be
+an 8GB download to replace what Windows already has. A persona is a name, a
+preferred voice, a pace and a verbosity, resolved against installed voices.
+
+**The engineer's language follows `whisper.language`, not `gui.language`.** The
+commands arrive through Whisper, so an engineer listening for English phrases
+while Whisper produces Spanish would never hear one — and nothing about that
+failure points at a language setting. `i18n.Catalogue` exists for this: a *held*
+language, separate from the global one the window uses.
+
+**Numbers are words in English and digits elsewhere.** Number grammar is
+per-language and doing it half-well produces confident nonsense in somebody's
+own language; digits hand it to the speech voice for that language, which is
+correct. Consequence: a non-English pack cannot cover numbers.
+
+**The spotter's left/right could not be verified off a track.** The geometry is
+sound but the sign depends on the sim's handedness, so it is
+`spotter_swap_sides` on the plugin rather than a guess in the code. Heading
+comes from two consecutive positions, not `mOri`, precisely because the
+orientation matrix's convention is the thing that could not be checked.
+
+Session data grew rather than gaining a parallel type: `Car` carries lap
+distance, speed, laps and lap times, and `SessionInfo` carries `track_length`
+and `elapsed`, all from the same single read. **`SessionInfo.has_data` is not
+`__bool__`** — `__bool__` asks "is there a room to be in", which needs a game
+server, and offline practice is exactly where a coaching routine is most wanted.
+`PluginRegistry.any_telemetry` is the engineer's entry point for that reason.
+
+Routines are registered statically in `routines.BUILTIN` for the same reason
+plugins are. Their trigger phrases live on the **config**, not the routine —
+what a routine is called is not the routine.
+
+**A plugin declares what it `provides`, and a behaviour needing something
+absent is skipped and says so once.** Sims differ more than they look: LMU
+hands over every car's world position, iRacing hands over lap-distance
+percentage and has its own left/right field instead, so a spotter can be built
+from one and not the other. A behaviour left switched on and permanently silent
+is indistinguishable from a bug — `Runner.run` logs which capability is missing
+rather than letting that happen. `provides=None` means "nobody said" and is
+read as "everything", so a plugin written before this existed keeps working.
+
+**The spotter's geometry is per-sim**, on the plugin's settings:
+`spotter_swap_sides`, `spotter_metres`, `spotter_width_metres`. Car lengths and
+axis conventions differ per game, so a number that suits one is wrong in the
+next. `service._context_for` is the single place a Context is built — there
+were two, and they had already drifted, so the same car counted as alongside or
+not depending on which path built the tick.
+
+**`--telemetry` is how a sim gets verified.** The failure it exists for is not
+a plugin reading nothing, which is obvious; it is a block that is *published
+but frozen* — the sim connected, every field plausible, and none of it ever
+moving. It compares consecutive reads including the sim's own clock and says
+so. Found on the first real run: five identical snapshots two seconds apart
+with a car sitting at 77 m/s, because LMU was paused.
 
 ## Voice, and what is not in this repository
 

@@ -48,9 +48,16 @@ def _strings_in(path: Path) -> list[str]:
     return found
 
 
+#: i18n.py *is* the mechanism, so its own `t()` takes a variable by definition.
+#: Scanning it would fail the literal check on the implementation of the check.
+SKIP = {SRC / "i18n.py"}
+
+
 def collect() -> dict[str, str]:
     strings: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
+        if path in SKIP:
+            continue
         strings.extend(_strings_in(path))
     # dict.fromkeys keeps first-seen order and drops duplicates, so the
     # template reads roughly in the order a user meets the strings.

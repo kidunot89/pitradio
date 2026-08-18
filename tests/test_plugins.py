@@ -285,22 +285,31 @@ def test_the_lmu_plugin_never_creates_the_mapping():
     import ast
     from pathlib import Path
 
-    source = (Path(__file__).parent.parent / "src" / "pitradio" / "plugins" / "lmu.py").read_text(
-        encoding="utf-8")
+    # Every plugin, not just LMU: the rule is silent when broken, so a second
+    # sim getting it wrong would look exactly like a session that is running.
+    folder = Path(__file__).parent.parent / "src" / "pitradio" / "plugins"
+    offenders = []
+    for path in sorted(folder.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        # The AST, not the text: the docstrings explaining this trap mention
+        # `tagname`, and banning the word would flag the explanation itself.
+        creating = [
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and any(kw.arg == "tagname" for kw in node.keywords)
+        ]
+        if creating:
+            offenders.append(path.name)
 
-    # The AST, not the text: the docstring explaining this trap mentions
-    # `tagname`, and banning the word would flag the explanation itself.
-    creating = [
-        node
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Call)
-        and any(kw.arg == "tagname" for kw in node.keywords)
-    ]
-    assert not creating, (
-        "a call passes tagname=, which creates the mapping when it is absent "
-        "and fabricates a block under the game's own name"
+    assert not offenders, (
+        f"{offenders} pass tagname=, which creates the mapping when it is "
+        f"absent and fabricates a block under the game's own name"
     )
-    assert "OpenFileMappingW" in source, "should open an existing mapping only"
+
+    # And one place actually opens one, so the rule has somewhere to live.
+    shared = (folder / "shared_memory.py").read_text(encoding="utf-8")
+    assert "OpenFileMappingW" in shared, "should open an existing mapping only"
 
 
 def test_status_says_not_connected_when_lmu_is_absent(lmu_absent):
@@ -763,7 +772,19 @@ def test_no_session_at_all_places_nobody():
 def test_lmu_exposes_the_proximity_settings():
     lmu = plugins.PluginRegistry().by_id("lmu")
     assert [s.key for s in lmu.settings] == [
-        "positions", "proximity_only", "proximity_metres"]
+        "positions", "proximity_only", "proximity_metres", "spotter_swap_sides",
+        "spotter_car_length", "spotter_car_width"]
+
+
+def test_the_spotter_side_swap_is_off_until_it_is_needed():
+    """It exists because which side is which could not be verified off a track.
+
+    Off by default is the only defensible starting point: half the users would
+    have to flip it whichever way round it shipped, and the ones who never
+    touch the spotter should not be asked to care.
+    """
+    defaults = plugins.PluginRegistry().settings_for("lmu")
+    assert defaults["spotter_swap_sides"] is False
 
 
 def test_proximity_is_off_until_it_is_switched_on():
