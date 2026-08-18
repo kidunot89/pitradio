@@ -93,9 +93,8 @@ PROMPTS = (
     "doing and don't worry about the mirrors for now.",
     "Traffic in turn three, a slower car on the racing line. Be patient "
     "through there and you'll get a better exit onto the straight.",
-    "Last lap, last lap. Bring it home safely, everything is looking good "
-    "on our side and the gap behind you is comfortable enough that you do "
-    "not need to take any risks.",
+    "Last lap, last lap. Bring it home safely, everything looks good on our "
+    "side and the gap behind you is comfortable enough not to take any risks.",
 )
 
 
