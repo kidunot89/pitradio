@@ -139,6 +139,36 @@ def _api_rank(index: int, kind: str) -> int:
         return len(_HOST_API_PREFERENCE)
 
 
+#: How long a name MME will give you. Windows' legacy WaveOut API carries the
+#: name in a fixed 32-byte field, so every device is truncated to 31
+#: characters — and it is truncated *silently*, with nothing to say the name is
+#: not the whole name.
+#:
+#: **This is what made the TV go quiet.** The picker stored
+#: `3 - HISENSE (2- AMD High Defini`, which is the MME truncation of
+#: `3 - HISENSE (2- AMD High Definition Audio Device)`. Matching that on
+#: equality can only ever find the MME entry, so the host API preference below
+#: never got a chance to prefer WASAPI — and MME is precisely the path whose
+#: writes succeed and produce no sound while the endpoint is held elsewhere,
+#: which is what happens the moment the TV is also the system default and a
+#: game is playing through it. No error, no log line, no sound.
+MME_NAME_LIMIT = 31
+
+
+def _matches(stored: str, name: str) -> bool:
+    """Whether a stored choice names this device.
+
+    Prefix as well as equality, in both directions: the stored name may be an
+    MME truncation of a fuller one, or it may be the fuller one and this device
+    the MME view of it. Either way they are the same physical endpoint, and
+    which API it is reached through is `_api_rank`'s business, not this one's.
+    """
+    if stored == name:
+        return True
+    shorter, longer = sorted((stored, name), key=len)
+    return (len(shorter) >= MME_NAME_LIMIT and longer.startswith(shorter))
+
+
 def resolve_device(spec: Any, kind: str = "input") -> Any:
     """A device index for a stored choice, or None for the system default.
 
@@ -157,13 +187,15 @@ def resolve_device(spec: Any, kind: str = "input") -> Any:
         return spec
 
     needle = str(spec).strip().lower()
-    exact = [index for index, _label in devices
-             if device_name(index, kind).strip().lower() == needle]
-    if exact:
-        # The same headset appears under every host API. Which one is picked
+    named = [index for index, _label in devices
+             if _matches(needle, device_name(index, kind).strip().lower())]
+    if named:
+        # The same endpoint appears under every host API. Which one is picked
         # decides whether the engineer can be heard over a game — see
-        # _HOST_API_PREFERENCE.
-        return min(exact, key=lambda index: _api_rank(index, kind))
+        # _HOST_API_PREFERENCE — so every API's view of it has to be a
+        # candidate here, which is the whole reason `_matches` forgives the
+        # MME truncation.
+        return min(named, key=lambda index: _api_rank(index, kind))
 
     loose = [index for index, label in devices if needle in label.lower()]
     if loose:
@@ -173,6 +205,40 @@ def resolve_device(spec: Any, kind: str = "input") -> Any:
                 "Available: %s", kind, spec,
                 ", ".join(label for _i, label in devices) or "(none)")
     return None
+
+
+def matches_device(spec: Any, index: int, kind: str = "output") -> bool:
+    """Whether a stored choice names this device, truncation and all.
+
+    The picker needs the same question `resolve_device` asks, or a config
+    holding an MME truncation shows "(system default)" in the box while the
+    sound goes somewhere else entirely.
+    """
+    if spec is None or spec == "":
+        return False
+    return _matches(str(spec).strip().lower(),
+                    device_name(index, kind).strip().lower())
+
+
+def canonical_name(index: int, kind: str = "output") -> str:
+    """The fullest name this endpoint has under any host API.
+
+    What a picker should *store*. Choosing the MME row and saving its name
+    writes a truncation, and while `resolve_device` now forgives that, a config
+    file that says what the device is actually called is worth more than one
+    that says what WaveOut could fit in 32 bytes.
+    """
+    name = device_name(index, kind)
+    if not name:
+        return name
+    folded = name.strip().lower()
+    candidates = [device_name(other, kind)
+                  for other, _label in list_devices(kind)]
+    longest = max(
+        (other for other in candidates
+         if other and _matches(folded, other.strip().lower())),
+        key=len, default=name)
+    return longest
 
 
 def device_samplerate(index: Any) -> int:

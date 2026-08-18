@@ -1029,7 +1029,7 @@ def _device_label(devices, spec) -> str:
             if spec == index:
                 return label
             continue
-        if str(spec).strip().lower() == speech.device_name(index, "output").strip().lower():
+        if speech.matches_device(spec, index, "output"):
             return label
         if str(spec).lower() in label.lower():
             return label
@@ -1042,10 +1042,16 @@ def _device_from_label(devices, label: str, kind: str = "output"):
     Windows renumbers audio devices whenever the set of them changes, so an
     index saved today points somewhere else tomorrow — silently, because sound
     going to the wrong device raises nothing. A name survives that.
+
+    **The fullest name, not whichever row was clicked.** MME truncates every
+    device name to 31 characters, so picking the MME row and storing its name
+    writes a truncation that can only ever match MME again — and MME is the one
+    host API whose writes go nowhere while a game holds the endpoint. See
+    `speech.MME_NAME_LIMIT`.
     """
     for index, shown in devices:
         if shown == label:
-            return speech.device_name(index, kind) or index
+            return speech.canonical_name(index, kind) or index
     return None
 
 
