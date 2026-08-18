@@ -32,9 +32,35 @@ imperfections in the input audio recordings". The requirements are
 The README writes the rate as "22.5 kHz", which is not a rate anything uses.
 XTTS's reference rate is 22050 and that is what the tool below writes.
 
+**You do not record the phrase list.** That is what the generator produces —
+it needs about two minutes of you saying *anything*, and learns what you sound
+like from it. [record_voice.py](../packaging/record_voice.py) walks through it,
+ten clips of ten seconds, with a passage to read each time so nobody has to
+invent one:
+
+```bash
+python packaging/record_voice.py --check                  # test the mic first
+python packaging/record_voice.py --name Bono --reference
+```
+
+Every take is measured as it is saved and rejected on the spot if it clipped or
+was too quiet, because finding out after forty takes is a session wasted.
+
+**Or skip the cloning entirely.** `--phrases` reads the engineer's 171 lines
+and writes a finished pack of real human speech — no GPU, no Docker, no
+renting anything, and better than any synthesiser will manage. It takes about
+half an hour of reading:
+
+```bash
+python packaging/record_voice.py --name Bono --phrases --out voices
+```
+
 **Record about two minutes**, reading anything — the README says not to obsess
 over emotional range, "as the xtts model tends to diminish those aspects
 anyway". Then:
+
+If you have recordings already — a phone memo, a download — this converts
+them instead:
 
 ```bash
 python packaging/prepare_voice.py --name Bono recordings/*.wav
@@ -66,6 +92,12 @@ on RunPod, which is what this was tested against.
 2. **Template**: anything CUDA with Docker available, or run the image
    directly. Give it **60GB of disk** — the image alone is ~15GB and each pack
    is ~2GB.
+   **Your API key goes in RunPod's own config, never in this repo.** Either
+   `runpodctl config --apiKey <key>`, which writes `~/.runpod/config.toml`, or
+   the `RUNPOD_API_KEY` environment variable. A key in a tree that is pushed to
+   GitHub is a key that has already leaked, which is why the relay's secrets
+   are handled the same way — see the note in `.gitignore`.
+
 3. **Upload the baseline clips.** They are a few megabytes:
 
    ```bash
@@ -133,3 +165,20 @@ A pack does not need to be complete. Anything it does not have is synthesised
 by the Windows voice, so a half-generated pack works and simply falls back more
 often. Driver names always do, in every pack, because no generated set can
 contain them.
+
+## Recording on a headset mic
+
+Perfectly usable, and the most common thing people have. Three things decide
+whether it works:
+
+* **Off to the side of your mouth**, a couple of finger widths away — not in
+  front of it. A boom mic directly in the airflow clips on every *p* and *b*,
+  and clipping cannot be undone afterwards.
+* **A quiet room.** `--check` measures the noise floor and tells you; a fan or
+  a PC under the desk ends up in every clip and therefore in the cloned voice.
+* **Consistent distance.** Do not lean around between takes. The model averages
+  what it hears, and clips recorded at four different distances average into
+  something that sounds like none of them.
+
+Windows' own microphone boost is worth turning **off** — it is a compressor,
+and it pumps the room noise up between words.

@@ -195,3 +195,46 @@ def test_integer_audio_is_scaled_not_reinterpreted():
     rather than a bad decode."""
     loud = np.full(100, 16384, dtype=np.int16)
     assert prep.to_mono([loud]) == pytest.approx(0.5, rel=0.01)
+
+
+# -- judging a take as it is recorded -------------------------------------
+
+
+def test_a_clipped_take_is_rejected():
+    """A headset mic in front of somebody's mouth clips on every plosive, and
+    the peaks are gone before the sound card ever saw them. Finding that out
+    after forty takes is a session wasted."""
+    import record_voice as rec
+
+    told, keep = rec.verdict(np.ones(1000, dtype=np.float32))
+    assert keep is False and "CLIPPED" in told
+
+
+def test_a_take_nobody_can_hear_is_rejected():
+    import record_voice as rec
+
+    told, keep = rec.verdict(speech(1.0, level=0.01))
+    assert keep is False and "quiet" in told
+
+
+def test_a_good_take_is_kept_and_its_peak_reported():
+    import record_voice as rec
+
+    told, keep = rec.verdict(speech(1.0, level=0.5))
+    assert keep is True and "0.50" in told
+
+
+def test_silence_is_not_mistaken_for_a_take():
+    import record_voice as rec
+
+    assert rec.verdict(np.zeros(0, dtype=np.float32))[1] is False
+
+
+def test_every_reference_prompt_is_long_enough_to_fill_a_clip():
+    """Ten seconds each. A prompt somebody finishes in four leaves six seconds
+    of room noise, which is the one thing the README is most insistent about."""
+    import record_voice as rec
+
+    for prompt in rec.PROMPTS:
+        # Reading aloud runs about 2.5 words a second.
+        assert len(prompt.split()) >= rec.REFERENCE_SECONDS * 2.0, prompt

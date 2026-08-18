@@ -27,6 +27,15 @@ pitradio.log*
 # Fetched by packaging/fetch_sdl3.py, verified by hash rather than committed.
 packaging/runtime/
 
+# Voice packs and the recordings they are made from. A generated pack is 1-2GB
+# and a set of reference clips is somebody's voice — neither belongs in a public
+# repository. The generated phrase list is kept, because it is small and is what
+# somebody needs before they have anything else.
+voices/*/
+baseline/
+recordings/
+!voices/phrase_inventory.csv
+
 # Relay secrets. The OAuth client secret and anything like it lives in the
 # environment on the server, never in the tree — a secret in a public repo is
 # a secret that has already leaked.
