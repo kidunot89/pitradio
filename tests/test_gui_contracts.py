@@ -453,3 +453,52 @@ def test_no_widget_hardcodes_a_colour(filename):
         + "\n\nUse a style from theme.py (Value.TLabel, Hint.TLabel, "
           "Muted.TLabel, Heading.TLabel), or add one there."
     )
+
+
+# -- no relay address is ever put on screen ------------------------------
+
+
+def test_the_window_never_shows_a_relay_address():
+    """Which machine carries the audio is a lifecycle, not a setting.
+
+    A text field for it does two bad things: it invites people to type
+    something that will not work, and it publishes the shared host's address
+    inside an application whose source is public. The window offers Create,
+    Reset, Stop and Destroy instead, and shows a state — never a URL.
+    """
+    source = (ROOT / "src/pitradio/ui/gui_settings.py").read_text(encoding="utf-8")
+
+    assert "v_voice_relay" not in source, (
+        "the Voice tab has a relay entry again; the address must not be shown"
+    )
+    assert "host_url" not in source, (
+        "the window is choosing a relay locally again. Two racers in one "
+        "session choosing separately land in the same room on different "
+        "servers and both hear silence — the coordinator decides, and the "
+        "client asks."
+    )
+
+    # Reading it to *address* the coordinator is fine; putting it on screen is
+    # not. So it may appear once, in the helper that builds the API client.
+    uses = [line.strip() for line in source.splitlines() if "voice.relay" in line]
+    assert uses == ["return hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)"], (
+        f"the relay address is read somewhere new: {uses}. It addresses the "
+        f"coordinator and is never rendered."
+    )
+
+
+def test_the_voice_tab_offers_the_host_lifecycle():
+    """Create, then Reset, Stop and Destroy once one exists."""
+    source = (ROOT / "src/pitradio/ui/gui_settings.py").read_text(encoding="utf-8")
+    for action in ("create", "reset", "stop", "start", "destroy"):
+        assert f'"{action}"' in source, f"the Voice tab has no {action} action"
+
+
+def test_destroying_a_host_asks_first():
+    """It ends billing and cannot be undone. Stop is the reversible one, and
+    the two must never be one click apart with no confirmation."""
+    source = (ROOT / "src/pitradio/ui/gui_settings.py").read_text(encoding="utf-8")
+    destroy = source.split("def _voice_host_destroy", 1)[-1].split("\ndef ", 1)[0]
+
+    assert "askyesno" in destroy, "Destroy must confirm before it runs"
+    assert "cannot be undone" in destroy

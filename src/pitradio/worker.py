@@ -208,9 +208,12 @@ class Worker(threading.Thread):
                 log.info("voice: no name to send under; skipping the clip")
                 return
 
+            # Levelled for ears, not for Whisper — which gets the untouched
+            # array a few lines later and has never needed the help. See
+            # speech.normalise_voice.
             frame = voice_mod.encode_clip(
                 voice_mod.Speaker(name, me.position if me else (0.0, 0.0, 0.0)),
-                speech.to_pcm16(audio),
+                speech.to_pcm16(speech.normalise_voice(audio)),
                 sent_at=time.time(),
                 rate=cfg.audio.samplerate,
             )
@@ -232,7 +235,18 @@ class Worker(threading.Thread):
         cfg = self.store.config
         profile: Profile = active["profile"]
 
+        # The cue first, so releasing the button is acknowledged when it
+        # happens rather than a second later. What follows is deliberately
+        # inaudible: as far as the driver is concerned the message ended when
+        # they let go.
         speech.play_cue(cfg.cues, cfg.cues.stop_hz)
+
+        # **Keep recording past the release.** People stop pressing before they
+        # stop speaking, so the last word lands after the thumb comes off and
+        # the clip ends mid-syllable — which Whisper transcribes as whatever
+        # the truncated sound resembles, making the message wrong rather than
+        # merely short. The mirror of starting the recording before `pre_keys`.
+        _sleep_ms(cfg.audio.release_tail_ms)
         audio = self.recorder.stop()
         clip_seconds = self.recorder.duration(audio)
 

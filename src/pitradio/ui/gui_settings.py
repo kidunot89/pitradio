@@ -13,7 +13,9 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -1095,7 +1097,7 @@ def _run_mic_test(app) -> None:
             app.recorder.start(app.store.config.audio)
             time.sleep(4.0)
             audio = app.recorder.stop()
-            app.root.after(0, lambda: app.v_test_result.set("Transcribing…"))
+            _on_main(app, lambda: app.v_test_result.set("Transcribing…"))
             raw = app.transcriber.transcribe(audio, app.store.config.whisper)
             text = speech.sanitize(raw, app.store.config.default_profile.max_chars)
             result = text or "(nothing recognised)"
@@ -1205,22 +1207,460 @@ def build_voice_tab(app) -> None:
         ),
         style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w")
 
-    relay = ttk.LabelFrame(frame, text=t("Relay"), padding=10)
-    relay.pack(fill="x", pady=(10, 0))
-    app.v_voice_relay = tk.StringVar(value=cfg.voice.relay)
-    _row(relay, 0, t("Server"), _entry(relay, app.v_voice_relay, width=40),
-         t("leave this alone unless you are running your own"))
-    ttk.Label(
-        relay,
-        text=t(
-            "The relay passes clips between everyone in your session. It is "
-            "told a hash of the game server you are on and nothing else — not "
-            "which server, not where any car is."
-        ),
-        style="Hint.TLabel", wraplength=640, justify="left").grid(
-        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+    _build_voice_host(app, frame)
 
     ttk.Button(footer, text=t("Save"), command=lambda: _save_voice(app)).pack(anchor="e")
+
+
+# -- the voice host ------------------------------------------------------
+#
+# A lifecycle, not a setting. **No address is ever shown** — not the shared
+# host's and not a racer's own. Which machine carries the audio is not a choice
+# anybody makes by typing a URL, and a field for it in a public application
+# publishes the shared host's address to everyone who opens the window.
+
+
+def _build_voice_host(app, frame) -> None:
+    host = ttk.LabelFrame(frame, text=t("Voice host"), padding=10)
+    host.pack(fill="x", pady=(10, 0))
+
+    app.v_voice_host_status = tk.StringVar(value=t("checking…"))
+    ttk.Label(host, textvariable=app.v_voice_host_status,
+              style="Value.TLabel", wraplength=620, justify="left").grid(
+        row=0, column=0, columnspan=4, sticky="w")
+
+    buttons = ttk.Frame(host)
+    buttons.grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
+    app.voice_host_buttons = {
+        "create": ttk.Button(buttons, text=t("Create"),
+                             command=lambda: _voice_host_create(app)),
+        "reset": ttk.Button(buttons, text=t("Reset"),
+                            command=lambda: _voice_host_act(app, "reset")),
+        "stop": ttk.Button(buttons, text=t("Stop"),
+                           command=lambda: _voice_host_act(app, "stop")),
+        "start": ttk.Button(buttons, text=t("Start"),
+                            command=lambda: _voice_host_act(app, "start")),
+        "destroy": ttk.Button(buttons, text=t("Destroy"),
+                              command=lambda: _voice_host_destroy(app)),
+        # Shown only while a login is in flight. Closing the browser tab is the
+        # commonest way one ends, and nothing tells the app that happened — so
+        # there has to be a way out that is not waiting for a timeout.
+        "cancel": ttk.Button(buttons, text=t("Cancel"),
+                             command=lambda: _voice_pair_cancel(app)),
+    }
+    app.voice_pairing = None
+    for button in app.voice_host_buttons.values():
+        button.pack(side="left", padx=(0, 6))
+        button.state(["disabled"])
+
+    ttk.Label(
+        host,
+        text=t(
+            "Everyone shares one host by default. Creating your own puts the "
+            "audio on a machine you pay for, near you — PitRadio opens "
+            "DigitalOcean in your browser, and the relay builds it for you. "
+            "Your cloud account is never handed to this application."
+        ),
+        style="Hint.TLabel", wraplength=640, justify="left").grid(
+        row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
+
+    ttk.Label(
+        host,
+        text=t(
+            "Stop powers your host down but keeps it, so its disk is still "
+            "billed. Destroy is the one that ends billing, and cannot be "
+            "undone. Reset repairs the configuration without changing the "
+            "address anyone is connected to."
+        ),
+        style="Hint.TLabel", wraplength=640, justify="left").grid(
+        row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+    app.voice_host = None
+    _voice_host_refresh(app)
+
+
+def _voice_api(app):
+    from pitradio import hostapi
+
+    cfg = app.store.config
+    # Always the coordinator, never a racer's own host: the host API lives
+    # there, and so does the decision about which relay a session uses.
+    return hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)
+
+
+def _on_main(app, work) -> None:
+    """Run `work` on the Tk thread, unless the window has gone.
+
+    Host requests take seconds and somebody may close the window during one.
+    `root.after` on a destroyed root raises, and it raises on a background
+    thread — where it becomes a traceback on somebody's console with no
+    indication which button caused it.
+    """
+    try:
+        app.root.after(0, work)
+    except Exception:
+        log.debug("window closed before a voice host reply arrived")
+
+
+def _voice_host_set(app, host, base_ok=None, message: str = "") -> None:
+    """Update the status line and which buttons are usable. Main thread only."""
+    from pitradio import hostapi
+
+    app.voice_host = host
+    app.v_voice_host_status.set(
+        message or hostapi.describe(host, base_ok=base_ok))
+
+    allowed = set(host.get("can", [])) if host else set()
+    if not host:
+        # No host of your own yet. Create is the only thing on offer, and only
+        # when there is a relay to ask.
+        allowed = {"create"} if _voice_api(app).configured else set()
+    # A login in flight replaces everything with a way to abandon it.
+    if getattr(app, "voice_pairing", None) is not None:
+        allowed = {"cancel"}
+
+    for name, button in app.voice_host_buttons.items():
+        button.state(["!disabled"] if name in allowed else ["disabled"])
+
+
+def _voice_host_refresh(app) -> None:
+    """Ask the relay what it has, off the main thread."""
+    api = _voice_api(app)
+    if not api.configured:
+        _voice_host_set(app, None, message=t("voice is unavailable in this build"))
+        return
+
+    def work():
+        if api.token:
+            reply = api.hosts()
+            hosts = reply.body.get("hosts") or [] if reply.ok else []
+            host = hosts[0] if hosts else None
+            if reply.ok:
+                _on_main(app, lambda: _after_refresh(app, host))
+                return
+        # No token, or the relay would not say: fall back to whether the
+        # shared host is answering, which is what that racer is using.
+        ok = api.health().ok
+        _on_main(app, lambda: _voice_host_set(app, None, base_ok=ok))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _remember_host(app, host) -> None:
+    """Write down which host is ours, so the coordinator can be offered it.
+
+    **The client never picks its own relay.** One that connected to its own
+    host because it had one would split the session in two, with both halves
+    hearing silence and nothing reporting a fault — so it offers the id and the
+    coordinator decides, weighing it against what everyone else in the session
+    offered.
+
+    Offering requires knowing, and nothing wrote this down. A racer could
+    create a host, watch it provision, see it reported as running, and go on
+    using the shared relay in every session — the host idle, the bill real, and
+    no error anywhere, because from the coordinator's side a racer who offers
+    nothing is indistinguishable from one who has nothing.
+
+    Cleared when the relay reports no host, so a destroyed one stops being
+    offered. Only ever called with an answer the relay actually gave: an
+    unreachable relay leaves the last known id alone rather than reading a
+    failed request as "you have no host".
+    """
+    cfg = app.store.config
+    host_id = str((host or {}).get("id") or "")
+    if host_id == cfg.voice.host_id:
+        return
+    cfg.voice.host_id = host_id
+    app.save_config()
+
+
+def _after_refresh(app, host) -> None:
+    _voice_host_set(app, host)
+    _remember_host(app, host)
+    # Keep asking while something is in flight. Terraform takes minutes, and a
+    # button that never updates is indistinguishable from one that did nothing.
+    if host and host.get("busy"):
+        from pitradio import hostapi
+
+        app.root.after(int(hostapi.POLL_SECONDS * 1000),
+                       lambda: _voice_host_refresh(app))
+
+
+def _voice_host_act(app, action: str) -> None:
+    api = _voice_api(app)
+    host = app.voice_host or {}
+    host_id = host.get("id")
+    if not host_id:
+        return
+    _busy(app, t("working…"))
+
+    def work():
+        reply = api.act(host_id, action)
+        _on_main(app, lambda: _acted(app, reply))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _voice_host_destroy(app) -> None:
+    """Destroying ends billing and cannot be undone, so it asks first."""
+    host = app.voice_host or {}
+    name = host.get("name") or t("your voice host")
+    if not messagebox.askyesno(
+        t("Destroy voice host"),
+        t("Destroy {name}?\n\nThis cannot be undone. It ends the billing for "
+          "it; Stop only powers it off.").format(name=name),
+        default="no", icon="warning",
+    ):
+        return
+
+    api = _voice_api(app)
+    host_id = host.get("id")
+    if not host_id:
+        return
+    _busy(app, t("destroying…"))
+
+    def work():
+        reply = api.destroy(host_id)
+        _on_main(app, lambda: _acted(app, reply))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _busy(app, message: str) -> None:
+    app.v_voice_host_status.set(message)
+    for button in app.voice_host_buttons.values():
+        button.state(["disabled"])
+
+
+def _acted(app, reply) -> None:
+    if not reply.ok:
+        _voice_host_set(app, app.voice_host, message=reply.error)
+        return
+    _after_refresh(app, reply.body if reply.body.get("id") else None)
+
+
+# -- creating one --------------------------------------------------------
+
+
+def _voice_host_create(app) -> None:
+    """Pair with DigitalOcean in the browser, then ask the relay to build it.
+
+    The token from that pairing stays on the relay. What comes back here is a
+    handle for managing this host and nothing else.
+    """
+    from pitradio import hostapi
+
+    api = _voice_api(app)
+    _busy(app, t("opening DigitalOcean…"))
+
+    def work():
+        started = api.start_pairing()
+        if not started.ok:
+            _on_main(app, lambda: _voice_host_set(
+                app, None, message=started.error or t("could not start pairing")))
+            return
+
+        url = started.body.get("verification_url", "")
+        code = started.body.get("user_code", "")
+        poll_token = started.body.get("poll_token", "")
+        if not (url and poll_token):
+            _on_main(app, lambda: _voice_pair_ended(
+                app, t("the relay did not offer a pairing")))
+            return
+
+        # Recorded before the browser opens, so Cancel works from the first
+        # moment there is anything to cancel.
+        app.voice_pairing = poll_token
+
+        _on_main(app, lambda: _voice_pair_waiting(app, code))
+        try:
+            webbrowser.open(url)
+        except Exception:
+            log.debug("could not open a browser", exc_info=True)
+
+        # Poll until the browser half finishes, is refused, expires, or the
+        # racer gives up. Closing the tab produces none of the first three —
+        # nothing tells an application that a browser window has gone — which
+        # is why Cancel exists rather than only a timeout.
+        deadline = time.monotonic() + hostapi.PAIRING_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(hostapi.POLL_SECONDS)
+            if getattr(app, "voice_pairing", None) != poll_token:
+                return                      # cancelled, or another was started
+
+            # Polled **once** per turn and the body kept: a successful poll
+            # consumes the pairing at the relay, so asking again for the same
+            # answer gets "unknown" and throws away the link that just
+            # succeeded.
+            reply = api.pairing_status(poll_token)
+            outcome = hostapi.pairing_outcome(reply)
+            if outcome == hostapi.LINKED:
+                _on_main(app, lambda body=reply.body: _paired(app, body))
+                return
+            if outcome == hostapi.FAILED:
+                _on_main(app, lambda: _voice_pair_ended(
+                    app, t("DigitalOcean did not grant access")))
+                return
+            if outcome == hostapi.EXPIRED:
+                _on_main(app, lambda: _voice_pair_ended(
+                    app, t("that login expired — press Create to try again")))
+                return
+
+        _on_main(app, lambda: _voice_pair_ended(
+            app, t("no answer from DigitalOcean — press Create to try again")))
+
+    threading.Thread(target=work, name="voice-pair", daemon=True).start()
+
+
+def _voice_pair_waiting(app, code: str) -> None:
+    """A login is in flight: say so, and offer the way out."""
+    app.v_voice_host_status.set(
+        t("waiting for DigitalOcean… code {code}").format(code=code))
+    for name, button in app.voice_host_buttons.items():
+        button.state(["!disabled"] if name == "cancel" else ["disabled"])
+
+
+def _voice_pair_ended(app, message: str) -> None:
+    """A login finished without linking, however it ended."""
+    app.voice_pairing = None
+    _voice_host_set(app, None, message=message)
+
+
+def _voice_pair_cancel(app) -> None:
+    """Give up waiting.
+
+    The poll loop notices the token has changed and stops. Nothing is told to
+    DigitalOcean — there is nothing to tell it — and the pairing expires at the
+    relay on its own, which is exactly what it is for.
+    """
+    app.voice_pairing = None
+    _voice_host_refresh(app)
+
+
+def _paired(app, body: dict) -> None:
+    """Store the handle, then ask for a host."""
+    app.voice_pairing = None
+    token = body.get("host_token", "")
+    if not token:
+        _voice_host_set(app, None, message=t("the relay linked nothing"))
+        return
+
+    cfg = app.store.config
+    cfg.voice.host_token = token
+    app.save_config()
+
+    _busy(app, t("asking what your account can use…"))
+    api = _voice_api(app)
+
+    def work():
+        reply = api.options()
+        _on_main(app, lambda: _choose_host(app, reply))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _choose_host(app, reply) -> None:
+    """Ask which size and where, then create it.
+
+    Both are the racer's to choose — it is their money and their grid. The
+    recommendation is shown with the reasoning behind it rather than asserted,
+    because "pick the cheapest" sounds like a cop-out until you know that
+    processor and memory are nowhere near the limit and transfer is.
+    """
+    if not reply.ok:
+        _voice_host_set(app, None, message=reply.error or t("could not read your account"))
+        return
+
+    sizes = reply.body.get("sizes") or []
+    regions = reply.body.get("regions") or []
+    if not sizes or not regions:
+        _voice_host_set(app, None, message=t("your account offers nothing to build on"))
+        return
+
+    chosen = _ask_host_choice(app, sizes, regions, reply.body.get("advice", ""))
+    if chosen is None:
+        _voice_host_refresh(app)
+        return
+
+    size, region = chosen
+    _busy(app, t("creating your voice host…"))
+    api = _voice_api(app)
+    name = _voice_host_name(app)
+
+    def work():
+        made = api.create(name, region, size)
+        _on_main(app, lambda: _acted(app, made))
+
+    threading.Thread(target=work, name="voice-host", daemon=True).start()
+
+
+def _ask_host_choice(app, sizes, regions, advice):
+    """A modal chooser. Returns (size slug, region slug), or None if cancelled."""
+    window = tk.Toplevel(app.root)
+    window.title(t("Create a voice host"))
+    window.transient(app.root)
+    window.resizable(False, False)
+    body = ttk.Frame(window, padding=14)
+    body.pack(fill="both", expand=True)
+
+    recommended = next((s["slug"] for s in sizes if s.get("recommended")),
+                       sizes[0]["slug"])
+    labels = {f"{s['label']}{t('  ← recommended') if s.get('recommended') else ''}":
+              s["slug"] for s in sizes}
+    region_labels = {f"{r['name']}": r["slug"] for r in regions}
+
+    size_var = tk.StringVar(value=next(
+        (label for label, slug in labels.items() if slug == recommended),
+        next(iter(labels))))
+    region_var = tk.StringVar(value=next(iter(region_labels)))
+
+    ttk.Label(body, text=t("Size"), style="Heading.TLabel").grid(
+        row=0, column=0, sticky="w")
+    ttk.Combobox(body, textvariable=size_var, state="readonly", width=52,
+                 values=list(labels)).grid(row=1, column=0, sticky="we", pady=(2, 10))
+
+    ttk.Label(body, text=t("Region"), style="Heading.TLabel").grid(
+        row=2, column=0, sticky="w")
+    ttk.Combobox(body, textvariable=region_var, state="readonly", width=52,
+                 values=list(region_labels)).grid(row=3, column=0, sticky="we",
+                                                  pady=(2, 10))
+
+    ttk.Label(body, text=advice, style="Hint.TLabel", wraplength=430,
+              justify="left").grid(row=4, column=0, sticky="w", pady=(0, 12))
+
+    result = {}
+    buttons = ttk.Frame(body)
+    buttons.grid(row=5, column=0, sticky="e")
+
+    def accept():
+        result["size"] = labels.get(size_var.get(), recommended)
+        result["region"] = region_labels.get(region_var.get(), "")
+        window.destroy()
+
+    ttk.Button(buttons, text=t("Cancel"), command=window.destroy).pack(
+        side="right", padx=(6, 0))
+    ttk.Button(buttons, text=t("Create"), command=accept).pack(side="right")
+
+    window.grab_set()
+    app.root.wait_window(window)
+    if not result.get("region"):
+        return None
+    return result["size"], result["region"]
+
+
+def _voice_host_name(app) -> str:
+    """A DNS label for the host, derived rather than asked for.
+
+    One fewer thing to explain: nobody opening a voice settings tab wants to be
+    asked to invent a hostname.
+    """
+    import re
+
+    base = (app.store.config.voice.display_name or "pitradio").lower()
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", base).strip("-") or "pitradio"
+    return cleaned[:24]
+
+
 
 
 def _percent(value: float) -> str:
@@ -1237,7 +1677,8 @@ def _save_voice(app) -> None:
     cfg.voice.volume = min(1.0, max(0.0, round(float(app.v_voice_volume.get()), 2)))
     cfg.voice.max_age_seconds = max(
         0.1, _as_float(app.v_voice_max_age, cfg.voice.max_age_seconds))
-    cfg.voice.relay = app.v_voice_relay.get().strip()
+    # Not the relay, not the host, not the token: none of those are settings
+    # anybody types, and Save must not clear what the host panel established.
     app.save_config()
 
 

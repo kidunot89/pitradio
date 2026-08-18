@@ -16,6 +16,7 @@ chat box; every failure path here ends in a log line and a retry.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -37,6 +38,10 @@ PLAY_QUEUE = 16
 #: Reconnect backoff, seconds. Ends where it stays: a relay that has been down
 #: for a minute is being restarted or replaced, and hammering it helps nobody.
 BACKOFF = (1.0, 2.0, 5.0, 10.0, 30.0)
+
+#: How long an assignment from the coordinator is trusted before asking
+#: again. A session changes relay about once, so this is housekeeping.
+ASSIGNMENT_TTL = 60.0
 
 #: How long a receive may block before the loop checks whether it should stop.
 #: Short enough that quitting feels immediate, long enough not to spin.
@@ -91,6 +96,8 @@ class RelayClient:
         self._outbox: queue.Queue[bytes] = queue.Queue(maxsize=SEND_QUEUE)
         self._lock = threading.Lock()
         self._url: str | None = None
+        #: Certificate to pin for this room, when it has no public name.
+        self._fingerprint = ""
         self._wake = threading.Event()
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
@@ -119,7 +126,7 @@ class RelayClient:
 
     # -- what room -------------------------------------------------------
 
-    def set_room(self, url: str | None) -> None:
+    def set_room(self, url: str | None, fingerprint: str = "") -> None:
         """Point at a room, or at nothing.
 
         Changing it drops the current connection: staying in the previous room
@@ -127,9 +134,10 @@ class RelayClient:
         is the worst failure this component has.
         """
         with self._lock:
-            if url == self._url:
+            if url == self._url and fingerprint == self._fingerprint:
                 return
             self._url = url
+            self._fingerprint = fingerprint
         log.info("voice room: %s", "none" if url is None else "changed")
         self._drain()
         self._wake.set()
@@ -173,7 +181,13 @@ class RelayClient:
         if self._room is None:
             return
         try:
-            self.set_room(self._room())
+            answer = self._room()
+            # A provider may answer with a url alone, or with the
+            # certificate to pin alongside it.
+            if isinstance(answer, tuple):
+                self.set_room(answer[0], answer[1] or "")
+            else:
+                self.set_room(answer)
         except Exception:
             log.debug("could not work out the voice room", exc_info=True)
 
@@ -206,7 +220,7 @@ class RelayClient:
 
     def _session(self, url: str) -> bool:
         """One connection, until it ends. True if it was ever established."""
-        socket = self._connect(url)
+        socket = self._connect(url, self._fingerprint)
         if socket is None:
             return False
 
@@ -263,6 +277,8 @@ class VoiceService:
         self.store = store
         self.plugins = plugins
         self.playback = Playback(lambda: self.store.config, play=play)
+        # (session key, relay url, when we were told) — see _assigned_relay.
+        self._assignment: tuple[str, str, float] = ("", "", 0.0)
         self.client = RelayClient(
             self._on_clip, connect=connect, room=self._room)
 
@@ -280,13 +296,52 @@ class VoiceService:
     # -- what the client asks it ------------------------------------------
 
     def _room(self) -> str | None:
+        """Which room, on the relay the **coordinator** names for this session.
+
+        The client does not choose. Two racers in one session choosing
+        separately — one with a host of their own, one without — land in the
+        same room on different servers, hear silence, and nothing anywhere
+        reports a fault. So the coordinator answers, every member gets the same
+        answer, and this asks rather than decides.
+
+        Falling back to the configured relay when the coordinator cannot be
+        reached is deliberate: a moment of trouble at the coordinator should
+        not silence a session that is already talking.
+        """
         cfg = self.store.config
         # Neither sending nor listening: there is no reason to hold a socket
         # open to a room, and being in one you cannot hear is worse than not.
         if not (cfg.voice.enabled or cfg.voice.playback):
             return None
         _plugin_id, session = self.plugins.any_session()
-        return room_url(cfg.voice.relay, session.key)
+        if not session.key:
+            return None
+
+        assigned = self._assigned_relay(session.key)
+        return room_url(assigned or cfg.voice.relay, session.key)
+
+    def _assigned_relay(self, session_key: str) -> str:
+        """Ask the coordinator which relay carries this session. "" if it will not say.
+
+        Cached for as long as the answer is stable, because this runs on the
+        connection loop and the answer changes about once a session.
+        """
+        cached_key, cached_url, cached_at = self._assignment
+        if cached_key == session_key and (_now() - cached_at) < ASSIGNMENT_TTL:
+            return cached_url
+
+        from pitradio import hostapi
+
+        cfg = self.store.config
+        api = hostapi.HostApi(cfg.voice.relay, cfg.voice.host_token)
+        if not api.configured:
+            return ""
+
+        reply = api.room_relay(session_key, cfg.voice.host_id)
+        url = str(reply.body.get("url") or "") if reply.ok else ""
+        if url:
+            self._assignment = (session_key, url, _now())
+        return url
 
     def _on_clip(self, clip) -> None:
         cfg = self.store.config
@@ -305,9 +360,11 @@ class VoiceService:
             metres=int(settings.get("proximity_metres") or 0),
             positions=session.positions(),
         ):
-            log.debug("clip from %r was out of range", clip.speaker.driver)
+            log.info("voice: %r is out of range; not playing", clip.speaker.driver)
             return
 
+        log.info("voice: received %d bytes from %r",
+                 len(clip.audio), clip.speaker.driver)
         self.playback.offer(clip)
 
 
@@ -376,7 +433,10 @@ class Playback:
                 continue
 
             try:
-                self._play(clip, self._config().voice)
+                voice_cfg = self._config().voice
+                log.info("voice: playing %r on device %r",
+                         clip.speaker.driver, voice_cfg.output_device or "(system default)")
+                self._play(clip, voice_cfg)
             except Exception:
                 log.exception("playing a clip failed")
 
@@ -397,19 +457,56 @@ def _now() -> float:
 _CLOSED = object()
 
 
-def _connect(url: str):
-    """The real socket. Imported here so a build without voice never loads it."""
+def _connect(url: str, fingerprint: str = ""):
+    """The real socket. Imported here so a build without voice never loads it.
+
+    A racer-owned host has no name and no public certificate: it serves one the
+    coordinator made, and named to us over a connection we already trust. So
+    the usual check is replaced by a **pin** — this exact certificate or
+    nothing. That is stricter than the default, not looser: the ordinary check
+    would only establish that some authority vouched for a name, and there is
+    no name here to vouch for.
+    """
     try:
         import websocket
     except ImportError:
         log.info("voice needs the websocket-client package, which is not installed")
         return None
 
+    options = {}
+    if fingerprint:
+        import ssl
+
+        # Verification is turned off so the handshake completes against a
+        # certificate no CA signed — and then the certificate is checked by
+        # hand, below. Skipping that second half would leave this trusting
+        # anything at all, which is why they are never separated.
+        options = {"cert_reqs": ssl.CERT_NONE, "check_hostname": False}
+
     try:
-        return _Socket(websocket.create_connection(url, timeout=RECV_TIMEOUT))
+        connection = websocket.create_connection(
+            url, timeout=RECV_TIMEOUT, sslopt=options or None)
     except Exception as exc:
         log.debug("could not reach the relay: %s", exc)
         return None
+
+    if fingerprint and not _pinned(connection, fingerprint):
+        log.warning("voice: the relay presented an unexpected certificate; "
+                    "refusing to connect")
+        with contextlib.suppress(Exception):
+            connection.close()
+        return None
+    return _Socket(connection)
+
+
+def _pinned(connection, fingerprint: str) -> bool:
+    """Whether the peer really is the host the coordinator named."""
+    try:
+        der = connection.sock.getpeercert(binary_form=True)
+    except Exception:
+        log.debug("could not read the relay's certificate", exc_info=True)
+        return False
+    return voice.certificate_matches(der, fingerprint)
 
 
 class _Socket:

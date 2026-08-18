@@ -8,7 +8,8 @@
     "channels": 1,
     "min_clip_seconds": 0.3,
     "max_clip_seconds": 30.0,
-    "gain": 1.0
+    "gain": 1.0,
+    "release_tail_ms": 1000
   },
   "whisper": {
     "model": "small.en",

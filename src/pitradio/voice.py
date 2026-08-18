@@ -46,6 +46,29 @@ def session_key(server_address: int, server_port: int) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:KEY_LENGTH]
 
 
+def certificate_matches(der: bytes, expected: str) -> bool:
+    """Whether a server's certificate is the one the coordinator named.
+
+    **This is the whole of the trust decision for a racer-owned host.** Such a
+    host has no DNS name and no public certificate: it serves one the
+    coordinator generated, and the coordinator told us its fingerprint over a
+    connection we already trust. Accepting that certificate and nothing else is
+    stronger than the usual check — a public certificate attests that a name
+    resolves somewhere, while this attests that the machine on the other end is
+    the exact one that was provisioned.
+
+    Compared case-insensitively and without separators, because tools print
+    fingerprints as `AB:CD:…` and as `abcd…` interchangeably; a mismatch of
+    punctuation must never read as a mismatch of identity.
+    """
+    if not der or not expected:
+        return False
+    wanted = expected.replace(":", "").replace(" ", "").lower()
+    if len(wanted) != 64:
+        return False
+    return hashlib.sha256(der).hexdigest() == wanted
+
+
 def is_session_key(value: str) -> bool:
     """Whether a string is shaped like one of ours.
 
