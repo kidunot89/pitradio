@@ -1346,8 +1346,37 @@ def _voice_host_refresh(app) -> None:
     threading.Thread(target=work, name="voice-host", daemon=True).start()
 
 
+def _remember_host(app, host) -> None:
+    """Write down which host is ours, so the coordinator can be offered it.
+
+    **The client never picks its own relay.** One that connected to its own
+    host because it had one would split the session in two, with both halves
+    hearing silence and nothing reporting a fault — so it offers the id and the
+    coordinator decides, weighing it against what everyone else in the session
+    offered.
+
+    Offering requires knowing, and nothing wrote this down. A racer could
+    create a host, watch it provision, see it reported as running, and go on
+    using the shared relay in every session — the host idle, the bill real, and
+    no error anywhere, because from the coordinator's side a racer who offers
+    nothing is indistinguishable from one who has nothing.
+
+    Cleared when the relay reports no host, so a destroyed one stops being
+    offered. Only ever called with an answer the relay actually gave: an
+    unreachable relay leaves the last known id alone rather than reading a
+    failed request as "you have no host".
+    """
+    cfg = app.store.config
+    host_id = str((host or {}).get("id") or "")
+    if host_id == cfg.voice.host_id:
+        return
+    cfg.voice.host_id = host_id
+    app.save_config()
+
+
 def _after_refresh(app, host) -> None:
     _voice_host_set(app, host)
+    _remember_host(app, host)
     # Keep asking while something is in flight. Terraform takes minutes, and a
     # button that never updates is indistinguishable from one that did nothing.
     if host and host.get("busy"):

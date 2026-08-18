@@ -564,3 +564,69 @@ def test_starting_twice_makes_one_thread():
         assert client._thread is first
     finally:
         client.stop()
+
+
+# -- remembering which host is ours --------------------------------------
+#
+# The client never picks its own relay: it offers its host id and the
+# coordinator decides, because a client that connected to its own host would
+# split the session in two with both halves hearing silence. Offering requires
+# knowing, and nothing wrote it down — so a racer could create a host, watch it
+# provision, see it reported running, and go on using the shared relay in every
+# session, with the host idle, the bill real, and no error anywhere.
+
+
+class _RememberStore:
+    def __init__(self, cfg):
+        self.config = cfg
+
+
+class _RememberApp:
+    def __init__(self, cfg):
+        self.store = _RememberStore(cfg)
+        self.saves = 0
+
+    def save_config(self):
+        self.saves += 1
+
+
+def _remember_app():
+    from pitradio import config as config_mod
+
+    return _RememberApp(config_mod.Config())
+
+
+def test_a_running_host_is_recorded_so_it_can_be_offered():
+    from pitradio.ui import gui_settings
+
+    app = _remember_app()
+    gui_settings._remember_host(app, {"id": "3ed41e918c104671", "state": "running"})
+
+    assert app.store.config.voice.host_id == "3ed41e918c104671"
+    assert app.saves == 1
+
+
+def test_recording_the_same_host_again_does_not_rewrite_the_config():
+    """The Voice tab polls while a host is busy.
+
+    Saving on each poll would rewrite the file every few seconds, and every
+    write is a hot-reload for the worker.
+    """
+    from pitradio.ui import gui_settings
+
+    app = _remember_app()
+    gui_settings._remember_host(app, {"id": "abc123"})
+    gui_settings._remember_host(app, {"id": "abc123"})
+
+    assert app.saves == 1
+
+
+def test_a_destroyed_host_stops_being_offered():
+    from pitradio.ui import gui_settings
+
+    app = _remember_app()
+    app.store.config.voice.host_id = "abc123"
+    gui_settings._remember_host(app, None)
+
+    assert app.store.config.voice.host_id == ""
+    assert app.saves == 1
