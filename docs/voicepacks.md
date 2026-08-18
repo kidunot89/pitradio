@@ -55,9 +55,8 @@ half an hour of reading:
 python packaging/record_voice.py --name Bono --phrases --out voices
 ```
 
-**Record about two minutes**, reading anything — the README says not to obsess
-over emotional range, "as the xtts model tends to diminish those aspects
-anyway". Then:
+The README says not to obsess over emotional range while reading, "as the xtts
+model tends to diminish those aspects anyway".
 
 If you have recordings already — a phone memo, a download — this converts
 them instead:
