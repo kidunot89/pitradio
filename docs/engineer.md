@@ -603,3 +603,30 @@ telemetry for the car you are driving and nobody else's — and it is attached b
 matching `mID`, because LMU's telemetry array is indexed by
 `playerVehicleIdx` while the scoring array is not. Attaching by position would
 put your tank on whichever car happened to be scored in that slot.
+
+## Being away from the wheel
+
+The engineer says nothing, and **records nothing**, when the driver is not
+driving. Three states, and they need three different signals:
+
+* **Paused** — the sim's clock stops while this machine's does not, and the
+  difference is the signal. Not `mGamePhase`: that read *green flag* right
+  through a session sitting paused in the garage, with `mCurrentET` frozen at
+  2218.0. The phase says what kind of session it is, not whether it is running.
+* **In the garage** — the clock keeps running here, so the clock cannot be the
+  signal. `mInGarageStall` is. Distinct from `in_pits`, which covers the whole
+  pit lane: a car serving a stop is racing.
+* **Handed to the AI** — `mControl` is 1, which is what spectating looks like.
+
+**Nothing is observed either, not merely nothing said.** A paused sim
+republishes the same frame forever, and feeding that to the lap book records a
+car covering no ground for as long as somebody leaves the game sitting there —
+a corrupt reference lap rather than a missing one. The spotter's state is
+dropped on the way in for the same reason: a car that was alongside before the
+pause is a fact about a moment that has gone.
+
+**Pausing an online race is not detected, and cannot be.** The clock keeps
+running there, because the race keeps running — the menu is open on this
+machine and the cars are still going. Nothing in the shared memory separates
+that from ordinary racing, and inventing a signal for it would silence the
+engineer during a real race. Which is the worse mistake of the two.

@@ -149,6 +149,13 @@ class Car:
     last_sector1: float = 0.0
     last_sector2: float = 0.0
 
+    #: Whether the car is sitting in its garage stall.
+    #:
+    #: Distinct from `in_pits`, which covers the whole pit lane: a car serving
+    #: a stop is in the pits and very much racing, while a car in the stall has
+    #: been parked by somebody who walked away from the wheel.
+    in_garage: bool = False
+
     #: Litres in the tank, and how many it holds. Zero for both means the sim
     #: did not say — which is every car but your own, in every sim here.
     fuel: float = 0.0
@@ -210,6 +217,15 @@ class SessionInfo:
     max_laps: int = 0
     #: When the session clock runs out, on the same clock as `elapsed`.
     ends_at: float = 0.0
+
+    #: Whether the sim is paused, as far as anything here can tell.
+    #:
+    #: **Worked out from the clock, not from a phase field.** LMU's
+    #: `mGamePhase` read 5 — green flag — throughout a session that was sitting
+    #: paused in the garage, with `mCurrentET` frozen at 2218.0. The phase says
+    #: what kind of session it is, not whether it is running. A clock that has
+    #: stopped is the honest signal, and it is the same signal in every sim.
+    paused: bool = False
 
     #: Whether the whole circuit is under caution. Distinct from a local
     #: yellow in every sector: it changes what the driver may do, not merely

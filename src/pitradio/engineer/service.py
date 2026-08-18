@@ -58,6 +58,40 @@ POLL_SECONDS = 0.1
 SPOTTER_REPEAT = 3.0
 
 
+#: How long the sim's clock may stand still before the session is called
+#: paused.
+#:
+#: Long enough not to trip on a frame hitch or a slow read, short enough that
+#: the engineer stops talking while somebody is still reaching for the escape
+#: key. The clock is the signal rather than any phase field — LMU's
+#: `mGamePhase` reads "green flag" throughout a paused session.
+PAUSE_AFTER_SECONDS = 1.0
+
+
+class Stalled:
+    """Whether the sim's clock has stopped.
+
+    Two clocks: the sim's, which stops when the game is paused, and this
+    machine's, which does not. When one moves and the other does not, the game
+    is not running.
+    """
+
+    def __init__(self, after: float = PAUSE_AFTER_SECONDS) -> None:
+        self._after = after
+        self._elapsed: float | None = None
+        self._since: float = 0.0
+
+    def reset(self) -> None:
+        self._elapsed, self._since = None, 0.0
+
+    def update(self, elapsed: float, now: float) -> bool:
+        """True once the sim's clock has been standing still long enough."""
+        if self._elapsed is None or elapsed != self._elapsed:
+            self._elapsed, self._since = elapsed, now
+            return False
+        return now - self._since >= self._after
+
+
 class EngineerService:
     """A named voice with opinions, and the thread that gives it something to say.
 
@@ -84,6 +118,9 @@ class EngineerService:
         #: tick as the books, so a fuel answer and a lap answer can never come
         #: from two different moments of the session.
         self.fuel = fuel_mod.Usage()
+        #: Whether the sim's clock is running. See `Stalled`.
+        self._stalled = Stalled()
+        self._quiet = False
         self.routines = {routine.id: routine for routine in routines.build()}
         self.active: routines.Routine | None = None
         #: The always-on behaviours. A routine brings its own runner, so the
@@ -605,8 +642,12 @@ class EngineerService:
             return
 
         self._maybe_new_session(session)
-        context = self._observe(session, plugin_id)
+
         now = self._clock()
+        if self._silent(session, now):
+            return
+
+        context = self._observe(session, plugin_id)
         provided = self._provides(plugin_id)
 
         # The always-on behaviours, then whatever routine is running. Both go
@@ -627,6 +668,37 @@ class EngineerService:
         except Exception:
             log.exception("routine %s failed; standing it down", self.active.id)
             self._stop_active(quiet=True)
+
+    def _silent(self, session: SessionInfo, now: float) -> bool:
+        """Whether to say nothing at all this tick, and record nothing either.
+
+        Three ways to be away from the wheel, and all of them want the same
+        thing: paused, sitting in the garage stall, or handed over to the AI.
+
+        **Nothing is observed either, not merely nothing said.** A paused sim
+        republishes the same frame forever, and feeding that to the lap book
+        would record a car travelling no distance for as long as somebody left
+        the game sitting there — which is a corrupt reference lap, not a
+        missing one. On the way back in, the spotter's state is thrown away
+        too: the car that was alongside before the pause is a fact about a
+        moment that has gone.
+        """
+        own = session.player()
+        quiet = (self._stalled.update(session.elapsed, now)
+                 or bool(session.paused)
+                 or (own is not None and own.in_garage)
+                 or own is None
+                 or own.control != 0)
+
+        if quiet and not self._quiet:
+            log.info("engineer quiet: the session is paused or you are not "
+                     "at the wheel")
+            self.behaviours.reset()
+            self.fuel.reset()
+        elif self._quiet and not quiet:
+            log.info("engineer listening again")
+        self._quiet = quiet
+        return quiet
 
     def _maybe_new_session(self, session: SessionInfo) -> None:
         """Throw everything away when the track changes.

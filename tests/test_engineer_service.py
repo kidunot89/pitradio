@@ -488,9 +488,12 @@ def test_a_new_fastest_sector_is_announced(engineer):
     enable(engineer, notifications.FASTEST_SECTOR)
     disable(engineer, notifications.LAP_TIME)
 
-    cross_sectors(engineer, "Rival", player=False, times=(30.0, 35.0, 25.0))
+    me = car("Me", player=True)
+    cross_sectors(engineer, "Rival", player=False, times=(30.0, 35.0, 25.0),
+                  alongside_player=me)
     engineer.speaker.said.clear()
-    cross_sectors(engineer, "Rival", player=False, times=(28.0, 35.0, 25.0))
+    cross_sectors(engineer, "Rival", player=False, times=(28.0, 35.0, 25.0),
+                  alongside_player=me)
 
     assert "has taken" in engineer.speaker.spoken()
     assert "sector one" in engineer.speaker.spoken()
@@ -907,9 +910,15 @@ def test_a_sim_with_no_classes_is_unaffected(engineer):
     enable(engineer, notifications.FASTEST_SECTOR)
     disable(engineer, notifications.LAP_TIME)
 
-    cross_sectors(engineer, "Rival", player=False, times=(30.0, 35.0, 25.0))
+    # The player's own car is in every frame, as it is in every real session —
+    # the engineer says nothing at all when it cannot find one, because that
+    # means nobody is at the wheel. See `EngineerService._silent`.
+    me = car("Me", player=True)
+    cross_sectors(engineer, "Rival", player=False, times=(30.0, 35.0, 25.0),
+                  alongside_player=me)
     engineer.speaker.said.clear()
-    cross_sectors(engineer, "Rival", player=False, times=(28.0, 35.0, 25.0))
+    cross_sectors(engineer, "Rival", player=False, times=(28.0, 35.0, 25.0),
+                  alongside_player=me)
     assert "has taken" in engineer.speaker.spoken()
 
 
@@ -1369,3 +1378,78 @@ def test_a_fuel_question_with_a_stop_in_it_is_not_read_as_a_class(engineer):
     said = engineer.speaker.spoken()
     assert "class" not in said
     assert "percent" in said
+
+
+# -- away from the wheel --------------------------------------------------
+
+
+def paused_frames(engineer, clock, *, frames=8, elapsed=99.0, **car_kwargs):
+    """Republish one frozen frame, with wall time moving and the sim's not.
+
+    Both clocks matter: the stall is the *difference* between them, so a test
+    that holds the wall clock still is testing nothing.
+    """
+    for _ in range(frames):
+        publish(engineer, car("Me", player=True, distance=500.0, **car_kwargs),
+                elapsed=elapsed)
+        clock.advance(0.3)
+
+
+def test_the_engineer_goes_quiet_when_the_sim_is_paused(engineer, clock):
+    """A paused sim republishes the same frame forever. The clock standing
+    still is the signal, and it is the same one in every sim — LMU's
+    `mGamePhase` reads "green flag" throughout a paused session."""
+    enable(engineer, notifications.SPOTTER, repeat=1.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    paused_frames(engineer, clock)
+    assert engineer._quiet, "a frozen sim clock is a paused game"
+
+
+def test_the_engineer_goes_quiet_in_the_garage(engineer, clock):
+    """**The clock cannot be the signal here.** It keeps running while the car
+    sits in its stall, so this comes off `mInGarageStall` instead."""
+    enable(engineer, notifications.LAP_TIME)
+
+    for step in range(6):
+        publish(engineer, replace(car("Me", player=True, speed=0.0),
+                                  in_garage=True), elapsed=100.0 + step)
+        clock.advance(0.3)
+    assert engineer._quiet, "parked in the stall is not driving"
+
+
+def test_a_paused_sim_does_not_poison_the_lap_book(engineer, clock):
+    """**Nothing is observed either, not merely nothing said.** A frozen frame
+    fed to the lap book records a car covering no ground for as long as the
+    game sits there, which is a corrupt reference lap rather than a missing
+    one."""
+    drive_a_lap(engineer, lap_time=83.4)
+    before = dict(engineer.book.best)
+
+    paused_frames(engineer, clock, frames=40)
+    assert dict(engineer.book.best) == before
+
+
+def test_it_starts_talking_again_when_the_clock_moves(engineer, clock):
+    enable(engineer, notifications.LAP_TIME)
+    paused_frames(engineer, clock)
+    assert engineer._quiet
+
+    # Two laps: the first re-establishes a continuous trace after the frozen
+    # frames, the second is a lap the book can actually judge.
+    drive_a_lap(engineer, lap_time=81.0, elapsed=300.0)
+    assert not engineer._quiet, "time moved, so the game is running again"
+    engineer.speaker.said.clear()
+    drive_a_lap(engineer, lap_time=80.0, laps=2, elapsed=400.0)
+    assert engineer.speaker.said, "and it should be talking again"
+
+
+def test_a_car_handed_to_the_ai_is_not_being_driven(engineer, clock):
+    """`mControl` reads 1 once the AI has it, which is what happens when
+    somebody hands over and watches."""
+    enable(engineer, notifications.LAP_TIME)
+    drive_a_lap(engineer, lap_time=83.4)
+    engineer.speaker.said.clear()
+
+    drive_a_lap(engineer, lap_time=80.0, player=False, elapsed=200.0)
+    assert engineer.speaker.said == []

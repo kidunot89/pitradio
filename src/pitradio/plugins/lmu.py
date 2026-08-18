@@ -534,6 +534,7 @@ class LeMansUltimatePlugin(SessionPlugin):
                     last_lap=max(0.0, float(vehicle.mLastLapTime)),
                     best_lap=max(0.0, float(vehicle.mBestLapTime)),
                     in_pits=bool(vehicle.mInPits),
+                    in_garage=bool(vehicle.mInGarageStall),
                     # 6 is blue, and 0 is green; the block's comment says
                     # those are the only two it currently shows.
                     blue_flag=int(vehicle.mFlag) == BLUE_FLAG,
