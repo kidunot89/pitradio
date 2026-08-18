@@ -1,139 +1,514 @@
-audio_filename,text_for_tts,subtitle
-a_tenth/a_tenth.wav,a tenth,a tenth
-best/best.wav,best,best
-best_lap/best_lap.wav,best lap,best lap
-better_entry/better_entry.wav,better entry,better entry
-car_left/car_left.wav,car left,car left
-car_right/car_right.wav,car right,car right
-car_stopped_ahead/car_stopped_ahead.wav,car stopped ahead,car stopped ahead
-clear/clear.wav,clear,clear
-clear_left/clear_left.wav,clear left,clear left
-clear_right/clear_right.wav,clear right,clear right
-down/down.wav,down,down
-eight/eight.wav,eight,eight
-eight_tenths/eight_tenths.wav,eight tenths,eight tenths
-eighteen/eighteen.wav,eighteen,eighteen
-eleven/eleven.wav,eleven,eleven
-faster_exit/faster_exit.wav,faster exit,faster exit
-fastest/fastest.wav,fastest,fastest
-fastest_lap_of_the_session/fastest_lap_of_the_session.wav,fastest lap of the session,fastest lap of the session
-fifteen/fifteen.wav,fifteen,fifteen
-fifty/fifty.wav,fifty,fifty
-fifty_eight/fifty_eight.wav,fifty eight,fifty eight
-fifty_five/fifty_five.wav,fifty five,fifty five
-fifty_four/fifty_four.wav,fifty four,fifty four
-fifty_nine/fifty_nine.wav,fifty nine,fifty nine
-fifty_one/fifty_one.wav,fifty one,fifty one
-fifty_seven/fifty_seven.wav,fifty seven,fifty seven
-fifty_six/fifty_six.wav,fifty six,fifty six
-fifty_three/fifty_three.wav,fifty three,fifty three
-fifty_two/fifty_two.wav,fifty two,fifty two
-five/five.wav,five,five
-forty/forty.wav,forty,forty
-forty_eight/forty_eight.wav,forty eight,forty eight
-forty_five/forty_five.wav,forty five,forty five
-forty_four/forty_four.wav,forty four,forty four
-forty_nine/forty_nine.wav,forty nine,forty nine
-forty_one/forty_one.wav,forty one,forty one
-forty_seven/forty_seven.wav,forty seven,forty seven
-forty_six/forty_six.wav,forty six,forty six
-forty_three/forty_three.wav,forty three,forty three
-forty_two/forty_two.wav,forty two,forty two
-four/four.wav,four,four
-four_tenths/four_tenths.wav,four tenths,four tenths
-four_wide/four_wide.wav,four wide,four wide
-fourteen/fourteen.wav,fourteen,fourteen
-give_me_a_lap_to_find_the_sectors/give_me_a_lap_to_find_the_sectors.wav,give me a lap to find the sectors,give me a lap to find the sectors
-go_ahead/go_ahead.wav,go ahead,go ahead
-had_a_better_entry/had_a_better_entry.wav,had a better entry,had a better entry
-half_a_second/half_a_second.wav,half a second,half a second
-has_no_lap_on_record_yet/has_no_lap_on_record_yet.wav,has no lap on record yet,has no lap on record yet
-has_no_time_in/has_no_time_in.wav,has no time in,has no time in
-has_taken/has_taken.wav,has taken,has taken
-has_the_fastest_lap/has_the_fastest_lap.wav,has the fastest lap,has the fastest lap
-i_cant_find/i_cant_find.wav,I can't find,I can't find
-is_ahead_by/is_ahead_by.wav,is ahead by,is ahead by
-last_lap/last_lap.wav,last lap,last lap
-nine/nine.wav,nine,nine
-nine_tenths/nine_tenths.wav,nine tenths,nine tenths
-nineteen/nineteen.wav,nineteen,nineteen
-no_reference_lap_yet_keep_going/no_reference_lap_yet_keep_going.wav,no reference lap yet; keep going,no reference lap yet; keep going
-nothing_in_it/nothing_in_it.wav,nothing in it,nothing in it
-oh/oh.wav,oh,oh
-one/one.wav,one,one
-one_second/one_second.wav,one second,one second
-point/point.wav,point,point
-radio_check/radio_check.wav,radio check,radio check
-say_again/say_again.wav,say again,say again
-sector_one/sector_one.wav,sector one,sector one
-sector_three/sector_three.wav,sector three,sector three
-sector_two/sector_two.wav,sector two,sector two
-seven/seven.wav,seven,seven
-seven_tenths/seven_tenths.wav,seven tenths,seven tenths
-seventeen/seventeen.wav,seventeen,seventeen
-six/six.wav,six,six
-six_tenths/six_tenths.wav,six tenths,six tenths
-sixteen/sixteen.wav,sixteen,sixteen
-slower_car_ahead/slower_car_ahead.wav,slower car ahead,slower car ahead
-standing_down/standing_down.wav,standing down,standing down
-targeting/targeting.wav,targeting,targeting
-ten/ten.wav,ten,ten
-thats_your_best/thats_your_best.wav,that's your best,that's your best
-thirteen/thirteen.wav,thirteen,thirteen
-thirty/thirty.wav,thirty,thirty
-thirty_eight/thirty_eight.wav,thirty eight,thirty eight
-thirty_five/thirty_five.wav,thirty five,thirty five
-thirty_four/thirty_four.wav,thirty four,thirty four
-thirty_nine/thirty_nine.wav,thirty nine,thirty nine
-thirty_one/thirty_one.wav,thirty one,thirty one
-thirty_seven/thirty_seven.wav,thirty seven,thirty seven
-thirty_six/thirty_six.wav,thirty six,thirty six
-thirty_three/thirty_three.wav,thirty three,thirty three
-thirty_two/thirty_two.wav,thirty two,thirty two
-three/three.wav,three,three
-three_tenths/three_tenths.wav,three tenths,three tenths
-three_wide/three_wide.wav,three wide,three wide
-turn_eight/turn_eight.wav,turn eight,turn eight
-turn_eighteen/turn_eighteen.wav,turn eighteen,turn eighteen
-turn_eleven/turn_eleven.wav,turn eleven,turn eleven
-turn_fifteen/turn_fifteen.wav,turn fifteen,turn fifteen
-turn_five/turn_five.wav,turn five,turn five
-turn_four/turn_four.wav,turn four,turn four
-turn_fourteen/turn_fourteen.wav,turn fourteen,turn fourteen
-turn_nine/turn_nine.wav,turn nine,turn nine
-turn_nineteen/turn_nineteen.wav,turn nineteen,turn nineteen
-turn_one/turn_one.wav,turn one,turn one
-turn_seven/turn_seven.wav,turn seven,turn seven
-turn_seventeen/turn_seventeen.wav,turn seventeen,turn seventeen
-turn_six/turn_six.wav,turn six,turn six
-turn_sixteen/turn_sixteen.wav,turn sixteen,turn sixteen
-turn_ten/turn_ten.wav,turn ten,turn ten
-turn_thirteen/turn_thirteen.wav,turn thirteen,turn thirteen
-turn_three/turn_three.wav,turn three,turn three
-turn_twelve/turn_twelve.wav,turn twelve,turn twelve
-turn_twenty/turn_twenty.wav,turn twenty,turn twenty
-turn_two/turn_two.wav,turn two,turn two
-twelve/twelve.wav,twelve,twelve
-twenty/twenty.wav,twenty,twenty
-twenty_eight/twenty_eight.wav,twenty eight,twenty eight
-twenty_five/twenty_five.wav,twenty five,twenty five
-twenty_four/twenty_four.wav,twenty four,twenty four
-twenty_nine/twenty_nine.wav,twenty nine,twenty nine
-twenty_one/twenty_one.wav,twenty one,twenty one
-twenty_seven/twenty_seven.wav,twenty seven,twenty seven
-twenty_six/twenty_six.wav,twenty six,twenty six
-twenty_three/twenty_three.wav,twenty three,twenty three
-twenty_two/twenty_two.wav,twenty two,twenty two
-two/two.wav,two,two
-two_cars_left/two_cars_left.wav,two cars left,two cars left
-two_cars_right/two_cars_right.wav,two cars right,two cars right
-two_tenths/two_tenths.wav,two tenths,two tenths
-up/up.wav,up,up
-was_faster_on_the_exit/was_faster_on_the_exit.wav,was faster on the exit,was faster on the exit
-which_sector/which_sector.wav,which sector?,which sector?
-yet/yet.wav,yet,yet
-you_are_ahead_by/you_are_ahead_by.wav,you are ahead by,you are ahead by
-you_had_a_better_entry/you_had_a_better_entry.wav,you had a better entry,you had a better entry
-you_were_faster_on_the_exit/you_were_faster_on_the_exit.wav,you were faster on the exit,you were faster on the exit
-yours/yours.wav,yours,yours
-zero/zero.wav,zero,zero
+audio_path,audio_filename,subtitle,text_for_tts
+\voice\pitradio\a_tenth,1.wav,a tenth,a tenth
+\voice\pitradio\a_tenth,2.wav,a tenth,a tenth
+\voice\pitradio\a_tenth,3.wav,a tenth,a tenth
+\voice\pitradio\best,1.wav,best,best
+\voice\pitradio\best,2.wav,best,best
+\voice\pitradio\best,3.wav,best,best
+\voice\pitradio\best_lap,1.wav,best lap,best lap
+\voice\pitradio\best_lap,2.wav,best lap,best lap
+\voice\pitradio\best_lap,3.wav,best lap,best lap
+\voice\pitradio\better_entry,1.wav,better entry,better entry
+\voice\pitradio\better_entry,2.wav,better entry,better entry
+\voice\pitradio\better_entry,3.wav,better entry,better entry
+\voice\pitradio\blue_flag,1.wav,blue flag,blue flag
+\voice\pitradio\blue_flag,2.wav,blue flag,blue flag
+\voice\pitradio\blue_flag,3.wav,blue flag,blue flag
+\voice\pitradio\car_left,1.wav,car left,car left
+\voice\pitradio\car_left,2.wav,car left,car left
+\voice\pitradio\car_left,3.wav,car left,car left
+\voice\pitradio\car_right,1.wav,car right,car right
+\voice\pitradio\car_right,2.wav,car right,car right
+\voice\pitradio\car_right,3.wav,car right,car right
+\voice\pitradio\car_stopped_ahead,1.wav,car stopped ahead,car stopped ahead
+\voice\pitradio\car_stopped_ahead,2.wav,car stopped ahead,car stopped ahead
+\voice\pitradio\car_stopped_ahead,3.wav,car stopped ahead,car stopped ahead
+\voice\pitradio\car_stopped_in,1.wav,car stopped in,car stopped in
+\voice\pitradio\car_stopped_in,2.wav,car stopped in,car stopped in
+\voice\pitradio\car_stopped_in,3.wav,car stopped in,car stopped in
+\voice\pitradio\clear,1.wav,clear,clear
+\voice\pitradio\clear,2.wav,clear,clear
+\voice\pitradio\clear,3.wav,clear,clear
+\voice\pitradio\clear_all_round,1.wav,clear all round,clear all round
+\voice\pitradio\clear_all_round,2.wav,clear all round,clear all round
+\voice\pitradio\clear_all_round,3.wav,clear all round,clear all round
+\voice\pitradio\clear_left,1.wav,clear left,clear left
+\voice\pitradio\clear_left,2.wav,clear left,clear left
+\voice\pitradio\clear_left,3.wav,clear left,clear left
+\voice\pitradio\clear_right,1.wav,clear right,clear right
+\voice\pitradio\clear_right,2.wav,clear right,clear right
+\voice\pitradio\clear_right,3.wav,clear right,clear right
+\voice\pitradio\clear_to_go,1.wav,clear to go,clear to go
+\voice\pitradio\clear_to_go,2.wav,clear to go,clear to go
+\voice\pitradio\clear_to_go,3.wav,clear to go,clear to go
+\voice\pitradio\down,1.wav,down,down
+\voice\pitradio\down,2.wav,down,down
+\voice\pitradio\down,3.wav,down,down
+\voice\pitradio\eight,1.wav,eight,eight
+\voice\pitradio\eight,2.wav,eight,eight
+\voice\pitradio\eight,3.wav,eight,eight
+\voice\pitradio\eighteen,1.wav,eighteen,eighteen
+\voice\pitradio\eighteen,2.wav,eighteen,eighteen
+\voice\pitradio\eighteen,3.wav,eighteen,eighteen
+\voice\pitradio\eighty,1.wav,eighty,eighty
+\voice\pitradio\eighty,2.wav,eighty,eighty
+\voice\pitradio\eighty,3.wav,eighty,eighty
+\voice\pitradio\eighty_eight,1.wav,eighty eight,eighty eight
+\voice\pitradio\eighty_eight,2.wav,eighty eight,eighty eight
+\voice\pitradio\eighty_eight,3.wav,eighty eight,eighty eight
+\voice\pitradio\eighty_five,1.wav,eighty five,eighty five
+\voice\pitradio\eighty_five,2.wav,eighty five,eighty five
+\voice\pitradio\eighty_five,3.wav,eighty five,eighty five
+\voice\pitradio\eighty_four,1.wav,eighty four,eighty four
+\voice\pitradio\eighty_four,2.wav,eighty four,eighty four
+\voice\pitradio\eighty_four,3.wav,eighty four,eighty four
+\voice\pitradio\eighty_nine,1.wav,eighty nine,eighty nine
+\voice\pitradio\eighty_nine,2.wav,eighty nine,eighty nine
+\voice\pitradio\eighty_nine,3.wav,eighty nine,eighty nine
+\voice\pitradio\eighty_one,1.wav,eighty one,eighty one
+\voice\pitradio\eighty_one,2.wav,eighty one,eighty one
+\voice\pitradio\eighty_one,3.wav,eighty one,eighty one
+\voice\pitradio\eighty_seven,1.wav,eighty seven,eighty seven
+\voice\pitradio\eighty_seven,2.wav,eighty seven,eighty seven
+\voice\pitradio\eighty_seven,3.wav,eighty seven,eighty seven
+\voice\pitradio\eighty_six,1.wav,eighty six,eighty six
+\voice\pitradio\eighty_six,2.wav,eighty six,eighty six
+\voice\pitradio\eighty_six,3.wav,eighty six,eighty six
+\voice\pitradio\eighty_three,1.wav,eighty three,eighty three
+\voice\pitradio\eighty_three,2.wav,eighty three,eighty three
+\voice\pitradio\eighty_three,3.wav,eighty three,eighty three
+\voice\pitradio\eighty_two,1.wav,eighty two,eighty two
+\voice\pitradio\eighty_two,2.wav,eighty two,eighty two
+\voice\pitradio\eighty_two,3.wav,eighty two,eighty two
+\voice\pitradio\eleven,1.wav,eleven,eleven
+\voice\pitradio\eleven,2.wav,eleven,eleven
+\voice\pitradio\eleven,3.wav,eleven,eleven
+\voice\pitradio\faster_exit,1.wav,faster exit,faster exit
+\voice\pitradio\faster_exit,2.wav,faster exit,faster exit
+\voice\pitradio\faster_exit,3.wav,faster exit,faster exit
+\voice\pitradio\fastest,1.wav,fastest,fastest
+\voice\pitradio\fastest,2.wav,fastest,fastest
+\voice\pitradio\fastest,3.wav,fastest,fastest
+\voice\pitradio\fastest_lap_of_the_session,1.wav,fastest lap of the session,fastest lap of the session
+\voice\pitradio\fastest_lap_of_the_session,2.wav,fastest lap of the session,fastest lap of the session
+\voice\pitradio\fastest_lap_of_the_session,3.wav,fastest lap of the session,fastest lap of the session
+\voice\pitradio\fifteen,1.wav,fifteen,fifteen
+\voice\pitradio\fifteen,2.wav,fifteen,fifteen
+\voice\pitradio\fifteen,3.wav,fifteen,fifteen
+\voice\pitradio\fifty,1.wav,fifty,fifty
+\voice\pitradio\fifty,2.wav,fifty,fifty
+\voice\pitradio\fifty,3.wav,fifty,fifty
+\voice\pitradio\fifty_eight,1.wav,fifty eight,fifty eight
+\voice\pitradio\fifty_eight,2.wav,fifty eight,fifty eight
+\voice\pitradio\fifty_eight,3.wav,fifty eight,fifty eight
+\voice\pitradio\fifty_five,1.wav,fifty five,fifty five
+\voice\pitradio\fifty_five,2.wav,fifty five,fifty five
+\voice\pitradio\fifty_five,3.wav,fifty five,fifty five
+\voice\pitradio\fifty_four,1.wav,fifty four,fifty four
+\voice\pitradio\fifty_four,2.wav,fifty four,fifty four
+\voice\pitradio\fifty_four,3.wav,fifty four,fifty four
+\voice\pitradio\fifty_nine,1.wav,fifty nine,fifty nine
+\voice\pitradio\fifty_nine,2.wav,fifty nine,fifty nine
+\voice\pitradio\fifty_nine,3.wav,fifty nine,fifty nine
+\voice\pitradio\fifty_one,1.wav,fifty one,fifty one
+\voice\pitradio\fifty_one,2.wav,fifty one,fifty one
+\voice\pitradio\fifty_one,3.wav,fifty one,fifty one
+\voice\pitradio\fifty_seven,1.wav,fifty seven,fifty seven
+\voice\pitradio\fifty_seven,2.wav,fifty seven,fifty seven
+\voice\pitradio\fifty_seven,3.wav,fifty seven,fifty seven
+\voice\pitradio\fifty_six,1.wav,fifty six,fifty six
+\voice\pitradio\fifty_six,2.wav,fifty six,fifty six
+\voice\pitradio\fifty_six,3.wav,fifty six,fifty six
+\voice\pitradio\fifty_three,1.wav,fifty three,fifty three
+\voice\pitradio\fifty_three,2.wav,fifty three,fifty three
+\voice\pitradio\fifty_three,3.wav,fifty three,fifty three
+\voice\pitradio\fifty_two,1.wav,fifty two,fifty two
+\voice\pitradio\fifty_two,2.wav,fifty two,fifty two
+\voice\pitradio\fifty_two,3.wav,fifty two,fifty two
+\voice\pitradio\fill_it,1.wav,fill it,fill it
+\voice\pitradio\fill_it,2.wav,fill it,fill it
+\voice\pitradio\fill_it,3.wav,fill it,fill it
+\voice\pitradio\fill_to,1.wav,fill to,fill to
+\voice\pitradio\fill_to,2.wav,fill to,fill to
+\voice\pitradio\fill_to,3.wav,fill to,fill to
+\voice\pitradio\five,1.wav,five,five
+\voice\pitradio\five,2.wav,five,five
+\voice\pitradio\five,3.wav,five,five
+\voice\pitradio\for,1.wav,for,for
+\voice\pitradio\for,2.wav,for,for
+\voice\pitradio\for,3.wav,for,for
+\voice\pitradio\forty,1.wav,forty,forty
+\voice\pitradio\forty,2.wav,forty,forty
+\voice\pitradio\forty,3.wav,forty,forty
+\voice\pitradio\forty_eight,1.wav,forty eight,forty eight
+\voice\pitradio\forty_eight,2.wav,forty eight,forty eight
+\voice\pitradio\forty_eight,3.wav,forty eight,forty eight
+\voice\pitradio\forty_five,1.wav,forty five,forty five
+\voice\pitradio\forty_five,2.wav,forty five,forty five
+\voice\pitradio\forty_five,3.wav,forty five,forty five
+\voice\pitradio\forty_four,1.wav,forty four,forty four
+\voice\pitradio\forty_four,2.wav,forty four,forty four
+\voice\pitradio\forty_four,3.wav,forty four,forty four
+\voice\pitradio\forty_nine,1.wav,forty nine,forty nine
+\voice\pitradio\forty_nine,2.wav,forty nine,forty nine
+\voice\pitradio\forty_nine,3.wav,forty nine,forty nine
+\voice\pitradio\forty_one,1.wav,forty one,forty one
+\voice\pitradio\forty_one,2.wav,forty one,forty one
+\voice\pitradio\forty_one,3.wav,forty one,forty one
+\voice\pitradio\forty_seven,1.wav,forty seven,forty seven
+\voice\pitradio\forty_seven,2.wav,forty seven,forty seven
+\voice\pitradio\forty_seven,3.wav,forty seven,forty seven
+\voice\pitradio\forty_six,1.wav,forty six,forty six
+\voice\pitradio\forty_six,2.wav,forty six,forty six
+\voice\pitradio\forty_six,3.wav,forty six,forty six
+\voice\pitradio\forty_three,1.wav,forty three,forty three
+\voice\pitradio\forty_three,2.wav,forty three,forty three
+\voice\pitradio\forty_three,3.wav,forty three,forty three
+\voice\pitradio\forty_two,1.wav,forty two,forty two
+\voice\pitradio\forty_two,2.wav,forty two,forty two
+\voice\pitradio\forty_two,3.wav,forty two,forty two
+\voice\pitradio\four,1.wav,four,four
+\voice\pitradio\four,2.wav,four,four
+\voice\pitradio\four,3.wav,four,four
+\voice\pitradio\fourteen,1.wav,fourteen,fourteen
+\voice\pitradio\fourteen,2.wav,fourteen,fourteen
+\voice\pitradio\fourteen,3.wav,fourteen,fourteen
+\voice\pitradio\full_course_yellow,1.wav,full course yellow,full course yellow
+\voice\pitradio\full_course_yellow,2.wav,full course yellow,full course yellow
+\voice\pitradio\full_course_yellow,3.wav,full course yellow,full course yellow
+\voice\pitradio\give_me_a_lap_to_find_the_sectors,1.wav,give me a lap to find the sectors,give me a lap to find the sectors
+\voice\pitradio\give_me_a_lap_to_find_the_sectors,2.wav,give me a lap to find the sectors,give me a lap to find the sectors
+\voice\pitradio\give_me_a_lap_to_find_the_sectors,3.wav,give me a lap to find the sectors,give me a lap to find the sectors
+\voice\pitradio\go_ahead,1.wav,go ahead,go ahead
+\voice\pitradio\go_ahead,2.wav,go ahead,go ahead
+\voice\pitradio\go_ahead,3.wav,go ahead,go ahead
+\voice\pitradio\green_flag,1.wav,green flag,green flag
+\voice\pitradio\green_flag,2.wav,green flag,green flag
+\voice\pitradio\green_flag,3.wav,green flag,green flag
+\voice\pitradio\had_a_better_entry,1.wav,had a better entry,had a better entry
+\voice\pitradio\had_a_better_entry,2.wav,had a better entry,had a better entry
+\voice\pitradio\had_a_better_entry,3.wav,had a better entry,had a better entry
+\voice\pitradio\half_a_second,1.wav,half a second,half a second
+\voice\pitradio\half_a_second,2.wav,half a second,half a second
+\voice\pitradio\half_a_second,3.wav,half a second,half a second
+\voice\pitradio\has_no_lap_on_record_yet,1.wav,has no lap on record yet,has no lap on record yet
+\voice\pitradio\has_no_lap_on_record_yet,2.wav,has no lap on record yet,has no lap on record yet
+\voice\pitradio\has_no_lap_on_record_yet,3.wav,has no lap on record yet,has no lap on record yet
+\voice\pitradio\has_no_time_in,1.wav,has no time in,has no time in
+\voice\pitradio\has_no_time_in,2.wav,has no time in,has no time in
+\voice\pitradio\has_no_time_in,3.wav,has no time in,has no time in
+\voice\pitradio\has_taken,1.wav,has taken,has taken
+\voice\pitradio\has_taken,2.wav,has taken,has taken
+\voice\pitradio\has_taken,3.wav,has taken,has taken
+\voice\pitradio\has_the_fastest_lap,1.wav,has the fastest lap,has the fastest lap
+\voice\pitradio\has_the_fastest_lap,2.wav,has the fastest lap,has the fastest lap
+\voice\pitradio\has_the_fastest_lap,3.wav,has the fastest lap,has the fastest lap
+\voice\pitradio\hold,1.wav,hold,hold
+\voice\pitradio\hold,2.wav,hold,hold
+\voice\pitradio\hold,3.wav,hold,hold
+\voice\pitradio\hold_your_line,1.wav,hold your line,hold your line
+\voice\pitradio\hold_your_line,2.wav,hold your line,hold your line
+\voice\pitradio\hold_your_line,3.wav,hold your line,hold your line
+\voice\pitradio\i_cant_find,1.wav,I can't find,I can't find
+\voice\pitradio\i_cant_find,2.wav,I can't find,I can't find
+\voice\pitradio\i_cant_find,3.wav,I can't find,I can't find
+\voice\pitradio\in,1.wav,in,in
+\voice\pitradio\in,2.wav,in,in
+\voice\pitradio\in,3.wav,in,in
+\voice\pitradio\in_the_middle,1.wav,in the middle,in the middle
+\voice\pitradio\in_the_middle,2.wav,in the middle,in the middle
+\voice\pitradio\in_the_middle,3.wav,in the middle,in the middle
+\voice\pitradio\is_ahead_by,1.wav,is ahead by,is ahead by
+\voice\pitradio\is_ahead_by,2.wav,is ahead by,is ahead by
+\voice\pitradio\is_ahead_by,3.wav,is ahead by,is ahead by
+\voice\pitradio\laps,1.wav,laps,laps
+\voice\pitradio\laps,2.wav,laps,laps
+\voice\pitradio\laps,3.wav,laps,laps
+\voice\pitradio\last_lap,1.wav,last lap,last lap
+\voice\pitradio\last_lap,2.wav,last lap,last lap
+\voice\pitradio\last_lap,3.wav,last lap,last lap
+\voice\pitradio\nine,1.wav,nine,nine
+\voice\pitradio\nine,2.wav,nine,nine
+\voice\pitradio\nine,3.wav,nine,nine
+\voice\pitradio\nineteen,1.wav,nineteen,nineteen
+\voice\pitradio\nineteen,2.wav,nineteen,nineteen
+\voice\pitradio\nineteen,3.wav,nineteen,nineteen
+\voice\pitradio\ninety,1.wav,ninety,ninety
+\voice\pitradio\ninety,2.wav,ninety,ninety
+\voice\pitradio\ninety,3.wav,ninety,ninety
+\voice\pitradio\ninety_eight,1.wav,ninety eight,ninety eight
+\voice\pitradio\ninety_eight,2.wav,ninety eight,ninety eight
+\voice\pitradio\ninety_eight,3.wav,ninety eight,ninety eight
+\voice\pitradio\ninety_five,1.wav,ninety five,ninety five
+\voice\pitradio\ninety_five,2.wav,ninety five,ninety five
+\voice\pitradio\ninety_five,3.wav,ninety five,ninety five
+\voice\pitradio\ninety_four,1.wav,ninety four,ninety four
+\voice\pitradio\ninety_four,2.wav,ninety four,ninety four
+\voice\pitradio\ninety_four,3.wav,ninety four,ninety four
+\voice\pitradio\ninety_nine,1.wav,ninety nine,ninety nine
+\voice\pitradio\ninety_nine,2.wav,ninety nine,ninety nine
+\voice\pitradio\ninety_nine,3.wav,ninety nine,ninety nine
+\voice\pitradio\ninety_one,1.wav,ninety one,ninety one
+\voice\pitradio\ninety_one,2.wav,ninety one,ninety one
+\voice\pitradio\ninety_one,3.wav,ninety one,ninety one
+\voice\pitradio\ninety_seven,1.wav,ninety seven,ninety seven
+\voice\pitradio\ninety_seven,2.wav,ninety seven,ninety seven
+\voice\pitradio\ninety_seven,3.wav,ninety seven,ninety seven
+\voice\pitradio\ninety_six,1.wav,ninety six,ninety six
+\voice\pitradio\ninety_six,2.wav,ninety six,ninety six
+\voice\pitradio\ninety_six,3.wav,ninety six,ninety six
+\voice\pitradio\ninety_three,1.wav,ninety three,ninety three
+\voice\pitradio\ninety_three,2.wav,ninety three,ninety three
+\voice\pitradio\ninety_three,3.wav,ninety three,ninety three
+\voice\pitradio\ninety_two,1.wav,ninety two,ninety two
+\voice\pitradio\ninety_two,2.wav,ninety two,ninety two
+\voice\pitradio\ninety_two,3.wav,ninety two,ninety two
+\voice\pitradio\no_fuel_data_yet,1.wav,no fuel data yet,no fuel data yet
+\voice\pitradio\no_fuel_data_yet,2.wav,no fuel data yet,no fuel data yet
+\voice\pitradio\no_fuel_data_yet,3.wav,no fuel data yet,no fuel data yet
+\voice\pitradio\no_reference_lap_yet_keep_going,1.wav,no reference lap yet; keep going,no reference lap yet; keep going
+\voice\pitradio\no_reference_lap_yet_keep_going,2.wav,no reference lap yet; keep going,no reference lap yet; keep going
+\voice\pitradio\no_reference_lap_yet_keep_going,3.wav,no reference lap yet; keep going,no reference lap yet; keep going
+\voice\pitradio\no_time_in,1.wav,no time in,no time in
+\voice\pitradio\no_time_in,2.wav,no time in,no time in
+\voice\pitradio\no_time_in,3.wav,no time in,no time in
+\voice\pitradio\no_time_yet,1.wav,no time yet,no time yet
+\voice\pitradio\no_time_yet,2.wav,no time yet,no time yet
+\voice\pitradio\no_time_yet,3.wav,no time yet,no time yet
+\voice\pitradio\nobody_is_in_that_class,1.wav,nobody is in that class,nobody is in that class
+\voice\pitradio\nobody_is_in_that_class,2.wav,nobody is in that class,nobody is in that class
+\voice\pitradio\nobody_is_in_that_class,3.wav,nobody is in that class,nobody is in that class
+\voice\pitradio\nothing_in_it,1.wav,nothing in it,nothing in it
+\voice\pitradio\nothing_in_it,2.wav,nothing in it,nothing in it
+\voice\pitradio\nothing_in_it,3.wav,nothing in it,nothing in it
+\voice\pitradio\oh,1.wav,oh,oh
+\voice\pitradio\oh,2.wav,oh,oh
+\voice\pitradio\oh,3.wav,oh,oh
+\voice\pitradio\one,1.wav,one,one
+\voice\pitradio\one,2.wav,one,one
+\voice\pitradio\one,3.wav,one,one
+\voice\pitradio\one_second,1.wav,one second,one second
+\voice\pitradio\one_second,2.wav,one second,one second
+\voice\pitradio\one_second,3.wav,one second,one second
+\voice\pitradio\percent,1.wav,percent,percent
+\voice\pitradio\percent,2.wav,percent,percent
+\voice\pitradio\percent,3.wav,percent,percent
+\voice\pitradio\point,1.wav,point,point
+\voice\pitradio\point,2.wav,point,point
+\voice\pitradio\point,3.wav,point,point
+\voice\pitradio\radio_check,1.wav,radio check,radio check
+\voice\pitradio\radio_check,2.wav,radio check,radio check
+\voice\pitradio\radio_check,3.wav,radio check,radio check
+\voice\pitradio\say_again,1.wav,say again,say again
+\voice\pitradio\say_again,2.wav,say again,say again
+\voice\pitradio\say_again,3.wav,say again,say again
+\voice\pitradio\seconds,1.wav,seconds,seconds
+\voice\pitradio\seconds,2.wav,seconds,seconds
+\voice\pitradio\seconds,3.wav,seconds,seconds
+\voice\pitradio\sector,1.wav,sector,sector
+\voice\pitradio\sector,2.wav,sector,sector
+\voice\pitradio\sector,3.wav,sector,sector
+\voice\pitradio\seven,1.wav,seven,seven
+\voice\pitradio\seven,2.wav,seven,seven
+\voice\pitradio\seven,3.wav,seven,seven
+\voice\pitradio\seventeen,1.wav,seventeen,seventeen
+\voice\pitradio\seventeen,2.wav,seventeen,seventeen
+\voice\pitradio\seventeen,3.wav,seventeen,seventeen
+\voice\pitradio\seventy,1.wav,seventy,seventy
+\voice\pitradio\seventy,2.wav,seventy,seventy
+\voice\pitradio\seventy,3.wav,seventy,seventy
+\voice\pitradio\seventy_eight,1.wav,seventy eight,seventy eight
+\voice\pitradio\seventy_eight,2.wav,seventy eight,seventy eight
+\voice\pitradio\seventy_eight,3.wav,seventy eight,seventy eight
+\voice\pitradio\seventy_five,1.wav,seventy five,seventy five
+\voice\pitradio\seventy_five,2.wav,seventy five,seventy five
+\voice\pitradio\seventy_five,3.wav,seventy five,seventy five
+\voice\pitradio\seventy_four,1.wav,seventy four,seventy four
+\voice\pitradio\seventy_four,2.wav,seventy four,seventy four
+\voice\pitradio\seventy_four,3.wav,seventy four,seventy four
+\voice\pitradio\seventy_nine,1.wav,seventy nine,seventy nine
+\voice\pitradio\seventy_nine,2.wav,seventy nine,seventy nine
+\voice\pitradio\seventy_nine,3.wav,seventy nine,seventy nine
+\voice\pitradio\seventy_one,1.wav,seventy one,seventy one
+\voice\pitradio\seventy_one,2.wav,seventy one,seventy one
+\voice\pitradio\seventy_one,3.wav,seventy one,seventy one
+\voice\pitradio\seventy_seven,1.wav,seventy seven,seventy seven
+\voice\pitradio\seventy_seven,2.wav,seventy seven,seventy seven
+\voice\pitradio\seventy_seven,3.wav,seventy seven,seventy seven
+\voice\pitradio\seventy_six,1.wav,seventy six,seventy six
+\voice\pitradio\seventy_six,2.wav,seventy six,seventy six
+\voice\pitradio\seventy_six,3.wav,seventy six,seventy six
+\voice\pitradio\seventy_three,1.wav,seventy three,seventy three
+\voice\pitradio\seventy_three,2.wav,seventy three,seventy three
+\voice\pitradio\seventy_three,3.wav,seventy three,seventy three
+\voice\pitradio\seventy_two,1.wav,seventy two,seventy two
+\voice\pitradio\seventy_two,2.wav,seventy two,seventy two
+\voice\pitradio\seventy_two,3.wav,seventy two,seventy two
+\voice\pitradio\six,1.wav,six,six
+\voice\pitradio\six,2.wav,six,six
+\voice\pitradio\six,3.wav,six,six
+\voice\pitradio\sixteen,1.wav,sixteen,sixteen
+\voice\pitradio\sixteen,2.wav,sixteen,sixteen
+\voice\pitradio\sixteen,3.wav,sixteen,sixteen
+\voice\pitradio\sixty,1.wav,sixty,sixty
+\voice\pitradio\sixty,2.wav,sixty,sixty
+\voice\pitradio\sixty,3.wav,sixty,sixty
+\voice\pitradio\sixty_eight,1.wav,sixty eight,sixty eight
+\voice\pitradio\sixty_eight,2.wav,sixty eight,sixty eight
+\voice\pitradio\sixty_eight,3.wav,sixty eight,sixty eight
+\voice\pitradio\sixty_five,1.wav,sixty five,sixty five
+\voice\pitradio\sixty_five,2.wav,sixty five,sixty five
+\voice\pitradio\sixty_five,3.wav,sixty five,sixty five
+\voice\pitradio\sixty_four,1.wav,sixty four,sixty four
+\voice\pitradio\sixty_four,2.wav,sixty four,sixty four
+\voice\pitradio\sixty_four,3.wav,sixty four,sixty four
+\voice\pitradio\sixty_nine,1.wav,sixty nine,sixty nine
+\voice\pitradio\sixty_nine,2.wav,sixty nine,sixty nine
+\voice\pitradio\sixty_nine,3.wav,sixty nine,sixty nine
+\voice\pitradio\sixty_one,1.wav,sixty one,sixty one
+\voice\pitradio\sixty_one,2.wav,sixty one,sixty one
+\voice\pitradio\sixty_one,3.wav,sixty one,sixty one
+\voice\pitradio\sixty_seven,1.wav,sixty seven,sixty seven
+\voice\pitradio\sixty_seven,2.wav,sixty seven,sixty seven
+\voice\pitradio\sixty_seven,3.wav,sixty seven,sixty seven
+\voice\pitradio\sixty_six,1.wav,sixty six,sixty six
+\voice\pitradio\sixty_six,2.wav,sixty six,sixty six
+\voice\pitradio\sixty_six,3.wav,sixty six,sixty six
+\voice\pitradio\sixty_three,1.wav,sixty three,sixty three
+\voice\pitradio\sixty_three,2.wav,sixty three,sixty three
+\voice\pitradio\sixty_three,3.wav,sixty three,sixty three
+\voice\pitradio\sixty_two,1.wav,sixty two,sixty two
+\voice\pitradio\sixty_two,2.wav,sixty two,sixty two
+\voice\pitradio\sixty_two,3.wav,sixty two,sixty two
+\voice\pitradio\standing_down,1.wav,standing down,standing down
+\voice\pitradio\standing_down,2.wav,standing down,standing down
+\voice\pitradio\standing_down,3.wav,standing down,standing down
+\voice\pitradio\still_there,1.wav,still there,still there
+\voice\pitradio\still_there,2.wav,still there,still there
+\voice\pitradio\still_there,3.wav,still there,still there
+\voice\pitradio\targeting,1.wav,targeting,targeting
+\voice\pitradio\targeting,2.wav,targeting,targeting
+\voice\pitradio\targeting,3.wav,targeting,targeting
+\voice\pitradio\ten,1.wav,ten,ten
+\voice\pitradio\ten,2.wav,ten,ten
+\voice\pitradio\ten,3.wav,ten,ten
+\voice\pitradio\tenths,1.wav,tenths,tenths
+\voice\pitradio\tenths,2.wav,tenths,tenths
+\voice\pitradio\tenths,3.wav,tenths,tenths
+\voice\pitradio\that_wont_reach_the_end,1.wav,that won't reach the end,that won't reach the end
+\voice\pitradio\that_wont_reach_the_end,2.wav,that won't reach the end,that won't reach the end
+\voice\pitradio\that_wont_reach_the_end,3.wav,that won't reach the end,that won't reach the end
+\voice\pitradio\thats_your_best,1.wav,that's your best,that's your best
+\voice\pitradio\thats_your_best,2.wav,that's your best,that's your best
+\voice\pitradio\thats_your_best,3.wav,that's your best,that's your best
+\voice\pitradio\thirteen,1.wav,thirteen,thirteen
+\voice\pitradio\thirteen,2.wav,thirteen,thirteen
+\voice\pitradio\thirteen,3.wav,thirteen,thirteen
+\voice\pitradio\thirty,1.wav,thirty,thirty
+\voice\pitradio\thirty,2.wav,thirty,thirty
+\voice\pitradio\thirty,3.wav,thirty,thirty
+\voice\pitradio\thirty_eight,1.wav,thirty eight,thirty eight
+\voice\pitradio\thirty_eight,2.wav,thirty eight,thirty eight
+\voice\pitradio\thirty_eight,3.wav,thirty eight,thirty eight
+\voice\pitradio\thirty_five,1.wav,thirty five,thirty five
+\voice\pitradio\thirty_five,2.wav,thirty five,thirty five
+\voice\pitradio\thirty_five,3.wav,thirty five,thirty five
+\voice\pitradio\thirty_four,1.wav,thirty four,thirty four
+\voice\pitradio\thirty_four,2.wav,thirty four,thirty four
+\voice\pitradio\thirty_four,3.wav,thirty four,thirty four
+\voice\pitradio\thirty_nine,1.wav,thirty nine,thirty nine
+\voice\pitradio\thirty_nine,2.wav,thirty nine,thirty nine
+\voice\pitradio\thirty_nine,3.wav,thirty nine,thirty nine
+\voice\pitradio\thirty_one,1.wav,thirty one,thirty one
+\voice\pitradio\thirty_one,2.wav,thirty one,thirty one
+\voice\pitradio\thirty_one,3.wav,thirty one,thirty one
+\voice\pitradio\thirty_seven,1.wav,thirty seven,thirty seven
+\voice\pitradio\thirty_seven,2.wav,thirty seven,thirty seven
+\voice\pitradio\thirty_seven,3.wav,thirty seven,thirty seven
+\voice\pitradio\thirty_six,1.wav,thirty six,thirty six
+\voice\pitradio\thirty_six,2.wav,thirty six,thirty six
+\voice\pitradio\thirty_six,3.wav,thirty six,thirty six
+\voice\pitradio\thirty_three,1.wav,thirty three,thirty three
+\voice\pitradio\thirty_three,2.wav,thirty three,thirty three
+\voice\pitradio\thirty_three,3.wav,thirty three,thirty three
+\voice\pitradio\thirty_two,1.wav,thirty two,thirty two
+\voice\pitradio\thirty_two,2.wav,thirty two,thirty two
+\voice\pitradio\thirty_two,3.wav,thirty two,thirty two
+\voice\pitradio\three,1.wav,three,three
+\voice\pitradio\three,2.wav,three,three
+\voice\pitradio\three,3.wav,three,three
+\voice\pitradio\three_wide_youre_on_the_left,1.wav,three wide you're on the left,three wide you're on the left
+\voice\pitradio\three_wide_youre_on_the_left,2.wav,three wide you're on the left,three wide you're on the left
+\voice\pitradio\three_wide_youre_on_the_left,3.wav,three wide you're on the left,three wide you're on the left
+\voice\pitradio\three_wide_youre_on_the_right,1.wav,three wide you're on the right,three wide you're on the right
+\voice\pitradio\three_wide_youre_on_the_right,2.wav,three wide you're on the right,three wide you're on the right
+\voice\pitradio\three_wide_youre_on_the_right,3.wav,three wide you're on the right,three wide you're on the right
+\voice\pitradio\turn,1.wav,turn,turn
+\voice\pitradio\turn,2.wav,turn,turn
+\voice\pitradio\turn,3.wav,turn,turn
+\voice\pitradio\twelve,1.wav,twelve,twelve
+\voice\pitradio\twelve,2.wav,twelve,twelve
+\voice\pitradio\twelve,3.wav,twelve,twelve
+\voice\pitradio\twenty,1.wav,twenty,twenty
+\voice\pitradio\twenty,2.wav,twenty,twenty
+\voice\pitradio\twenty,3.wav,twenty,twenty
+\voice\pitradio\twenty_eight,1.wav,twenty eight,twenty eight
+\voice\pitradio\twenty_eight,2.wav,twenty eight,twenty eight
+\voice\pitradio\twenty_eight,3.wav,twenty eight,twenty eight
+\voice\pitradio\twenty_five,1.wav,twenty five,twenty five
+\voice\pitradio\twenty_five,2.wav,twenty five,twenty five
+\voice\pitradio\twenty_five,3.wav,twenty five,twenty five
+\voice\pitradio\twenty_four,1.wav,twenty four,twenty four
+\voice\pitradio\twenty_four,2.wav,twenty four,twenty four
+\voice\pitradio\twenty_four,3.wav,twenty four,twenty four
+\voice\pitradio\twenty_nine,1.wav,twenty nine,twenty nine
+\voice\pitradio\twenty_nine,2.wav,twenty nine,twenty nine
+\voice\pitradio\twenty_nine,3.wav,twenty nine,twenty nine
+\voice\pitradio\twenty_one,1.wav,twenty one,twenty one
+\voice\pitradio\twenty_one,2.wav,twenty one,twenty one
+\voice\pitradio\twenty_one,3.wav,twenty one,twenty one
+\voice\pitradio\twenty_seven,1.wav,twenty seven,twenty seven
+\voice\pitradio\twenty_seven,2.wav,twenty seven,twenty seven
+\voice\pitradio\twenty_seven,3.wav,twenty seven,twenty seven
+\voice\pitradio\twenty_six,1.wav,twenty six,twenty six
+\voice\pitradio\twenty_six,2.wav,twenty six,twenty six
+\voice\pitradio\twenty_six,3.wav,twenty six,twenty six
+\voice\pitradio\twenty_three,1.wav,twenty three,twenty three
+\voice\pitradio\twenty_three,2.wav,twenty three,twenty three
+\voice\pitradio\twenty_three,3.wav,twenty three,twenty three
+\voice\pitradio\twenty_two,1.wav,twenty two,twenty two
+\voice\pitradio\twenty_two,2.wav,twenty two,twenty two
+\voice\pitradio\twenty_two,3.wav,twenty two,twenty two
+\voice\pitradio\two,1.wav,two,two
+\voice\pitradio\two,2.wav,two,two
+\voice\pitradio\two,3.wav,two,two
+\voice\pitradio\up,1.wav,up,up
+\voice\pitradio\up,2.wav,up,up
+\voice\pitradio\up,3.wav,up,up
+\voice\pitradio\was_faster_on_the_exit,1.wav,was faster on the exit,was faster on the exit
+\voice\pitradio\was_faster_on_the_exit,2.wav,was faster on the exit,was faster on the exit
+\voice\pitradio\was_faster_on_the_exit,3.wav,was faster on the exit,was faster on the exit
+\voice\pitradio\which_sector,1.wav,which sector?,which sector?
+\voice\pitradio\which_sector,2.wav,which sector?,which sector?
+\voice\pitradio\which_sector,3.wav,which sector?,which sector?
+\voice\pitradio\yet,1.wav,yet,yet
+\voice\pitradio\yet,2.wav,yet,yet
+\voice\pitradio\yet,3.wav,yet,yet
+\voice\pitradio\you_are_ahead_by,1.wav,you are ahead by,you are ahead by
+\voice\pitradio\you_are_ahead_by,2.wav,you are ahead by,you are ahead by
+\voice\pitradio\you_are_ahead_by,3.wav,you are ahead by,you are ahead by
+\voice\pitradio\you_had_a_better_entry,1.wav,you had a better entry,you had a better entry
+\voice\pitradio\you_had_a_better_entry,2.wav,you had a better entry,you had a better entry
+\voice\pitradio\you_had_a_better_entry,3.wav,you had a better entry,you had a better entry
+\voice\pitradio\you_were_faster_on_the_exit,1.wav,you were faster on the exit,you were faster on the exit
+\voice\pitradio\you_were_faster_on_the_exit,2.wav,you were faster on the exit,you were faster on the exit
+\voice\pitradio\you_were_faster_on_the_exit,3.wav,you were faster on the exit,you were faster on the exit
+\voice\pitradio\your_best,1.wav,your best,your best
+\voice\pitradio\your_best,2.wav,your best,your best
+\voice\pitradio\your_best,3.wav,your best,your best
+\voice\pitradio\yours,1.wav,yours,yours
+\voice\pitradio\yours,2.wav,yours,yours
+\voice\pitradio\yours,3.wav,yours,yours
+\voice\pitradio\zero,1.wav,zero,zero
+\voice\pitradio\zero,2.wav,zero,zero
+\voice\pitradio\zero,3.wav,zero,zero

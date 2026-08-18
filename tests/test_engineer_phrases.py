@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from pitradio import i18n
-from pitradio.engineer import lines, phrases
+from pitradio.engineer import coaching, lines, phrases, spotter
 
 ENTRIES = (
     ("corner_coach", ("target {driver}", "initiate build procedures",
@@ -202,35 +202,35 @@ def test_numbers_are_words_in_english(script):
 
 
 def test_a_lap_time_reads_the_way_it_is_said(script):
-    assert script.lap_time(83.456) == "one twenty three point four six"
+    assert " ".join(script.lap_time(83.456)) == "one twenty three point four six"
 
 
 def test_a_lap_under_a_minute_drops_the_minute(script):
-    assert script.lap_time(45.2) == "forty five point two zero"
+    assert " ".join(script.lap_time(45.2)) == "forty five point two zero"
 
 
 def test_the_tens_place_is_spoken_even_when_it_is_zero(script):
     """"one five" is fifteen. "one oh five" is sixty five seconds."""
-    assert script.lap_time(65.0).startswith("one oh five")
+    assert " ".join(script.lap_time(65.0)).startswith("one oh five")
 
 
 def test_no_lap_time_says_nothing(script):
-    assert script.lap_time(0) == ""
-    assert script.lap_time(-1) == ""
+    assert script.lap_time(0) == []
+    assert script.lap_time(-1) == []
 
 
 def test_the_smallest_gap_worth_naming_is_a_tenth(script):
     """0.05 rounds to a tenth. Python's round() would make it zero, and the
     engineer would announce "zero tenths" as its first useful call."""
-    assert script.delta(0.05) == "a tenth"
-    assert script.delta(0.04) == "nothing in it"
+    assert script.delta(0.05) == ["a tenth"]
+    assert script.delta(0.04) == ["nothing in it"]
 
 
 def test_gaps_are_said_in_tenths_then_seconds(script):
-    assert script.delta(0.2) == "two tenths"
-    assert script.delta(0.5) == "half a second"
-    assert script.delta(1.0) == "one second"
-    assert script.delta(2.4) == "two point four seconds"
+    assert script.delta(0.2) == ["two", "tenths"]
+    assert script.delta(0.5) == ["half a second"]
+    assert script.delta(1.0) == ["one second"]
+    assert script.delta(2.4) == ["two", "point", "four", "seconds"]
 
 
 def test_a_gap_is_the_same_either_way_round(script):
@@ -253,7 +253,7 @@ def test_numbers_are_digits_outside_english(spanish):
     """Number grammar is per-language and doing it half-well would produce
     confident nonsense. Digits hand it to the speech voice, which knows."""
     assert spanish.number(23) == "23"
-    assert spanish.lap_time(83.456) == "1 23.46"
+    assert spanish.lap_time(83.456) == ["1 23.46"]
 
 
 def test_a_translated_sentence_uses_the_catalogue(spanish):
@@ -266,3 +266,76 @@ def test_a_translated_sentence_uses_the_catalogue(spanish):
 
 def test_an_untranslated_sentence_falls_back_to_english(spanish):
     assert spanish.stopped() == ["standing down"]
+
+
+# -- what a voice pack is asked to record ---------------------------------
+
+
+def test_a_lap_time_is_fragments_a_pack_can_hold():
+    """Joined up, "one twenty three point four six" is a phrase no pack could
+    ever contain, so every lap time fell through to the Windows synthesiser —
+    audibly, mid-sentence. Crew Chief composes times from a numbers folder for
+    exactly this reason."""
+    script = lines.Script(i18n.Catalogue("en"))
+    assert script.lap_time(83.456) == [
+        "one", "twenty three", "point", "four", "six"]
+
+
+def test_a_lap_just_over_a_minute_keeps_its_tens_place():
+    """"one five" sounds like fifteen."""
+    script = lines.Script(i18n.Catalogue("en"))
+    assert script.lap_time(65.04) == [
+        "one", "oh", "five", "point", "zero", "four"]
+
+
+def test_every_fragment_of_a_call_is_in_the_vocabulary():
+    """**The check that makes a pack worth generating.** A fragment the
+    inventory never asked for is a word the pack does not have, and the
+    engineer drops into the Windows voice for it in the middle of a sentence.
+    """
+    catalogue = i18n.Catalogue("en")
+    script = lines.Script(catalogue)
+    known = set(lines.vocabulary(catalogue))
+
+    calls = [
+        script.lap_time_call(83.456, personal_best=True),
+        script.lap_time_call(65.04, personal_best=False),
+        script.fastest_sector_call("Estre", 2, 41.28, mine=False),
+        script.sector_delta_call(3, 0.42),
+        script.sector_best_call(1, 28.9),
+        script.corner_call("Nato", 8, coaching.EXIT, 0.23),
+        script.corner_call("Nato", 12, coaching.ENTRY, -1.5),
+        script.fuel_answer(86, 17),
+        script.flag_call("car stopped in turn 6"),
+        script.flag_call("car stopped in sector 2"),
+        script.flag_call("full course yellow"),
+        script.spotter_call("car left"),
+        script.spotter_call(spotter.HOLD_YOUR_LINE),
+        script.rejoin_call(True),
+        script.best_lap_answer(91.2),
+        script.no_time_yet(),
+    ]
+    missing = {fragment for call in calls for fragment in call
+               if fragment not in known}
+    # Driver names are the one thing no pack can hold, by definition.
+    assert missing <= {"Estre", "Nato"}, sorted(missing)
+
+
+def test_the_vocabulary_covers_every_number_a_lap_time_uses():
+    catalogue = i18n.Catalogue("en")
+    script = lines.Script(catalogue)
+    known = set(lines.vocabulary(catalogue))
+
+    missing = set()
+    for hundredths in range(0, 12000, 7):
+        missing |= {part for part in script.lap_time(hundredths / 100.0)
+                    if part not in known}
+    assert not missing, sorted(missing)
+
+
+def test_templates_are_not_offered_for_recording():
+    """A line with a placeholder is assembled from fragments that are
+    themselves listed, so recording the template records a phrase the engineer
+    never says."""
+    assert not [line for line in lines.vocabulary(i18n.Catalogue("en"))
+                if "{" in line]

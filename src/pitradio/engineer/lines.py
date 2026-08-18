@@ -78,20 +78,27 @@ class Script:
             return _TENS[tens] if not ones else f"{_TENS[tens]} {_ONES[ones]}"
         return " ".join(_ONES[int(digit)] for digit in str(value))
 
-    def lap_time(self, seconds: float) -> str:
-        """83.456 -> "one twenty three point four six".
+    def lap_time(self, seconds: float) -> Utterance:
+        """83.456 -> ["one", "twenty three", "point", "four", "six"].
 
         The minute is bare and the seconds are not: nobody says "one minute
         twenty three", and a 65-second lap is read "one oh five". Two decimal
         places, because the third is finer than the sim's own scoring.
 
-        Outside English the two parts are handed over as separate numbers —
-        "1 23.46" — which every speech voice reads correctly for its language
-        and none of them mistake for a time of day, which is what happens to
-        "1:23.46".
+        **Fragments, not one string**, and that is what lets a voice pack say a
+        lap time at all. Joined up, "one twenty three point four six" is a
+        phrase no pack could ever contain, so every time fell through to the
+        Windows synthesiser — audibly, in the middle of a sentence otherwise
+        spoken by somebody else. Crew Chief composes times from a `numbers`
+        folder for exactly this reason. Split, a pack needs sixty-odd number
+        clips and covers every lap time there is.
+
+        Outside English the two parts are handed over as digits — "1 23.46" —
+        which every speech voice reads correctly for its language and none of
+        them mistake for a time of day, which is what happens to "1:23.46".
         """
         if not seconds or seconds <= 0:
-            return ""
+            return []
 
         hundredths = int(seconds * 100 + 0.5)
         minutes, rest = divmod(hundredths, 6000)
@@ -99,21 +106,24 @@ class Script:
 
         if not self.catalogue.english:
             body = f"{whole}.{fraction:02d}"
-            return f"{minutes} {body}" if minutes else body
+            return [f"{minutes} {body}"] if minutes else [body]
 
-        parts: list[str] = []
+        parts: Utterance = []
         if minutes:
             parts.append(self.number(minutes))
             # "oh five", not "five" — the tens place is spoken even when it is
             # zero, or "one five" sounds like fifteen.
-            parts.append(f"oh {self.number(whole)}" if whole < 10 else self.number(whole))
+            if whole < 10:
+                parts.extend([self.t("oh"), self.number(whole)])
+            else:
+                parts.append(self.number(whole))
         else:
             parts.append(self.number(whole))
-        parts.append("point")
-        parts.append(" ".join(self.number(int(digit)) for digit in f"{fraction:02d}"))
-        return " ".join(parts)
+        parts.append(self.t("point"))
+        parts.extend(self.number(int(digit)) for digit in f"{fraction:02d}")
+        return parts
 
-    def delta(self, seconds: float) -> str:
+    def delta(self, seconds: float) -> Utterance:
         """A gap, said the way it is on the radio rather than printed.
 
         Tenths up to a second, because a tenth is the unit a driver can act on.
@@ -121,16 +131,18 @@ class Script:
         """
         gap = abs(float(seconds))
         if gap < 0.05:
-            return self.t("nothing in it")
+            return [self.t("nothing in it")]
         if gap < 0.95:
             # Half up, not round(): Python rounds a bare .5 to even, so the
             # first gap worth naming — 0.05 — would come back as "zero tenths".
             tenths = int(gap * 10 + 0.5)
             if tenths == 5:
-                return self.t("half a second")
+                return [self.t("half a second")]
             if tenths == 1:
-                return self.t("a tenth")
-            return self.t("{count} tenths", count=self.number(tenths))
+                return [self.t("a tenth")]
+            if not self.catalogue.english:
+                return [self.t("{count} tenths", count=self.number(tenths))]
+            return [self.number(tenths), self.t("tenths")]
         if gap < 10:
             whole = int(gap)
             tenths = int((gap - whole) * 10 + 0.5)
@@ -138,12 +150,41 @@ class Script:
                 whole, tenths = whole + 1, 0
             if not tenths:
                 if whole == 1:
-                    return self.t("one second")
-                return self.t("{count} seconds", count=self.number(whole))
-            return self.t(
-                "{count} seconds",
-                count=f"{self.number(whole)} {self.t('point')} {self.number(tenths)}")
-        return self.t("{count} seconds", count=self.number(int(gap + 0.5)))
+                    return [self.t("one second")]
+                return self._seconds(self.number(whole))
+            return self._seconds(
+                f"{self.number(whole)} {self.t('point')} {self.number(tenths)}"
+                if not self.catalogue.english else None,
+                self.number(whole), self.t("point"), self.number(tenths))
+        return self._seconds(self.number(int(gap + 0.5)))
+
+    def _seconds(self, *parts) -> Utterance:
+        """"N seconds", as one translated phrase or as fragments.
+
+        The count leads in English and a translator owns where it goes
+        everywhere else — the same rule as `turn_name`.
+        """
+        pieces = [part for part in parts if part]
+        if not self.catalogue.english:
+            return [self.t("{count} seconds", count=" ".join(pieces))]
+        return [*pieces, self.t("seconds")]
+
+    def turn_name(self, corner: int) -> Utterance:
+        """"turn" and the number, split only where splitting helps.
+
+        Two fragments in English, so a pack needs "turn" once and reuses the
+        numbers it already has rather than a recording per corner.
+
+        **One fragment everywhere else**, and that is not a shortcut. Word
+        order is per-language — Spanish says "curva 4" and German "Kurve 4",
+        but plenty of languages do not put the number last — and a translator
+        who was handed the two halves separately could not fix it. Nothing is
+        lost by keeping the template: numbers are digits outside English, so a
+        non-English pack cannot cover them anyway.
+        """
+        if not self.catalogue.english:
+            return [self.t("turn {number}", number=self.number(corner))]
+        return [self.t("turn"), self.number(corner)]
 
     # -- what it actually says --------------------------------------------
 
@@ -161,7 +202,7 @@ class Script:
         if not lap_time:
             return [self.t("targeting"), driver]
         return [self.t("targeting"), driver,
-                self.t("best lap"), self.lap_time(lap_time)]
+                self.t("best lap"), *self.lap_time(lap_time)]
 
     def no_lap_for(self, driver: str) -> Utterance:
         """The target exists but has not set a lap worth chasing yet."""
@@ -180,8 +221,8 @@ class Script:
         time wants to know straight away whether it was the good one.
         """
         if personal_best:
-            return [self.t("that's your best"), self.lap_time(seconds)]
-        return [self.t("last lap"), self.lap_time(seconds)]
+            return [self.t("that's your best"), *self.lap_time(seconds)]
+        return [self.t("last lap"), *self.lap_time(seconds)]
 
     def corner_call(
         self, driver: str, corner: int, phase: str, seconds: float
@@ -193,7 +234,7 @@ class Script:
         one stretch of track, and it does not know why. "Brake later" would be
         a guess dressed up as coaching.
         """
-        turn = self.t("turn {number}", number=self.number(corner))
+        turn = self.turn_name(corner)
         gap = self.delta(seconds)
         exiting = phase == coaching.EXIT
         lost = seconds > 0
@@ -202,16 +243,17 @@ class Script:
             # No corner number: the driver has just come out of it and knows
             # which one it was. What they do not know is the half and the size.
             half = (self.t("faster exit") if exiting else self.t("better entry"))
-            return [driver, half, gap] if lost else [self.t("yours"), half, gap]
+            return ([driver, half, *gap] if lost
+                    else [self.t("yours"), half, *gap])
 
         if lost:
             half = (self.t("was faster on the exit") if exiting
                     else self.t("had a better entry"))
-            return [turn, driver, half, gap]
+            return [*turn, driver, half, *gap]
 
         half = (self.t("you were faster on the exit") if exiting
                 else self.t("you had a better entry"))
-        return [turn, half, gap]
+        return [*turn, half, *gap]
 
     def urgent_phrases(self) -> list[str]:
         """Everything the spotter can say, for pre-rendering.
@@ -250,11 +292,10 @@ class Script:
 
         match = re.fullmatch(r"car stopped in turn (\d+)", call)
         if match:
-            return [self.t("car stopped in"),
-                    self.t("turn {number}").format(number=self.number(int(match[1])))]
+            return [self.t("car stopped in"), *self.turn_name(int(match[1]))]
         match = re.fullmatch(r"car stopped in sector (\d+)", call)
         if match:
-            return [self.t("car stopped in"), self.sector_name(int(match[1]))]
+            return [self.t("car stopped in"), *self.sector_name(int(match[1]))]
         return [call]
 
     def rejoin_call(self, clear: bool) -> Utterance:
@@ -293,52 +334,57 @@ class Script:
 
     # -- laps and sectors --------------------------------------------------
 
-    def sector_name(self, sector: int) -> str:
-        return self.t("sector {number}", number=self.number(sector))
+    def sector_name(self, sector: int) -> Utterance:
+        if not self.catalogue.english:
+            # Word order is the translator's, not ours — see `turn_name`.
+            return [self.t("sector {number}", number=self.number(sector))]
+        return [self.t("sector"), self.number(sector)]
 
     def fastest_lap_call(self, driver: str, seconds: float, *,
                          mine: bool) -> Utterance:
         """Somebody has taken the fastest lap of the session."""
         if mine:
-            return [self.t("fastest lap of the session"), self.lap_time(seconds)]
-        return [driver, self.t("has the fastest lap"), self.lap_time(seconds)]
+            return [self.t("fastest lap of the session"), *self.lap_time(seconds)]
+        return [driver, self.t("has the fastest lap"), *self.lap_time(seconds)]
 
     def fastest_sector_call(self, driver: str, sector: int, seconds: float, *,
                             mine: bool) -> Utterance:
         if mine:
-            return [self.t("fastest"), self.sector_name(sector),
-                    self.lap_time(seconds)]
-        return [driver, self.t("has taken"), self.sector_name(sector),
-                self.lap_time(seconds)]
+            return [self.t("fastest"), *self.sector_name(sector),
+                    *self.lap_time(seconds)]
+        return [driver, self.t("has taken"), *self.sector_name(sector),
+                *self.lap_time(seconds)]
 
     def sector_best_call(self, sector: int, seconds: float) -> Utterance:
         """Your own best in a sector, which is the one to keep repeating."""
-        return [self.t("best"), self.sector_name(sector), self.lap_time(seconds)]
+        return [self.t("best"), *self.sector_name(sector),
+                *self.lap_time(seconds)]
 
     def sector_delta_call(self, sector: int, delta: float) -> Utterance:
         """How a sector went against your best. Negative is quicker."""
         gap = self.delta(delta)
         if delta > 0:
-            return [self.sector_name(sector), self.t("down"), gap]
-        return [self.sector_name(sector), self.t("up"), gap]
+            return [*self.sector_name(sector), self.t("down"), *gap]
+        return [*self.sector_name(sector), self.t("up"), *gap]
 
     def sector_target_call(self, driver: str, sector: int,
                            delta: float) -> Utterance:
         """The sector trainer's verdict against the driver being chased."""
         gap = self.delta(delta)
         if delta > 0:
-            return [self.sector_name(sector), driver, self.t("is ahead by"), gap]
-        return [self.sector_name(sector), self.t("you are ahead by"), gap]
+            return [*self.sector_name(sector), driver,
+                    self.t("is ahead by"), *gap]
+        return [*self.sector_name(sector), self.t("you are ahead by"), *gap]
 
     def targeting_sector(self, driver: str, sector: int,
                          seconds: float) -> Utterance:
         if not seconds:
-            return [self.t("targeting"), driver, self.sector_name(sector)]
-        return [self.t("targeting"), driver, self.sector_name(sector),
-                self.lap_time(seconds)]
+            return [self.t("targeting"), driver, *self.sector_name(sector)]
+        return [self.t("targeting"), driver, *self.sector_name(sector),
+                *self.lap_time(seconds)]
 
     def no_sector_for(self, driver: str, sector: int) -> Utterance:
-        return [driver, self.t("has no time in"), self.sector_name(sector),
+        return [driver, self.t("has no time in"), *self.sector_name(sector),
                 self.t("yet")]
 
     # -- answers to questions ---------------------------------------------
@@ -351,16 +397,16 @@ class Script:
         "Estre, one fifty two eight" is ambiguous about which race it is an
         answer to, and the driver asked precisely because they did not know.
         """
-        answer = [driver, self.lap_time(seconds)]
+        answer = [driver, *self.lap_time(seconds)]
         return [*answer, self.t("in"), vehicle_class] if vehicle_class else answer
 
     def fastest_sector_answer(self, driver: str, sector: int, seconds: float, *,
                               vehicle_class: str = "") -> Utterance:
-        answer = [driver, self.sector_name(sector), self.lap_time(seconds)]
+        answer = [driver, *self.sector_name(sector), *self.lap_time(seconds)]
         return [*answer, self.t("in"), vehicle_class] if vehicle_class else answer
 
     def best_lap_answer(self, seconds: float) -> Utterance:
-        return [self.t("your best"), self.lap_time(seconds)]
+        return [self.t("your best"), *self.lap_time(seconds)]
 
     def fuel_answer(self, percent: float, laps: float) -> Utterance:
         """The fill for a stop, as the sim's own screen wants it.
@@ -371,7 +417,7 @@ class Script:
         entry who catches only the first two words has still got what they
         needed.
         """
-        return [self.t("fill to"), self.percent(percent),
+        return [self.t("fill to"), *self.percent(percent),
                 self.t("for"), self.number(int(laps)), self.t("laps")]
 
     def fuel_will_not_reach(self) -> Utterance:
@@ -391,7 +437,7 @@ class Script:
         """
         return [self.t("no fuel data yet")]
 
-    def percent(self, value: float) -> str:
+    def percent(self, value: float) -> Utterance:
         """A tank fill, as words in English and digits elsewhere.
 
         The same rule as every other number here: number grammar is
@@ -399,8 +445,8 @@ class Script:
         somebody's own language.
         """
         if not self.catalogue.english:
-            return f"{int(value)}%"
-        return f"{self.number(int(value))} percent"
+            return [f"{int(value)}%"]
+        return [self.number(int(value)), self.t("percent")]
 
     def no_time_yet(self, vehicle_class: str = "") -> Utterance:
         """Nobody has set one. An answer, and not the same as saying nothing."""
@@ -433,14 +479,20 @@ class Script:
 
 
 #: Everything above that is a fixed fragment, for `packs.inventory`. Anything
-#: not in here is a driver's name or a number, and no generated pack can hold
-#: those — see the module docstring.
+#: **Numbers are not in here** — they come out of `number()` and are listed by
+#: `vocabulary()` instead, because there are a hundred of them and enumerating
+#: them by hand would be a list that silently went stale. A driver's name is
+#: not in here either, and never can be.
 FIXED_LINES = (
-    "nothing in it", "half a second", "a tenth", "{count} tenths", "one second",
-    "{count} seconds", "point", "go ahead", "say again", "standing down",
+    "nothing in it", "half a second", "a tenth", "tenths", "one second",
+    "seconds", "point", "oh", "percent", "turn", "sector",
+    # Kept for translators: outside English these stay whole phrases, because
+    # word order is theirs to decide. See `Script.turn_name`.
+    "{count} tenths", "{count} seconds", "turn {number}", "sector {number}",
+    "go ahead", "say again", "standing down",
     "targeting", "best lap", "has no lap on record yet", "I can't find",
     "no reference lap yet; keep going", "that's your best", "last lap",
-    "turn {number}", "was faster on the exit", "had a better entry",
+    "was faster on the exit", "had a better entry",
     "you were faster on the exit", "you had a better entry",
     "faster exit", "better entry", "yours",
     "radio check", "car left", "car right",
@@ -451,7 +503,7 @@ FIXED_LINES = (
     "full course yellow", "green flag", "blue flag", "car stopped in",
     "clear to go", "hold",
     "{routine} running", "{routine} off",
-    "sector {number}", "fastest lap of the session", "has the fastest lap",
+    "fastest lap of the session", "has the fastest lap",
     "in", "your best", "no time in", "no time yet", "nobody is in that class",
     "fill to", "for", "laps", "fill it", "that won't reach the end",
     "no fuel data yet",
@@ -459,3 +511,31 @@ FIXED_LINES = (
     "you are ahead by", "has no time in", "yet", "which sector?",
     "give me a lap to find the sectors",
 )
+
+
+#: The largest number the engineer can be asked to say.
+#:
+#: Ninety-nine covers everything: seconds in a lap time top out at 59, a fill
+#: percentage at 99 (a hundred is "fill it" instead, which is a different call),
+#: and a lap count beyond this is a race nobody is fuelling one stop for.
+MAX_SPOKEN_NUMBER = 99
+
+
+def vocabulary(catalogue: i18n.Catalogue) -> list[str]:
+    """Every fragment the engineer can say, for a voice pack to record.
+
+    `FIXED_LINES` plus the numbers, which are generated rather than listed —
+    a hand-kept list of a hundred number words is a list that goes stale
+    without anything failing.
+
+    **Templates are excluded and that is not a gap.** A line with a `{}` in it
+    is assembled from fragments that are themselves in here, so recording the
+    template would record a phrase the engineer never actually says.
+    """
+    script = Script(catalogue)
+    spoken = [catalogue.translate(line) for line in FIXED_LINES
+              if "{" not in line]
+    spoken.extend(script.number(value)
+                  for value in range(MAX_SPOKEN_NUMBER + 1))
+    # Order-preserving dedupe: "one" is both a number and part of "one second".
+    return list(dict.fromkeys(phrase for phrase in spoken if phrase.strip()))

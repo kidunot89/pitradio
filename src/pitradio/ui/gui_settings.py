@@ -1608,8 +1608,7 @@ def _write_phrase_list(app) -> None:
         _engineer_language_code(app.v_eng_language.get()) or "en")
     target = paths.voice_pack_dir() / "phrase_inventory.csv"
     try:
-        spoken = [catalogue.translate(line) for line in lines.FIXED_LINES
-                  if "{" not in line]
+        spoken = lines.vocabulary(catalogue)
         packs.inventory([(packs.slug(line), line) for line in spoken], target)
     except OSError as exc:
         messagebox.showerror(t("PitRadio"), f"Could not write the phrase list:\n{exc}")

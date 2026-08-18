@@ -168,14 +168,36 @@ def find(root: Path, name: str) -> VoicePack | None:
 # -- telling a generator what to record ----------------------------------
 
 
-def inventory(phrases: list[tuple[str, str]], path: Path) -> Path:
+#: Where a generated clip is filed inside the pack.
+#:
+#: One folder of our own under `voice/`, rather than scattering phrases across
+#: Crew Chief's category names. Its own reader keys on the **leaf** folder, so
+#: the middle of the path is filing and nothing depends on it — but a pack that
+#: puts our phrases in Crew Chief's `spotter` folder would look like a Crew
+#: Chief pack while containing phrases Crew Chief has never heard of.
+INVENTORY_PATH = "\\voice\\pitradio"
+
+#: How many takes of each phrase to ask for.
+#:
+#: More than one because a spotter that says "car left" identically forty times
+#: an hour stops sounding like a person. `VoicePack.take` picks between them at
+#: random, which is what the several-takes layout is for.
+TAKES = 3
+
+
+def inventory(phrases: list[tuple[str, str]], path: Path, *,
+              takes: int = TAKES) -> Path:
     """Write the phrase list a voice-pack generator needs.
 
-    Columns are the ones `crew-chief-autovoicepack` reads from its own
-    `phrase_inventory.csv`: where the clip goes, what to say, and what to show.
+    The columns are the four `crew-chief-autovoicepack` actually reads —
+    `audio_path`, `audio_filename`, `subtitle`, `text_for_tts` — in that order.
+    Its README documents a two-column form with the path and filename combined,
+    which its own `phrase_inventory.csv` does not use; the file wins over the
+    prose, because the file is what the script parses.
+
     Generating this from the app rather than maintaining it by hand is the
-    whole reason phrase ids are derived from the text — the list can never
-    drift from what the engineer actually says.
+    whole reason phrase ids are derived from the text: the list can never drift
+    from what the engineer actually says.
 
     `phrases` is (phrase id, the words). Duplicates are dropped, since the same
     fragment turns up in several sentences and nobody wants it recorded twice.
@@ -187,7 +209,10 @@ def inventory(phrases: list[tuple[str, str]], path: Path) -> Path:
 
     with open(path, "w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["audio_filename", "text_for_tts", "subtitle"])
+        writer.writerow(["audio_path", "audio_filename", "subtitle",
+                         "text_for_tts"])
         for phrase, text in sorted(seen.items()):
-            writer.writerow([f"{phrase}/{phrase}.wav", text, text])
+            for take in range(1, max(1, takes) + 1):
+                writer.writerow([rf"{INVENTORY_PATH}\{phrase}", f"{take}.wav",
+                                 text, text])
     return path
