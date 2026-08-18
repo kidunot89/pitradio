@@ -143,8 +143,18 @@ def car(driver, *, distance=0.0, speed=50.0, laps=0, last_lap=0.0,
         last_sector1=last1, last_sector2=last2, vehicle_class=vehicle_class)
 
 
-def publish(engineer, *cars, elapsed=0.0):
+#: The sim clock, which advances by itself between frames unless a test says
+#: otherwise. It has to move: the spotter's overlap and clear delays are
+#: measured against it, and a frozen clock means an overlap that has lasted no
+#: time at all and is therefore never called.
+_CLOCK = {"now": 0.0}
+
+
+def publish(engineer, *cars, elapsed=None):
     """Hand the engineer one frame of the sim and let it tick."""
+    if elapsed is None:
+        _CLOCK["now"] += 0.2
+        elapsed = _CLOCK["now"]
     engineer.plugins.session = SessionInfo(
         track="Sebring", track_length=TRACK, elapsed=elapsed, cars=tuple(cars))
     engineer._tick()
@@ -494,14 +504,19 @@ def alongside(engineer, *, left=False, right=False, distance=10.0, gap=1.0):
 
     `gap` is how far up the road the other cars are, which is what the
     alongside range is measured against.
+
+    **Two frames, not one.** Crew Chief's overlap delay means a car has to
+    still be there on the next look before it is called, and a helper that
+    published a single frame would be testing a spotter with that turned off.
     """
     others = []
     if left:
         others.append(car("Left", position=(-3.0, 0.0, distance + gap)))
     if right:
         others.append(car("Right", position=(3.0, 0.0, distance + gap)))
-    publish(engineer, car("Me", player=True, position=(0.0, 0.0, distance)),
-            *others)
+    for _ in range(2):
+        publish(engineer, car("Me", player=True, position=(0.0, 0.0, distance)),
+                *others)
 
 
 def test_the_spotter_keeps_saying_it_while_the_car_is_still_there(engineer, clock):
@@ -552,8 +567,9 @@ def test_the_two_sides_are_tracked_apart(engineer, clock):
     clock.advance(0.2)
     alongside(engineer, left=True, right=True, distance=20.0)
     said = engineer.speaker.spoken()
-    assert "right" in said
-    # The left call is inside its interval, so it is not repeated here.
+    # Somebody either side is a situation, not two calls: Crew Chief says
+    # where *you* are, which is the thing that can be acted on.
+    assert spotter.IN_THE_MIDDLE in said
     assert said.count("car left") == 0
 
 
@@ -630,12 +646,14 @@ def test_a_held_car_keeps_the_side_called_without_being_counted():
     assert spotter.counts(neighbours) == {"left": 0}
 
 
-def test_two_genuinely_side_by_side_cars_are_two():
+def test_two_cars_on_one_side_says_which_side_you_are_on():
+    """"Two cars left" is the same fact stated the harder way round: a driver
+    hearing it has to work out where that leaves them, while they are busy."""
     facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
     neighbours = spotter.alongside(
         (0.0, 0.0, 10.0), facing,
         {"Near": (-2.0, 0.0, 10.5), "Wide": (-5.0, 0.0, 9.5)})
-    assert spotter.call(neighbours) == "two cars left"
+    assert spotter.call(neighbours) == spotter.THREE_WIDE_RIGHT
 
 
 # -- the heading the axes depend on ---------------------------------------
@@ -809,10 +827,11 @@ def test_a_sim_that_does_its_own_spotting_needs_no_positions(engineer):
     disable(engineer, notifications.LAP_TIME)
 
     # Everybody at the origin: geometry could say nothing here.
-    engineer.plugins.session = SessionInfo(
-        track="Watkins", track_length=TRACK,
-        cars=(car("Me", player=True),), alongside={"left": 1})
-    engineer._tick()
+    for elapsed in (1.0, 1.2):            # the overlap delay wants a second look
+        engineer.plugins.session = SessionInfo(
+            track="Watkins", track_length=TRACK, elapsed=elapsed,
+            cars=(car("Me", player=True, speed=60.0),), alongside={"left": 1})
+        engineer._tick()
 
     assert "car left" in engineer.speaker.spoken()
 
@@ -824,12 +843,13 @@ def test_the_sim_s_own_count_reaches_the_call(engineer):
     enable(engineer, notifications.SPOTTER, repeat=3.0)
     disable(engineer, notifications.LAP_TIME)
 
-    engineer.plugins.session = SessionInfo(
-        track="Watkins", track_length=TRACK,
-        cars=(car("Me", player=True),), alongside={"right": 2})
-    engineer._tick()
+    for elapsed in (1.0, 1.2):
+        engineer.plugins.session = SessionInfo(
+            track="Watkins", track_length=TRACK, elapsed=elapsed,
+            cars=(car("Me", player=True, speed=60.0),), alongside={"right": 2})
+        engineer._tick()
 
-    assert "two cars right" in engineer.speaker.spoken()
+    assert spotter.THREE_WIDE_LEFT in engineer.speaker.spoken()
 
 
 def test_the_sim_s_spotter_clears_a_side_like_any_other(engineer):
@@ -838,13 +858,16 @@ def test_the_sim_s_spotter_clears_a_side_like_any_other(engineer):
     disable(engineer, notifications.LAP_TIME)
 
     empty = SessionInfo(track="Watkins", track_length=TRACK,
-                        cars=(car("Me", player=True),))
-    engineer.plugins.session = replace(empty, alongside={"left": 1})
-    engineer._tick()
+                        cars=(car("Me", player=True, speed=60.0),))
+    for elapsed in (1.0, 1.2):
+        engineer.plugins.session = replace(empty, elapsed=elapsed,
+                                           alongside={"left": 1})
+        engineer._tick()
     engineer.speaker.said.clear()
 
-    engineer.plugins.session = replace(empty, alongside={})
-    engineer._tick()
+    for elapsed in (2.0, 2.3):            # and the clear delay wants one too
+        engineer.plugins.session = replace(empty, elapsed=elapsed, alongside={})
+        engineer._tick()
     assert "clear left" in engineer.speaker.spoken()
 
 
@@ -897,9 +920,9 @@ def test_a_car_is_not_called_until_it_is_properly_alongside(engineer):
     disable(engineer, notifications.LAP_TIME)
 
     alongside(engineer, distance=0.0)
-    # Inside the hold range (5.17m) but outside the enter range (4.05m), so
+    # Inside the hold range (5.0m) but outside the enter range (4.5m), so
     # nothing is said until they come properly alongside.
-    alongside(engineer, left=True, distance=10.0, gap=4.5)
+    alongside(engineer, left=True, distance=10.0, gap=4.8)
     assert engineer.speaker.said == []
 
     alongside(engineer, left=True, distance=20.0, gap=2.0)   # properly alongside
@@ -916,7 +939,7 @@ def test_a_call_is_held_out_to_the_wider_range(engineer):
     engineer.speaker.said.clear()
 
     # Drifted back past the enter range but still inside the leave range.
-    alongside(engineer, left=True, distance=20.0, gap=4.5)
+    alongside(engineer, left=True, distance=20.0, gap=4.8)
     assert "clear" not in engineer.speaker.spoken()
 
 
@@ -984,22 +1007,29 @@ def test_a_new_track_clears_everything(engineer):
 def test_a_repeat_says_still_there_rather_than_the_call_again():
     """"Car left" twice makes the driver re-check a side they already know
     about. Crew Chief's own vocabulary, and for that reason."""
-    key, first = spotter.standing("left", 1, first=True)
-    again_key, again = spotter.standing("left", 1, first=False)
+    one_left = {spotter.LEFT: 1}
+    key, again = spotter.standing(one_left)
 
-    assert first == "car left"
+    assert spotter.arrival(one_left) == spotter.CAR_LEFT
     assert again == spotter.STILL_THERE
     # **The same key**, or the repeat would be a new call and go out on the
     # very next tick instead of on the repeat interval.
-    assert key == again_key
+    assert key == spotter.arrival_key(one_left)
+
+
+def test_cars_on_both_sides_repeat_hold_your_line():
+    """A different instruction from "still there" on one side: that one means
+    do not move *that way*, and this one means do not move."""
+    _key, text = spotter.standing({spotter.LEFT: 1, spotter.RIGHT: 1})
+    assert text == spotter.HOLD_YOUR_LINE
 
 
 def test_a_second_car_arriving_is_a_new_call_not_a_repeat():
-    one, _ = spotter.standing("left", 1, first=True)
-    two, text = spotter.standing("left", 2, first=True)
+    one = spotter.arrival_key({spotter.LEFT: 1})
+    two = spotter.arrival_key({spotter.LEFT: 2})
 
     assert one != two
-    assert text == "two cars left"
+    assert spotter.arrival({spotter.LEFT: 2}) == spotter.THREE_WIDE_RIGHT
 
 
 def test_both_sides_going_clear_at_once_is_one_call():
@@ -1146,3 +1176,75 @@ def test_the_same_sentence_addressed_is_a_question(engineer):
     followed. Only the unaddressed path has to be careful."""
     grid(engineer, ENDURANCE)
     assert engineer.handle("Chief, who has the fastest lap of my life") is True
+
+
+# -- Crew Chief's rules, ported ------------------------------------------
+
+
+def test_a_car_flying_past_is_not_a_car_alongside():
+    """Crew Chief's `max_closing_speed_for_spotter`, and the rule that catches
+    the lapping car: something arriving 12 m/s quicker crosses the whole
+    overlap window in under a second, so the call describes a car that has
+    gone and the driver holds a line for nothing."""
+    facing = spotter.heading((0.0, 0.0, 0.0), (0.0, 0.0, 10.0))
+    beside = {"Passing": (-3.0, 0.0, 10.5)}
+
+    assert spotter.alongside((0.0, 0.0, 10.0), facing, beside,
+                             speeds={"Passing": 80.0}, my_speed=50.0) == []
+    # Racing alongside at a similar pace is exactly what this is for.
+    assert spotter.alongside((0.0, 0.0, 10.0), facing, beside,
+                             speeds={"Passing": 52.0}, my_speed=50.0)
+
+
+def test_the_spotter_says_nothing_below_walking_pace(engineer):
+    """Crew Chief's `min_speed_for_spotter`. Below it you are in the pit lane,
+    on the grid, or crawling out of a spin, and every car around you is
+    stationary or passing at walking pace."""
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    for _ in range(3):
+        publish(engineer,
+                car("Me", player=True, speed=2.0, position=(0.0, 0.0, 10.0)),
+                car("Left", speed=2.0, position=(-3.0, 0.0, 10.5)))
+    assert engineer.speaker.said == []
+
+
+def test_the_spotter_falls_silent_under_a_full_course_yellow(engineer):
+    """Crew Chief's `fcy_stop_spotter_immediately`, on by default. The whole
+    field is bunched at a crawl and permanently overlapping; every call would
+    be true and useless."""
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    for elapsed in (1.0, 1.2, 1.4):
+        engineer.plugins.session = SessionInfo(
+            track="Sebring", track_length=TRACK, elapsed=elapsed,
+            full_course_yellow=True,
+            cars=(car("Me", player=True, speed=30.0, position=(0.0, 0.0, 10.0)),
+                  car("Left", speed=30.0, position=(-3.0, 0.0, 10.5))))
+        engineer._tick()
+    assert engineer.speaker.said == []
+
+
+def test_an_overlap_has_to_last_before_it_is_called(engineer):
+    """Crew Chief's `spotter_overlap_delay`. Two cars at the same corner cross
+    in and out of overlap as they breathe, and without it the spotter
+    chatters."""
+    enable(engineer, notifications.SPOTTER, repeat=3.0)
+    disable(engineer, notifications.LAP_TIME)
+
+    alongside(engineer, distance=0.0)
+    engineer.speaker.said.clear()
+    # One frame only, so the overlap has lasted no time at all.
+    publish(engineer, car("Me", player=True, position=(0.0, 0.0, 10.0)),
+            car("Left", position=(-3.0, 0.0, 11.0)), elapsed=99.0)
+    assert engineer.speaker.said == []
+
+
+def test_the_gap_for_clear_is_metres_not_another_car_length():
+    """Half a metre of daylight is half a metre whatever you are driving. A
+    second car length would give a kart two metres of hysteresis and hang the
+    call on long after they had gone."""
+    kart = spotter.ranges(2.0, 1.5)
+    assert kart["metres"] - kart["overlap"] == spotter.GAP_FOR_CLEAR

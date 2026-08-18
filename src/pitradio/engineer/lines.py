@@ -223,8 +223,9 @@ class Script:
         """
         return [
             self.t("car left"), self.t("car right"),
-            self.t("two cars left"), self.t("two cars right"),
-            self.t("three wide"), self.t("four wide"),
+            self.t("three wide you're on the left"),
+            self.t("three wide you're on the right"),
+            self.t("in the middle"), self.t("hold your line"),
             self.t("clear left"), self.t("clear right"), self.t("clear"),
             self.t("clear all round"), self.t("still there"),
             self.t("car stopped ahead"),
@@ -275,10 +276,12 @@ class Script:
         spoken = {
             "car left": self.t("car left"),
             "car right": self.t("car right"),
-            "two cars left": self.t("two cars left"),
-            "two cars right": self.t("two cars right"),
-            "three wide": self.t("three wide"),
-            "four wide": self.t("four wide"),
+            "three wide you're on the left":
+                self.t("three wide you're on the left"),
+            "three wide you're on the right":
+                self.t("three wide you're on the right"),
+            "in the middle": self.t("in the middle"),
+            "hold your line": self.t("hold your line"),
             "clear left": self.t("clear left"),
             "clear right": self.t("clear right"),
             "clear": self.t("clear"),
@@ -400,8 +403,10 @@ FIXED_LINES = (
     "turn {number}", "was faster on the exit", "had a better entry",
     "you were faster on the exit", "you had a better entry",
     "faster exit", "better entry", "yours",
-    "radio check", "car left", "car right", "two cars left", "two cars right",
-    "three wide", "four wide", "clear", "clear left", "clear right",
+    "radio check", "car left", "car right",
+    "three wide you're on the left", "three wide you're on the right",
+    "in the middle", "hold your line",
+    "clear", "clear left", "clear right",
     "clear all round", "still there", "car stopped ahead",
     "full course yellow", "green flag", "blue flag", "car stopped in",
     "clear to go", "hold",

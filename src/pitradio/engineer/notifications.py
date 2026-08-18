@@ -230,11 +230,23 @@ class SpotterNotification(Notification):
         self._heading = spotter.Heading()
         self._sides: frozenset[str] = frozenset()
         self._stopped = spotter.Stopped()
+        #: When each side first appeared, and when it last went empty. Crew
+        #: Chief's `spotter_overlap_delay` and `spotter_clear_delay`: two cars
+        #: at the same corner cross in and out of overlap as they breathe, and
+        #: without a settling time the spotter chatters.
+        self._since: dict[str, float] = {}
+        self._empty_since: dict[str, float] = {}
+        #: The situation that is actually being called, which lags the measured
+        #: one by those delays.
+        self._called: dict[str, int] = {}
 
     def reset(self) -> None:
         self._heading.reset()
         self._sides = frozenset()
         self._stopped.reset()
+        self._since.clear()
+        self._empty_since.clear()
+        self._called.clear()
 
     def check(self, context) -> list[Call]:
         own = context.own_car()
@@ -242,35 +254,57 @@ class SpotterNotification(Notification):
             self.reset()
             return []
 
-        tally = self._tally(context, own)
-        if tally is None:
+        if context.session.full_course_yellow:
+            # **Silent under caution.** Crew Chief's `fcy_stop_spotter_
+            # immediately`, on by default. Under a full-course yellow the whole
+            # field is bunched at a crawl, permanently overlapping, and every
+            # call would be true and useless. The flags behaviour has the only
+            # thing worth saying at that point.
+            self.reset()
             return []
 
+        if float(getattr(own, "speed", 0.0) or 0.0) < spotter.MIN_SPEED:
+            # In the pit lane, on the grid, or crawling out of a spin. The cars
+            # around you are stationary or passing at walking pace, and a
+            # spotter that calls those is one nobody leaves switched on.
+            self.reset()
+            return []
+
+        measured = self._tally(context, own)
+        if measured is None:
+            return []
+
+        tally = self._settled(measured, context.session.elapsed)
         now = frozenset(tally)
         changes = spotter.calls(tally, self._sides)
         self._sides = now
 
         # An arrival and the repeats that follow it are **one call under one
-        # key**, from `spotter.standing`. Two keys would mean the repeat was a
-        # new call the moment the wording changed, and a new call is due
+        # key**, from `spotter.arrival_key`. Two keys would mean the repeat was
+        # a new call the moment the wording changed, and a new call is due
         # immediately — so "car left" would be followed by "still there" a tick
         # later instead of three seconds later.
-        arrived = {side for side, _text, _urgent in changes if side in now}
         calls: list[Call] = []
+        arrived = False
         for side, text, urgent in changes:
-            key = (spotter.standing(side, tally.get(side, 1), first=True)[0]
-                   if side in arrived else f"{side}:{text}")
-            calls.append(Call(key, context.script.spotter_call(text), urgent))
-        # Sides that have not changed still get a standing call, which the
-        # repeat interval decides the fate of. Without this the spotter says
-        # "car left" once and then nothing for as long as they sit there — and
-        # with the arrival's own wording it would say "car left" over and over,
-        # which is what `spotter.standing` exists to stop.
-        for side in sorted(now):
-            if side in arrived:
+            if text.startswith("clear"):
+                calls.append(Call(f"{side}:{text}",
+                                  context.script.spotter_call(text), urgent))
                 continue
-            key, text = spotter.standing(side, tally.get(side, 1), first=False)
-            calls.append(Call(key, context.script.spotter_call(text), urgent=True))
+            arrived = True
+            calls.append(Call(spotter.arrival_key(tally),
+                              context.script.spotter_call(text), urgent))
+
+        # A situation that has not changed still gets a standing call, which
+        # the repeat interval decides the fate of. Without this the spotter
+        # says "car left" once and then nothing for as long as they sit there —
+        # and with the arrival's own wording it would say "car left" over and
+        # over, which is what `spotter.standing` exists to stop.
+        held = spotter.standing(tally)
+        if held is not None and not arrived:
+            key, text = held
+            calls.append(Call(key, context.script.spotter_call(text),
+                              urgent=True))
 
         # What is up the road, which the sides say nothing about. A car that
         # has been *stationary* for a second is the hazard a spotter exists
@@ -286,6 +320,39 @@ class SpotterNotification(Notification):
             calls.append(Call(f"ahead:{text}",
                               context.script.spotter_call(text), urgent=True))
         return calls
+
+    def _settled(self, measured: dict[str, int], now: float) -> dict[str, int]:
+        """What to actually call, once the delays have had their say.
+
+        Crew Chief has two and they are deliberately different lengths. The
+        overlap delay is short because a warning that is late is worthless; the
+        clear delay is longer because it can afford to be sure — a driver who
+        holds their line a tenth longer than necessary has lost nothing, and
+        one who is told the track is clear a tenth too early has lost rather
+        more.
+        """
+        for side in (spotter.LEFT, spotter.RIGHT):
+            if side in measured:
+                # **Present with a count of zero is not absent.** That is a car
+                # held in view by the wider range: the side is still occupied,
+                # it is simply not a second car alongside. Reading it as empty
+                # is what made the all-clear fire while somebody was still
+                # there — see `spotter.counts`.
+                count = measured[side] or self._called.get(side, 1)
+                self._empty_since.pop(side, None)
+                since = self._since.setdefault(side, now)
+                if now - since >= spotter.OVERLAP_DELAY:
+                    self._called[side] = count
+                continue
+
+            self._since.pop(side, None)
+            if side not in self._called:
+                continue
+            empty = self._empty_since.setdefault(side, now)
+            if now - empty >= spotter.CLEAR_DELAY:
+                self._called.pop(side, None)
+                self._empty_since.pop(side, None)
+        return dict(self._called)
 
     def _tally(self, context, own) -> dict[str, int] | None:
         """side -> how many cars, from whichever route this sim supports.
@@ -312,6 +379,12 @@ class SpotterNotification(Notification):
                   if name != own.driver}
         return spotter.counts(spotter.alongside(
             own.position, facing, others,
+            # How fast everybody is going, so a car flying past on a lapping
+            # run is not called as one sitting alongside — see
+            # `spotter.MAX_CLOSING_SPEED`.
+            speeds={car.driver: car.speed for car in context.session.cars
+                    if car.driver},
+            my_speed=float(getattr(own, "speed", 0.0) or 0.0),
             # Per-sim, from the plugin's settings: a prototype and a GT car are
             # different lengths, and sims disagree about where a car's origin
             # sits, so a number that suits one game is wrong in the next.

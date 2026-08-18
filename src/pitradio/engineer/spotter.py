@@ -30,23 +30,22 @@ RIGHT = "right"
 
 #: The car, in metres. **Everything else is derived from these.**
 #:
-#: Taken from how Crew Chief models it, which is the right way round: two cars
-#: are alongside when their *bodywork* overlaps, and that is a fact about car
-#: length, not an arbitrary radius. Its defaults are 4.5m by 1.8m, with
-#: per-car overrides — a kart is 2.0 by 1.5, an LMP 4.34 by 1.75, a truck 6.5
-#: by 2.5 — which is why these are plugin settings rather than constants.
+#: Crew Chief's model, and its numbers: `spotter_car_length` ships at 4.5 for
+#: Le Mans Ultimate, 5 for Project CARS 2 and ACC, 4.4 for Automobilista 2 —
+#: which is why these are plugin settings rather than constants. Two cars are
+#: alongside when their *bodywork* overlaps, and that is a fact about how long
+#: they are, not an arbitrary radius.
 DEFAULT_CAR_LENGTH = 4.5
 DEFAULT_CAR_WIDTH = 1.8
 
-#: Bodywork overlaps when the centres are within a car length. Slightly inside
-#: that, so the call means "properly beside you" rather than "just caught the
-#: back of them".
-ENTER_LENGTHS = 0.9
-
-#: And the call is dropped just past a full length, when they are genuinely
-#: clear. This was two car lengths, which is why the all-clear kept arriving
-#: long after the car had gone.
-LEAVE_LENGTHS = 1.15
+#: How much daylight there has to be before a side is clear, in metres past
+#: the bodywork. Crew Chief's `spotter_gap_for_clear`, and its default.
+#:
+#: A gap rather than a second multiple of the car length. The distinction
+#: matters at the extremes: for a kart, "a further car length" is two metres of
+#: hysteresis and the call hangs on far too long; half a metre of daylight is
+#: half a metre of daylight whatever you are driving.
+GAP_FOR_CLEAR = 0.5
 
 #: Two cars side by side have their centres about a car width apart. Nearer
 #: than this and they are on the same line — one following the other.
@@ -54,6 +53,24 @@ MIN_LATERAL_WIDTHS = 0.9
 
 #: And beyond a few widths they are on another part of the circuit.
 MAX_LATERAL_WIDTHS = 4.0
+
+#: Below this, in metres per second, the spotter says nothing at all. Crew
+#: Chief's `min_speed_for_spotter`, and its default of 10.
+#:
+#: Which is 36km/h, and higher than it first looks — deliberately. Below it you
+#: are in the pit lane, on the grid, or crawling out of a spin, and in all
+#: three the cars around you are stationary or passing at walking pace. A
+#: spotter that calls those is a spotter nobody leaves switched on.
+MIN_SPEED = 10.0
+
+#: And a car closing faster than this is not alongside, it is going past.
+#: Crew Chief's `max_closing_speed_for_spotter`, default 12.
+#:
+#: **This is the one that catches the lapping car.** Something arriving 12 m/s
+#: quicker crosses the whole overlap window in under a second: by the time the
+#: call is spoken they are gone, and the driver holds a line for a car that is
+#: no longer there. It is also every car you go past in the pit exit.
+MAX_CLOSING_SPEED = 12.0
 
 #: Below this the heading taken from two positions is noise rather than a
 #: direction.
@@ -65,22 +82,36 @@ MAX_LATERAL_WIDTHS = 4.0
 #: Everything downstream depends on these axes being right.
 MIN_HEADING_METRES = 3.0
 
-DEFAULT_ALONGSIDE_METRES = DEFAULT_CAR_LENGTH * LEAVE_LENGTHS
-DEFAULT_OVERLAP_METRES = DEFAULT_CAR_LENGTH * ENTER_LENGTHS
+#: How long an overlap has to last before it is called, and how long a side has
+#: to be clear before the all-clear is. Crew Chief's `spotter_overlap_delay`
+#: and `spotter_clear_delay`, in seconds rather than its milliseconds.
+#:
+#: **Both are needed and they are deliberately different.** Two cars at the
+#: same corner cross in and out of overlap as they breathe, and without the
+#: delays the spotter chatters. The overlap delay is the shorter of the two
+#: because a warning that is late is worthless, while the all-clear can afford
+#: to be sure — a driver who holds their line a tenth longer than necessary has
+#: lost nothing.
+OVERLAP_DELAY = 0.05
+CLEAR_DELAY = 0.15
+
+DEFAULT_OVERLAP_METRES = DEFAULT_CAR_LENGTH
+DEFAULT_ALONGSIDE_METRES = DEFAULT_CAR_LENGTH + GAP_FOR_CLEAR
 DEFAULT_WIDTH_METRES = DEFAULT_CAR_WIDTH * MAX_LATERAL_WIDTHS
 MIN_LATERAL_METRES = DEFAULT_CAR_WIDTH * MIN_LATERAL_WIDTHS
 
 
 def ranges(car_length: float = DEFAULT_CAR_LENGTH,
-           car_width: float = DEFAULT_CAR_WIDTH) -> dict[str, float]:
+           car_width: float = DEFAULT_CAR_WIDTH,
+           gap: float = GAP_FOR_CLEAR) -> dict[str, float]:
     """Every spotter distance, from the size of the cars.
 
     One place, so the four of them cannot drift apart — and so a sim whose
     cars are karts or trucks gets all four right by changing two numbers.
     """
     return {
-        "overlap": car_length * ENTER_LENGTHS,
-        "metres": car_length * LEAVE_LENGTHS,
+        "overlap": car_length,
+        "metres": car_length + gap,
         "min_lateral": car_width * MIN_LATERAL_WIDTHS,
         "width": car_width * MAX_LATERAL_WIDTHS,
     }
@@ -105,7 +136,7 @@ class Alongside:
     #: Whether the bodywork actually overlaps, rather than this being a car
     #: kept in view by the wider holding range. **Only overlapping cars are
     #: counted**: a car tucked in behind the one beside you is one car on that
-    #: side, not two, and calling "two cars left" for it is worse than saying
+    #: side, not two, and calling it three wide is worse than saying
     #: nothing because the driver looks for something that is not there.
     overlapping: bool = True
 
@@ -210,6 +241,9 @@ def alongside(
     overlap: float = DEFAULT_OVERLAP_METRES,
     min_lateral: float = MIN_LATERAL_METRES,
     holding: frozenset[str] | None = None,
+    speeds: dict[str, float] | None = None,
+    my_speed: float = 0.0,
+    max_closing: float = MAX_CLOSING_SPEED,
 ) -> list[Alongside]:
     """Every car beside this one, nearest first.
 
@@ -227,6 +261,14 @@ def alongside(
     call, marked `overlapping=False`. They keep the call alive so it does not
     flicker as two cars breathe — but they are **not counted**, because a car
     tucked in behind the one beside you is one car on that side, not two.
+
+    **A car closing faster than `max_closing` is not alongside, it is going
+    past.** Crew Chief's `max_closing_speed_for_spotter`, and the rule that
+    catches the lapping car: something arriving 12 m/s quicker crosses the
+    whole overlap window in well under a second, so by the time the call has
+    been spoken they have gone — and the driver holds a line for a car that is
+    no longer there. `speeds` is optional; without it every car is treated as
+    running alongside, which is what a caller with no speed data means.
     """
     if facing is None:
         return []
@@ -243,6 +285,11 @@ def alongside(
         if sideways < min_lateral or sideways > width:
             continue
 
+        if speeds is not None:
+            closing = abs(float(speeds.get(driver, my_speed)) - my_speed)
+            if closing > max_closing:
+                continue
+
         side = RIGHT if (across > 0) != swap else LEFT
         overlapping = abs(along) <= overlap
         if not overlapping and not (side in held and abs(along) <= metres):
@@ -254,6 +301,32 @@ def alongside(
     return found
 
 
+#: Crew Chief's spotter vocabulary, taken from the sound folders in a local
+#: installation rather than guessed at. Every one of these is a clip a voice
+#: pack built for Crew Chief already contains, so a pack dropped in here speaks
+#: them without a mapping.
+#:
+#: What is deliberately absent is the oval set — `car_inside`, `clear_outside`,
+#: `three_wide_on_inside`. Which side is inside is a fact about the banking,
+#: which none of the sims here publish and which Crew Chief keeps per-track. A
+#: guess at it is a call that is confidently the wrong way round.
+CAR_LEFT, CAR_RIGHT = "car left", "car right"
+#: **Which side *you* are on**, not how many cars are beside you.
+#:
+#: This was "two cars left", which is the same fact stated the harder way
+#: round: a driver hearing it has to work out where that leaves them, while
+#: they are busy. Crew Chief says "three wide, you're on the right" when both
+#: other cars are to your left, and that is directly actionable — it says which
+#: way there is no room.
+THREE_WIDE_LEFT = "three wide you're on the left"
+THREE_WIDE_RIGHT = "three wide you're on the right"
+#: One car each side, so you are the filling.
+IN_THE_MIDDLE = "in the middle"
+#: The standing call while somebody is overlapping on **both** sides, which is
+#: a different instruction from "still there" on one: do not move at all.
+HOLD_YOUR_LINE = "hold your line"
+
+
 def call(neighbours: list[Alongside]) -> str | None:
     """What the spotter says about them, or nothing.
 
@@ -261,25 +334,76 @@ def call(neighbours: list[Alongside]) -> str | None:
     thing worth hearing is which way not to turn, and a name is a syllable
     count nobody has time for.
     """
-    if not neighbours:
-        return None
     beside = [car for car in neighbours if car.overlapping] or neighbours
-    neighbours = beside
-    sides = {car.side for car in neighbours}
-    if len(sides) > 1:
-        # Cars on both sides is the one call that is about *you* rather than
-        # about them: it means there is nowhere to go, which is a different
-        # instruction from "somebody is on your left".
-        return "three wide" if len(neighbours) <= 2 else "four wide"
-    side = neighbours[0].side
-    if len(neighbours) > 1:
-        return f"two cars {side}"
-    return f"car {side}"
+    return arrival(counts(beside) if beside else {})
+
+
+def arrival(tally: dict[str, int]) -> str | None:
+    """The call for a situation, from how many cars are on each side.
+
+    One function, because every one of these is a statement about the *same*
+    thing — where you are and where the room is — and splitting it across the
+    caller is how "two cars left" and "three wide" ended up disagreeing about
+    what to say when there were two on one side and one on the other.
+    """
+    left, right = tally.get(LEFT, 0), tally.get(RIGHT, 0)
+    if not left and not right:
+        return None
+    if left and right:
+        # Somebody either side. Which is the one call that is about *you*
+        # rather than about them: there is nowhere to go.
+        return IN_THE_MIDDLE
+    if left > 1:
+        return THREE_WIDE_RIGHT
+    if right > 1:
+        return THREE_WIDE_LEFT
+    return CAR_LEFT if left else CAR_RIGHT
 
 
 def occupied(neighbours: list[Alongside]) -> frozenset[str]:
     """Which sides currently have somebody on them."""
     return frozenset(car.side for car in neighbours)
+
+
+def calls(
+    now: dict[str, int] | frozenset[str], before: frozenset[str]
+) -> list[tuple[str, str, bool]]:
+    """(side, what to say, whether it is urgent), for what changed.
+
+    **Both directions.** A spotter that only says "car left" leaves the driver
+    holding a line they no longer need to hold, waiting for a call that never
+    comes — which is worse than not being told in the first place, because they
+    are now deliberately not using a piece of track. So a side going clear is a
+    call in its own right.
+
+    Both are urgent. The all-clear was ranked below the warning on the
+    reasoning that only a warning can arrive too late to matter, and that is
+    wrong from the seat: a driver holding a line for a car that left two
+    corners ago is giving up track they could be using, and they hold it until
+    they are told otherwise.
+
+    A side that has not changed produces nothing here. Repeating a warning
+    while a car is still there is a *timer*, not a state change, and belongs to
+    the notification that owns the repeat interval.
+    """
+    tally = now if isinstance(now, dict) else {side: 1 for side in now}
+    if (LEFT in before and RIGHT in before
+            and LEFT not in tally and RIGHT not in tally):
+        # Both at once. Two all-clears back to back is the one place the
+        # spotter is talking over itself at exactly the wrong moment.
+        return [(LEFT, CLEAR_ALL_ROUND, True)]
+
+    arrived = [side for side in (LEFT, RIGHT)
+               if side in tally and side not in before]
+    changed: list[tuple[str, str, bool]] = []
+    if arrived:
+        # One call for the arrival, whichever side or sides it was: the
+        # situation is what is being described, not each car in turn.
+        changed.append((arrived[0], arrival(tally) or "", True))
+    for side in (LEFT, RIGHT):
+        if side in before and side not in tally:
+            changed.append((side, f"clear {side}", True))
+    return [entry for entry in changed if entry[1]]
 
 
 #: What the spotter says about a car that is *still* there, rather than saying
@@ -298,51 +422,32 @@ STILL_THERE = "still there"
 CLEAR_ALL_ROUND = "clear all round"
 
 
-def calls(
-    now: dict[str, int] | frozenset[str], before: frozenset[str]
-) -> list[tuple[str, str, bool]]:
-    """(side, what to say, whether it is urgent), for what changed.
+def standing(tally: dict[str, int]) -> tuple[str, str] | None:
+    """(key, what to say) while the situation has not changed.
 
-    `now` is side -> how many cars, so an arrival says how many rather than
-    always "car left": two cars stacked down one side is a different problem
-    from one, and the moment they arrive is when that matters most. A bare set
-    is accepted as "one car each", which is what a caller that cannot count
-    means.
+    The key is the **shape of the situation**, not the words, and that is the
+    whole design. It has to stay the same for as long as the situation does, or
+    the repeat interval never governs anything: a key that changed when the
+    wording did would make the follow-up a brand new call and it would go out
+    on the very next tick, a heartbeat after the arrival.
 
-    **Both directions.** A spotter that only says "car left" leaves the driver
-    holding a line they no longer need to hold, waiting for a call that never
-    comes — which is worse than not being told in the first place, because they
-    are now deliberately not using a piece of track. So a side going clear is a
-    call in its own right.
+    Keying on the counts instead means one car becoming two *is* a new call,
+    and goes out immediately — which is right, because it is news.
 
-    The clear is not urgent and the warning is: one of them means do not move,
-    and the other means you may. Only the first can arrive too late to matter.
-
-    A side that has not changed produces nothing here. Repeating a warning
-    while a car is still there is a *timer*, not a state change, and belongs to
-    the notification that owns the repeat interval.
+    Cars on both sides get `HOLD_YOUR_LINE` rather than `STILL_THERE`, because
+    they are different instructions: one means do not move that way, and the
+    other means do not move.
     """
-    tally = now if isinstance(now, dict) else {side: 1 for side in now}
-    if (LEFT in before and RIGHT in before
-            and LEFT not in tally and RIGHT not in tally):
-        # Both at once. Two all-clears back to back is the one place the
-        # spotter is talking over itself at exactly the wrong moment.
-        return [(LEFT, CLEAR_ALL_ROUND, True)]
+    left, right = tally.get(LEFT, 0), tally.get(RIGHT, 0)
+    if not left and not right:
+        return None
+    key = f"{left}:{right}"
+    return key, (HOLD_YOUR_LINE if left and right else STILL_THERE)
 
-    changed: list[tuple[str, str, bool]] = []
-    for side in (LEFT, RIGHT):
-        was, is_now = side in before, side in tally
-        if is_now and not was:
-            changed.append((side, warning(side, tally.get(side, 1)), True))
-        elif was and not is_now:
-            # **Urgent too.** This was ranked below the warning on the reasoning
-            # that only a warning can arrive too late to matter. That is wrong
-            # from the seat: a driver holding a line for a car that left two
-            # corners ago is giving up track they could be using, and they hold
-            # it until they are told otherwise. The all-clear is what ends that,
-            # so it cannot queue behind a lap time either.
-            changed.append((side, f"clear {side}", True))
-    return changed
+
+def arrival_key(tally: dict[str, int]) -> str:
+    """The key an arrival shares with the repeats that follow it."""
+    return f"{tally.get(LEFT, 0)}:{tally.get(RIGHT, 0)}"
 
 
 #: How far up the road a hazard is worth warning about. Beyond this there is
@@ -481,29 +586,3 @@ def counts(neighbours: list[Alongside]) -> dict[str, int]:
             continue
         tally[car.side] = tally.get(car.side, 0) + 1
     return tally
-
-
-def warning(side: str, count: int) -> str:
-    """The call for a side somebody has just arrived on.
-
-    Counts them, because two cars stacked down one side is a different problem
-    from one — but only cars actually beside you count, so a queue forming
-    behind the one on your door stays "car left".
-    """
-    return f"two cars {side}" if count > 1 else f"car {side}"
-
-
-def standing(side: str, count: int, *, first: bool) -> tuple[str, str]:
-    """(key, what to say) for a side that has somebody on it.
-
-    The key is the **count**, not the words, and that is the whole design. It
-    has to stay the same for as long as the situation does, or the repeat
-    interval never governs anything: a key that changed when the wording did
-    would make the follow-up a brand new call and it would go out on the very
-    next tick, a heartbeat after the arrival.
-
-    Keying on the count instead means one car becoming two *is* a new call, and
-    goes out immediately — which is right, because it is news — while a car
-    simply sitting there repeats on the timer and says `STILL_THERE`.
-    """
-    return f"{side}:{count}", warning(side, count) if first else STILL_THERE

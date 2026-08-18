@@ -485,3 +485,71 @@ The questions are listed read-only on the Engineer tab. The phrases a routine
 answers to are worth putting in your own words; the questions this can answer
 are fixed by what the sim publishes, and an editable box there would imply you
 could invent one.
+
+## The spotter, and where its numbers come from
+
+Every threshold in `spotter.py` is Crew Chief's, read out of a local
+installation rather than guessed at — its `ui_text/en.txt` names each setting
+and `CrewChiefV4.exe.config` ships the defaults:
+
+| Ours | Crew Chief's | Default |
+| --- | --- | --- |
+| `DEFAULT_CAR_LENGTH` | `lmu_spotter_car_length` | 4.5 (5 for pcars2/ACC, 4.4 for AMS2) |
+| `GAP_FOR_CLEAR` | `spotter_gap_for_clear` | 0.5 m |
+| `OVERLAP_DELAY` | `spotter_overlap_delay` | 50 ms |
+| `CLEAR_DELAY` | `spotter_clear_delay` | 150 ms |
+| `MIN_SPEED` | `min_speed_for_spotter` | 10 m/s |
+| `MAX_CLOSING_SPEED` | `max_closing_speed_for_spotter` | 12 m/s |
+| the repeat interval | `spotter_hold_repeat_frequency` | 3 s |
+
+Three of those were missing here entirely and each was causing a fault the
+driver could feel:
+
+**The closing-speed limit is what catches the lapping car.** Something arriving
+12 m/s quicker crosses the whole overlap window in well under a second, so by
+the time the call has been spoken they have gone — and the driver holds a line
+for a car that is no longer there.
+
+**The minimum speed is what stops the pit lane and the grid.** Below 10 m/s the
+cars around you are stationary or passing at walking pace, and calling those is
+how a spotter ends up switched off.
+
+**The two settling delays are what stop the chatter.** Two cars at the same
+corner cross in and out of overlap as they breathe. They are deliberately
+different lengths: the overlap delay is short because a warning that is late is
+worthless, and the clear delay is longer because it can afford to be sure — a
+driver who holds their line a tenth longer than necessary has lost nothing.
+
+The clear range is `car length + gap`, not a second multiple of the length. The
+distinction matters at the extremes: for a kart, "a further car length" is two
+metres of hysteresis and the call hangs on far too long, while half a metre of
+daylight is half a metre whatever you are driving.
+
+**The spotter is silent under a full-course yellow** — Crew Chief's
+`fcy_stop_spotter_immediately`, on by default. The field is bunched at a crawl
+and permanently overlapping, so every call would be true and useless.
+
+### What it says
+
+The vocabulary is Crew Chief's `Sounds/voice/spotter/` folder, so a voice pack
+built for Crew Chief speaks all of it without a mapping: `car_left`,
+`car_right`, `still_there`, `hold_your_line`, `in_the_middle`, `clear_left`,
+`clear_right`, `clear_all_round`, `three_wide_on_left`, `three_wide_on_right`.
+
+Two of those replaced calls that stated the same fact the harder way round:
+
+* **"Three wide, you're on the right"** was "two cars left". A driver hearing
+  the old one has to work out where that leaves them, while they are busy; the
+  new one says directly which way there is no room.
+* **"In the middle"** was "three wide", for one car either side.
+
+A repeat says `still there` on one side and `hold your line` on both, because
+those are different instructions — one means do not move that way, the other
+means do not move. The arrival and its repeats share a key derived from the
+*counts*, so the repeat interval governs them; a key that changed with the
+wording would make the follow-up a new call, due on the very next tick.
+
+**The oval set is deliberately absent** — `car_inside`, `clear_outside`,
+`three_wide_on_inside`. Which side is inside is a fact about the banking, which
+none of the sims here publish and which Crew Chief keeps per-track. A guess at
+it is a call that is confidently the wrong way round.
