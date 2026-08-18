@@ -235,7 +235,18 @@ class Worker(threading.Thread):
         cfg = self.store.config
         profile: Profile = active["profile"]
 
+        # The cue first, so releasing the button is acknowledged when it
+        # happens rather than a second later. What follows is deliberately
+        # inaudible: as far as the driver is concerned the message ended when
+        # they let go.
         speech.play_cue(cfg.cues, cfg.cues.stop_hz)
+
+        # **Keep recording past the release.** People stop pressing before they
+        # stop speaking, so the last word lands after the thumb comes off and
+        # the clip ends mid-syllable — which Whisper transcribes as whatever
+        # the truncated sound resembles, making the message wrong rather than
+        # merely short. The mirror of starting the recording before `pre_keys`.
+        _sleep_ms(cfg.audio.release_tail_ms)
         audio = self.recorder.stop()
         clip_seconds = self.recorder.duration(audio)
 

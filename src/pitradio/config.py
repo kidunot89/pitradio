@@ -123,6 +123,18 @@ class AudioConfig:
     channels: int = 1
     min_clip_seconds: float = 0.3     # below this, don't even transcribe
     max_clip_seconds: float = 30.0
+    # Keep recording for this long after the trigger is released.
+    #
+    # **People stop pressing before they stop speaking.** The last word goes
+    # out as the thumb comes off, and the clip ends mid-syllable — which
+    # Whisper then transcribes as whatever the truncated sound resembles, so
+    # the message is not merely short but wrong. This is the mirror of
+    # recording *before* `pre_keys`: the same mistake at the other end of the
+    # press.
+    #
+    # Costs exactly this much delay before transcription starts, which is why
+    # it is a tunable and not a constant.
+    release_tail_ms: int = 1000
     # Software gain applied to captured audio. Raising the Windows device level
     # needs the Core Audio APIs; multiplying the samples achieves the same for
     # Whisper's benefit and works whatever the driver exposes.
@@ -423,6 +435,15 @@ class Config:
             problems.append("audio.min_clip_seconds must be >= 0")
         if self.audio.max_clip_seconds <= self.audio.min_clip_seconds:
             problems.append("audio.max_clip_seconds must exceed min_clip_seconds")
+        tail = self.audio.release_tail_ms
+        if not isinstance(tail, int) or isinstance(tail, bool) or tail < 0:
+            problems.append("audio.release_tail_ms must be a non-negative integer")
+        elif tail > 5000:
+            # It is paid before every transcription, and nobody keeps talking
+            # for five seconds after letting go of a push-to-talk button.
+            problems.append(
+                f"audio.release_tail_ms is {tail}ms; that is added to every "
+                f"message before it is transcribed")
 
         problems.extend(self._voice_problems())
 

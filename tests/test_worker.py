@@ -115,8 +115,13 @@ def worker_setup(monkeypatch, foreground, tmp_path):
 
 def base_config():
     from pathlib import Path
-    return json.loads(
+    cfg = json.loads(
         (Path(__file__).parent.parent / "config.default.json").read_text(encoding="utf-8"))
+    # The shipped default keeps recording for a second after the release, which
+    # every cycle here would otherwise spend asleep for no benefit. The two
+    # tests that care about it set their own value.
+    cfg["audio"]["release_tail_ms"] = 0
+    return cfg
 
 
 def cycle(worker, at=None):
@@ -149,6 +154,46 @@ def test_recording_starts_before_the_chat_keys(worker_setup):
     assert recorder.active
     # The chat-open keys went out after the recorder was already running.
     assert sent == [("keys", ("enter",))]
+
+
+def _tail_before_stop(worker_setup, monkeypatch, tail_ms):
+    """What the worker waited for, immediately before stopping the recorder."""
+    from pitradio import worker as worker_mod
+
+    cfg = base_config()
+    cfg.setdefault("audio", {})["release_tail_ms"] = tail_ms
+    worker, _store, _state, _sent, recorder, _tr = worker_setup(cfg)
+
+    slept = []
+    monkeypatch.setattr(worker_mod, "_sleep_ms", lambda ms: slept.append(ms))
+
+    seen = {}
+    stop = recorder.stop
+
+    def watched_stop():
+        seen["slept"] = list(slept)
+        return stop()
+
+    recorder.stop = watched_stop
+    cycle(worker)
+    return seen["slept"]
+
+
+def test_recording_continues_past_the_release(worker_setup, monkeypatch):
+    """People stop pressing before they stop speaking.
+
+    The last word lands after the thumb comes off, so the clip ends
+    mid-syllable — and Whisper transcribes the truncated sound as whatever it
+    resembles, which makes the message wrong rather than merely short.
+    """
+    slept = _tail_before_stop(worker_setup, monkeypatch, 900)
+
+    assert slept[-1] == 900, "the recorder was stopped without waiting"
+
+
+def test_the_tail_can_be_turned_off(worker_setup, monkeypatch):
+    """It is paid before every transcription, so it has to be optional."""
+    assert _tail_before_stop(worker_setup, monkeypatch, 0)[-1] == 0
 
 
 def test_the_matched_profile_is_reported(worker_setup):
