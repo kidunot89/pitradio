@@ -232,7 +232,7 @@ def cmd_self_test() -> int:
         # ModuleNotFoundError and the real modules were never checked at all.
         "pitradio", "pitradio.config", "pitradio.paths", "pitradio.state",
         "pitradio.keys", "pitradio.languages", "pitradio.mentions",
-        "pitradio.gestures", "pitradio.i18n", "pitradio.speech",
+        "pitradio.gestures", "pitradio.i18n", "pitradio.speech", "pitradio.audio",
         "pitradio.updater", "pitradio.worker",
         "pitradio.input.winapi", "pitradio.input.hook", "pitradio.input.inject",
         "pitradio.ui.gui", "pitradio.ui.gui_settings", "pitradio.ui.gui_language",

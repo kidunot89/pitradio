@@ -642,5 +642,15 @@ class App:
             except Exception:
                 log.debug("stopping %s failed", component, exc_info=True)
 
+        # Last, and after everything that might still be talking: the output
+        # holds the device open for the life of the app, so it is the one
+        # thing that has to be handed back rather than left to the interpreter.
+        try:
+            from pitradio import speech
+
+            speech.close_output()
+        except Exception:
+            log.debug("closing the audio output failed", exc_info=True)
+
         self.root.quit()
         self.root.destroy()

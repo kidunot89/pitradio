@@ -126,6 +126,22 @@ _HOST_API_PREFERENCE = ("Windows WASAPI", "Windows DirectSound", "MME",
                         "Windows WDM-KS")
 
 
+def host_api_of(index: Any) -> str:
+    """Which Windows sound API a device index is reached through, or "".
+
+    Worth knowing outside this module: WASAPI is the only one that takes a
+    shared-versus-exclusive setting, and handing that setting to any other host
+    API is an error rather than a no-op. See `audio._open_stream`.
+    """
+    try:
+        sd = _sd()
+        info = sd.query_devices(index if index is not None else None, "output")
+        return str(sd.query_hostapis()[info["hostapi"]]["name"])
+    except Exception:
+        log.debug("could not name the host API of %r", index, exc_info=True)
+        return ""
+
+
 def _api_rank(index: int, kind: str) -> int:
     try:
         sd = _sd()
@@ -242,7 +258,15 @@ def canonical_name(index: int, kind: str = "output") -> str:
 
 
 def device_samplerate(index: Any) -> int:
-    """What rate a device is actually running at, or 0 if it will not say."""
+    """What rate a device says it runs at, or 0 if it will not say.
+
+    **Advisory only, and no longer on the playing path.** What
+    `query_devices` reports and what the endpoint will actually accept are not
+    always the same number, and being wrong is a hard refusal rather than a
+    resample — so `audio.Output` opens the stream and reads the rate back off
+    it instead. This is kept for the settings screen, where an approximate
+    answer is worth more than none.
+    """
     try:
         info = _sd().query_devices(index if index is not None else None, "output")
         return int(float(info["default_samplerate"]))
@@ -349,28 +373,41 @@ class Recorder:
 # -- cues ----------------------------------------------------------------
 
 
+#: What a cue is generated at, before it is resampled to the device's rate.
+CUE_RATE = 44100
+
+
+def cue_tone(cue_cfg, frequency: int, rate: int = CUE_RATE) -> np.ndarray:
+    """The beep itself, as samples. Pure, so the shaping can be tested."""
+    samples = int(rate * cue_cfg.duration_ms / 1000)
+    if samples <= 0:
+        return np.zeros(0, dtype=np.float32)
+    t = np.linspace(0.0, cue_cfg.duration_ms / 1000, samples, endpoint=False)
+    wave = (np.sin(2 * np.pi * frequency * t) * cue_cfg.volume).astype(np.float32)
+    # Fade the edges, otherwise the discontinuity clicks louder than the tone.
+    fade = max(1, samples // 20)
+    wave[:fade] *= np.linspace(0.0, 1.0, fade)
+    wave[-fade:] *= np.linspace(1.0, 0.0, fade)
+    return wave
+
+
 def play_cue(cue_cfg, frequency: int, device: Any = None) -> None:
     """Short sine beep, fire-and-forget.
 
     Played on the same tick recording starts, so a faint tone can land at the
     head of the clip. Whisper's VAD discards it; anyone bothered can point cues
     at a different output device or turn them off.
+
+    **Through the app's one output, not `sd.play`.** This built a 44.1kHz tone
+    and handed it straight to PortAudio; WASAPI shared mode accepts only the
+    endpoint's own rate and refuses anything else outright, so on a 48kHz
+    device every cue failed with `Invalid sample rate [PaErrorCode -9997]` —
+    caught here and logged at debug level, which is to say not at all. A beep
+    has no business having its own opinion about sample rates.
     """
     if not cue_cfg.enabled:
         return
-    try:
-        sd = _sd()
-        rate = 44100
-        samples = int(rate * cue_cfg.duration_ms / 1000)
-        t = np.linspace(0.0, cue_cfg.duration_ms / 1000, samples, endpoint=False)
-        wave = (np.sin(2 * np.pi * frequency * t) * cue_cfg.volume).astype(np.float32)
-        # Fade the edges, otherwise the discontinuity clicks louder than the tone.
-        fade = max(1, samples // 20)
-        wave[:fade] *= np.linspace(0.0, 1.0, fade)
-        wave[-fade:] *= np.linspace(1.0, 0.0, fade)
-        sd.play(wave, rate, device=resolve_device(device, "output"))
-    except Exception as exc:
-        log.debug("cue playback failed: %s", exc)
+    play_clip(cue_tone(cue_cfg, frequency), CUE_RATE, 1.0, device)
 
 
 # -- voice clips ---------------------------------------------------------
@@ -418,33 +455,14 @@ def play_clip(audio: np.ndarray, rate: int, volume: float = 1.0,
     The device is passed in rather than read off a feature's config, because
     there is one output device for the whole app — see `AudioConfig` for why
     that stopped being per-feature.
+
+    A thin wrapper over `audio.Output` now. Resolving the device, negotiating
+    a rate and recovering from a failure all belong to a stream that stays
+    open: doing them per clip meant re-negotiating with a busy endpoint per
+    clip, which is a coin toss the app kept losing. See the module docstring
+    in [audio.py](audio.py).
     """
-    if audio is None or audio.size == 0:
-        return
-    try:
-        sd = _sd()
-        level = min(1.0, max(0.0, float(volume)))
-        index = resolve_device(device, "output")
-        rate = int(rate) or 16000
-
-        # **Resampled to whatever the device actually runs at.** WASAPI shared
-        # mode accepts only the endpoint's configured rate and refuses anything
-        # else outright; MME accepts any rate and resamples it itself, which is
-        # how a mismatch stayed invisible until a game was holding the device.
-        # Doing it here means neither host API has to.
-        native = device_samplerate(index)
-        if native and native != rate:
-            audio = resample(audio, rate, native)
-            rate = native
-
-        sd.play((audio * level).astype(np.float32), rate, device=index)
-        sd.wait()
-    except Exception as exc:
-        # A missing or busy output device must not end the playback thread;
-        # the next clip may well work. **Warned, not debugged**: this is the
-        # only signal that the engineer is being played into a device nobody
-        # can hear, and at debug level it was invisible.
-        log.warning("could not play on device %r: %s", device, exc)
+    output(device).play(audio, rate, volume=volume)
 
 
 def stop_playback() -> None:
@@ -455,11 +473,55 @@ def stop_playback() -> None:
     moment*, and waiting politely for a lap time to finish reading is how it
     arrives after the corner — which is worse than not making it, because the
     driver acts on it late.
+
+    **No longer `sd.stop()`**, which reached past every queue in this app and
+    stopped the *device*, taking anything else being played with it. What is
+    playing belongs to the output, and dropping it is the output's business.
     """
-    try:
-        _sd().stop()
-    except Exception as exc:
-        log.debug("could not stop playback: %s", exc)
+    _output().stop()
+
+
+#: The app's one output.
+#:
+#: One, because there is one output device for the whole app — see
+#: `AudioConfig` — and a second stream on the same endpoint is one more thing
+#: for the game to compete with.
+_OUTPUT: Any = None
+_OUTPUT_LOCK = threading.Lock()
+
+#: A one-element list, so the output's device callable reads the current value
+#: without this module needing a `global` on the playing path.
+_OUTPUT_DEVICE: list[Any] = [None]
+
+
+def _output():
+    global _OUTPUT
+    with _OUTPUT_LOCK:
+        if _OUTPUT is None:
+            from pitradio import audio
+
+            _OUTPUT = audio.Output(lambda: _OUTPUT_DEVICE[0])
+        return _OUTPUT
+
+
+def output(device: Any = None):
+    """The app's output, pointed at this device.
+
+    Callers each read the device off the live config and pass it in, so the
+    window can change it without anybody holding a stale handle. `Output`
+    reopens the stream only when the answer actually changes.
+    """
+    _OUTPUT_DEVICE[0] = device
+    return _output()
+
+
+def close_output() -> None:
+    """Let go of the device. For the way out, and for tests."""
+    global _OUTPUT
+    with _OUTPUT_LOCK:
+        if _OUTPUT is not None:
+            _OUTPUT.close()
+            _OUTPUT = None
 
 
 # -- transcription -------------------------------------------------------

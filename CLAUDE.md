@@ -198,6 +198,20 @@ produces a bug with no error message.
   logs and the model cache to `%LOCALAPPDATA%` — see [paths.py](paths.py). Under
   Program Files, writes land in UAC's VirtualStore and hot-reload silently stops
   working.
+- **All sound leaves through one held-open stream.** [audio.py](src/pitradio/audio.py)
+  owns it; nothing else calls `sd.play`. Three separate silences came from not
+  doing this. WASAPI shared mode accepts *only* the endpoint's configured rate
+  and refuses anything else outright, so the rate is read back off the opened
+  stream rather than asked of `query_devices` — what that reports and what the
+  endpoint accepts are not always the same number. Shared mode is requested
+  explicitly (`WasapiSettings(exclusive=False)`), because a dictation app that
+  seized an output device would silence the game it exists to talk over. And
+  opening a WASAPI endpoint is a negotiation rather than a function call, so
+  doing it per beep was rolling the dice per beep.
+- **MME truncates every device name to 31 characters, silently.** A config
+  holding one can only ever match MME again, and MME's writes succeed and
+  produce no sound while another process holds the endpoint. `speech._matches`
+  forgives the truncation so the host API preference gets to prefer WASAPI.
 - **The self-updater exits before the installer runs.** Inno's
   `/CLOSEAPPLICATIONS` uses the Windows Restart Manager, which needs the target
   to register and answer shutdown requests; a tkinter app does neither, so Setup
