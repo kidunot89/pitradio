@@ -338,6 +338,42 @@ class Script:
         return [driver, self.t("has no time in"), self.sector_name(sector),
                 self.t("yet")]
 
+    # -- answers to questions ---------------------------------------------
+
+    def fastest_lap_answer(self, driver: str, seconds: float, *,
+                           vehicle_class: str = "") -> Utterance:
+        """Who has the fastest lap, when asked rather than when it happens.
+
+        The class is said back when one was involved. On an endurance grid
+        "Estre, one fifty two eight" is ambiguous about which race it is an
+        answer to, and the driver asked precisely because they did not know.
+        """
+        answer = [driver, self.lap_time(seconds)]
+        return [*answer, self.t("in"), vehicle_class] if vehicle_class else answer
+
+    def fastest_sector_answer(self, driver: str, sector: int, seconds: float, *,
+                              vehicle_class: str = "") -> Utterance:
+        answer = [driver, self.sector_name(sector), self.lap_time(seconds)]
+        return [*answer, self.t("in"), vehicle_class] if vehicle_class else answer
+
+    def best_lap_answer(self, seconds: float) -> Utterance:
+        return [self.t("your best"), self.lap_time(seconds)]
+
+    def no_time_yet(self, vehicle_class: str = "") -> Utterance:
+        """Nobody has set one. An answer, and not the same as saying nothing."""
+        if vehicle_class:
+            return [self.t("no time in"), vehicle_class, self.t("yet")]
+        return [self.t("no time yet")]
+
+    def no_such_class(self) -> Utterance:
+        """A class was named that nobody on this grid is in.
+
+        Said rather than guessed at. Falling back to the overall answer would
+        be a wrong answer stated confidently, and the driver would have no way
+        to tell.
+        """
+        return [self.t("nobody is in that class")]
+
     def which_sector(self) -> Utterance:
         """The sector trainer started without being told which sector."""
         return [self.t("which sector?")]
@@ -371,6 +407,7 @@ FIXED_LINES = (
     "clear to go", "hold",
     "{routine} running", "{routine} off",
     "sector {number}", "fastest lap of the session", "has the fastest lap",
+    "in", "your best", "no time in", "no time yet", "nobody is in that class",
     "fastest", "has taken", "best", "down", "up", "is ahead by",
     "you are ahead by", "has no time in", "yet", "which sector?",
     "give me a lap to find the sectors",

@@ -32,6 +32,7 @@ from pitradio.engineer import (
     notifications,
     packs,
     phrases,
+    queries,
     routines,
     sectors,
     speaking,
@@ -243,6 +244,94 @@ class EngineerService:
                 entries.append((routine.id, chosen))
         return tuple(entries)
 
+    def _query_entries(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """(query id, the phrases that ask it), translated.
+
+        Questions go into the same matcher as the routines, so one pass over
+        the sentence decides everything and a routine can never be shadowed by
+        a question or the other way round. The two are kept apart by id, which
+        `_dispatch` checks before it looks for a routine.
+
+        The argument-taking ones carry a `{argument}` placeholder, which is
+        what confines them to the addressed path — an argument has no end, so
+        an unaddressed "fastest sector three in GT3" would otherwise swallow
+        any sentence starting with those words. See `phrases.MIN_BARE_WORDS`.
+        """
+        entries: list[tuple[str, tuple[str, ...]]] = []
+        for query_id, spoken in queries.DEFAULT_PHRASES.items():
+            suffix = " {argument}" if query_id in queries.TAKES_ARGUMENT else ""
+            entries.append((query_id, tuple(
+                self.catalogue.translate(phrase) + suffix for phrase in spoken)))
+        return tuple(entries)
+
+    def _query_is_real(self, command: phrases.Command) -> bool:
+        """Whether an unaddressed question was really one.
+
+        Addressed, it certainly was: somebody who said the engineer's name was
+        talking to it, and "who has the fastest lap in LMP1" at a race with no
+        LMP1 entry deserves an answer saying so rather than being typed into
+        the chat box.
+
+        Unaddressed, the argument has to make sense on its own — see
+        `queries.understood`.
+        """
+        if command.routine not in queries.DEFAULT_PHRASES or command.addressed:
+            return True
+        classes = {car.vehicle_class for car in self._context().session.cars
+                   if car.vehicle_class}
+        return queries.understood(queries.parse(command.argument, classes))
+
+    def _answer(self, command: phrases.Command) -> None:
+        """One question, one answer, and nothing left running.
+
+        Everything here is read out of the books the notifications already
+        keep, so asking costs a lookup rather than a second pass over the
+        session.
+        """
+        context = self._context()
+        classes = {car.vehicle_class for car in context.session.cars
+                   if car.vehicle_class}
+        ask = queries.parse(command.argument, classes)
+        if ask.unknown_class:
+            self.say(self.script.no_such_class(), urgent=True)
+            return
+
+        # No class named means the driver's own, which is what they meant:
+        # somebody asking "who has the fastest lap" from a GT3 car is asking
+        # about the race they are in. `own_class_only` off means they have
+        # already said they want the overall picture.
+        wanted = ask.vehicle_class or context.my_class()
+
+        if command.routine == queries.MY_BEST_LAP:
+            own = context.own_car()
+            best = context.book.best_for(own.driver) if own else None
+            if best is None:
+                self.say(self.script.no_time_yet(), urgent=True)
+                return
+            self.say(self.script.best_lap_answer(best.lap_time), urgent=True)
+            return
+
+        if command.routine == queries.FASTEST_SECTOR:
+            sector = ask.sector
+            if not sector:
+                self.say(self.script.which_sector(), urgent=True)
+                return
+            held = context.sectors.fastest(sector, wanted)
+            if held is None:
+                self.say(self.script.no_time_yet(wanted), urgent=True)
+                return
+            driver, seconds = held
+            self.say(self.script.fastest_sector_answer(
+                driver, sector, seconds, vehicle_class=wanted), urgent=True)
+            return
+
+        fastest = context.book.fastest(wanted)
+        if fastest is None or fastest.lap_time <= 0:
+            self.say(self.script.no_time_yet(wanted), urgent=True)
+            return
+        self.say(self.script.fastest_lap_answer(
+            fastest.driver, fastest.lap_time, vehicle_class=wanted), urgent=True)
+
     def handle(self, text: str) -> bool:
         """Was that for the engineer? Called by the worker before it types.
 
@@ -257,7 +346,7 @@ class EngineerService:
             command = phrases.match_command(
                 text,
                 name=self.display_name(),
-                entries=self._entries(),
+                entries=self._entries() + self._query_entries(),
                 end_entries=self._end_entries(),
                 stop_phrases=tuple(
                     self.catalogue.translate(phrase)
@@ -268,6 +357,11 @@ class EngineerService:
             return False
 
         if command is None:
+            return False
+
+        if not self._query_is_real(command):
+            # It began like a question and its argument was not one. Better in
+            # the chat box than answered as though it had been asked.
             return False
 
         log.info("engineer: %r -> %s%s", text, command.routine,
@@ -287,6 +381,12 @@ class EngineerService:
 
         if command.routine == phrases.STOP:
             self._stop_active()
+            return
+
+        if command.routine in queries.DEFAULT_PHRASES:
+            # A question, not a routine: it has an answer and when the answer
+            # has been given there is nothing running.
+            self._answer(command)
             return
 
         routine = self.routines.get(command.routine)

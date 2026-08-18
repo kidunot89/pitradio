@@ -1362,6 +1362,7 @@ def build_engineer_tab(app) -> None:
 
     _build_behaviours(app, frame)
     _build_routines(app, frame)
+    _build_questions(app, frame)
 
     ttk.Button(footer, text=t("Save"), command=lambda: _save_engineer(app)).pack(anchor="e")
     _load_engineer_voices(app)
@@ -1472,6 +1473,55 @@ def _build_routines(app, frame) -> None:
             app, box, t("Ends on"),
             stored.end_phrases if stored and stored.end_phrases else ends)
         app.v_eng_routines[routine_id] = (enabled, start_box, end_box)
+
+
+def _build_questions(app, frame) -> None:
+    """The things you ask, as opposed to the things you start.
+
+    Read-only, and deliberately. A routine is a thing the engineer *does* and
+    is worth naming in your own words; a question is a question, and the ones
+    it answers are fixed by what the sim publishes. A settings box here would
+    imply you could invent a question it could answer.
+    """
+    from pitradio.engineer import queries as queries_mod
+
+    asking = ttk.LabelFrame(frame, text=t("Questions"), padding=10)
+    asking.pack(fill="x", pady=(10, 0))
+
+    ttk.Label(
+        asking,
+        text=t(
+            "Ask while driving and you get one answer — nothing starts "
+            "running. Anything that follows is read against this session: "
+            "\"in GT3\" is a class on the grid, \"sector three\" is a "
+            "sector. Say the engineer's name first if a question is not "
+            "recognised on its own."
+        ),
+        style="Hint.TLabel", wraplength=620, justify="left").pack(anchor="w")
+
+    # Built here rather than held at module level so every string is a literal
+    # the extractor can find — translations come from the same catalogue as
+    # everything else in the window.
+    described = (
+        ("fastest_lap", t("Fastest lap"),
+         t("who has the quickest lap of the session. Name a class to ask "
+           "about that one instead of your own")),
+        ("fastest_sector", t("Fastest sector"),
+         t("who holds a sector. Say which sector, and a class if you want "
+           "one other than yours")),
+        ("my_best_lap", t("Your best lap"), t("what you have done so far")),
+    )
+
+    for query_id, name, answers in described:
+        box = ttk.Frame(asking)
+        box.pack(fill="x", pady=(10, 0))
+        ttk.Label(box, text=name).pack(anchor="w")
+        ttk.Label(box, text=answers, style="Muted.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", padx=(20, 0))
+        spoken = queries_mod.DEFAULT_PHRASES.get(query_id, ())
+        ttk.Label(box, text=" / ".join(f'"{phrase}"' for phrase in spoken),
+                  style="Muted.TLabel", wraplength=600,
+                  justify="left").pack(anchor="w", padx=(20, 0))
 
 
 def _phrase_box(app, parent, label: str, lines_: tuple[str, ...]):

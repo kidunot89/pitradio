@@ -1061,3 +1061,88 @@ def test_getting_going_again_clears_the_stopped_memory():
                   track_length=5000.0, stopped=stopped, now=0.5)
     assert spotter.ahead(own, [own, a_car("Ahead", 150.0, 0.5)],
                          track_length=5000.0, stopped=stopped, now=1.2) is None
+
+
+# -- asking the engineer a question ---------------------------------------
+
+
+def grid(engineer, entries, *, elapsed=0.0):
+    """Drive a whole grid round a lap, so the books have times for all of them.
+
+    The whole grid in every frame, not one car at a time: the classes the
+    engineer will match a question against come from the session it can see
+    *now*, and a grid published a car at a time has only ever had one class in
+    it at once.
+    """
+    for distance in range(0, int(TRACK), 20):
+        publish(engineer, *(
+            car(name, distance=float(distance), laps=0, speed=60.0,
+                player=name == entries[0][0], vehicle_class=klass)
+            for name, klass, _seconds in entries), elapsed=elapsed)
+        elapsed += 0.2
+    publish(engineer, *(
+        car(name, distance=5.0, laps=1, speed=60.0, last_lap=seconds,
+            player=name == entries[0][0], vehicle_class=klass)
+        for name, klass, seconds in entries), elapsed=elapsed)
+
+
+ENDURANCE = (("Estre", "LMGT3", 112.5), ("Nato", "Hypercar", 104.0))
+
+
+def test_who_has_the_fastest_lap_is_answered_and_never_sent(engineer):
+    """The trigger key sends to the whole session, so a question that reached
+    the chat box would be somebody's words thrown away -- but so would a
+    question that was not recognised. Both halves matter."""
+    grid(engineer, ENDURANCE)
+    engineer.speaker.said.clear()
+
+    # The player is in the GT3 car, and `own_class_only` is on, so the answer
+    # is about the race they are actually in rather than the overall one.
+    assert engineer.handle("Chief, who has the fastest lap") is True
+    spoken = engineer.speaker.spoken()
+    assert "Estre" in spoken and "Nato" not in spoken
+
+
+def test_a_question_can_name_a_class(engineer):
+    grid(engineer, ENDURANCE)
+    engineer.speaker.said.clear()
+
+    engineer.handle("Chief, who has the fastest lap in Hypercar")
+    spoken = engineer.speaker.spoken()
+    assert "Nato" in spoken and "Estre" not in spoken
+
+
+def test_a_class_nobody_is_in_is_said_so_rather_than_answered_anyway(engineer):
+    """Falling back to the overall answer would be a wrong answer stated
+    confidently, and the driver would have no way to tell."""
+    grid(engineer, ENDURANCE)
+    engineer.speaker.said.clear()
+
+    assert engineer.handle("Chief, who has the fastest lap in LMP1") is True
+    spoken = engineer.speaker.spoken()
+    assert "Estre" not in spoken and "Nato" not in spoken
+
+
+def test_the_fastest_sector_needs_a_sector(engineer):
+    """Asked without one it asks back, rather than picking one."""
+    grid(engineer, ENDURANCE)
+    engineer.speaker.said.clear()
+
+    assert engineer.handle("Chief, who has the fastest sector") is True
+    assert engineer.speaker.said
+
+
+def test_an_ordinary_sentence_that_starts_like_a_question_is_not_one(engineer):
+    """An argument has no end, so this would otherwise be read as a question
+    about a class called "of my life that one" and never reach the chat box.
+    The defence is that the argument space is closed -- see
+    `queries.understood`."""
+    grid(engineer, ENDURANCE)
+    assert engineer.handle("who has the fastest lap of my life that one") is False
+
+
+def test_the_same_sentence_addressed_is_a_question(engineer):
+    """Somebody who said the engineer's name was talking to it, whatever
+    followed. Only the unaddressed path has to be careful."""
+    grid(engineer, ENDURANCE)
+    assert engineer.handle("Chief, who has the fastest lap of my life") is True

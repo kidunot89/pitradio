@@ -445,3 +445,43 @@ where being stationary is the point, and nothing before the car has ever
 moved — sitting on the grid before the lights is stationary, on the racing
 line, with the whole field behind, which is every input the rejoin advice looks
 at.
+
+## Questions
+
+Distinct from routines, and the distinction is not bookkeeping. A routine is
+something the engineer *starts doing* and goes on doing until it is stood down;
+a question has an answer, and when the answer has been given there is nothing
+running. Modelling one as the other would put "who has the fastest lap" in the
+routines list, where every entry has a stop phrase and a tick-box, and neither
+means anything for a question.
+
+Three of them: the fastest lap, the fastest sector, and your own best.
+
+**The parameter follows the keyword and is never part of the phrase.** What a
+driver can ask about depends on the sim they are in — the classes on this grid,
+the sectors this circuit has — and none of that belongs in a phrase somebody
+typed into a settings box. "Who has the fastest sector" is the phrase; "three
+in GT3" is what came after it, parsed against the session. A class is matched
+through `mentions.class_aliases`, so LMU's "LMGT3" answers to "GT3" exactly as
+it does everywhere else, and "LMP2" still refuses to answer to "P2" because
+that is a position.
+
+**A closed argument space is the false-positive defence**, and a better one
+than counting words. `phrases.MIN_BARE_WORDS` protects routines by demanding
+two words in front of an open-ended parameter; that is not enough here, because
+"who has the fastest lap of my life that one" clears it easily and would be
+taken as a question about a class called "of my life that one" — swallowing the
+message. But a question's argument can only be a class on this grid, a sector
+between one and three, or nothing. Anything else was not a question, whatever
+it started with. Addressed by name it is one regardless: somebody who said the
+engineer's name was talking to it.
+
+**No class named means your own class**, because that is what somebody in a
+GT3 car asking "who has the fastest lap" means. A class named that nobody is in
+gets told so rather than being quietly answered with the overall figure — a
+wrong answer stated confidently is the failure mode with no symptom.
+
+The questions are listed read-only on the Engineer tab. The phrases a routine
+answers to are worth putting in your own words; the questions this can answer
+are fixed by what the sim publishes, and an editable box there would imply you
+could invent one.
