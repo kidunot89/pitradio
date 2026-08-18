@@ -552,6 +552,11 @@ console code page, and it **synthesises to a WAV** rather than speaking — that
 is what gives the engineer the same output-device setting as voice chat instead
 of landing on whatever Windows considers default mid-race.
 
+[docs/voicepacks.md](docs/voicepacks.md) is how to generate one, including the
+reference-audio spec, the phrase list and renting a GPU;
+[packaging/prepare_voice.py](packaging/prepare_voice.py) turns any recording
+into clips the generator accepts.
+
 **Voice packs use Crew Chief's folder layout**, so a `crew-chief-autovoicepack`
 output drops straight in. Phrase ids are *derived* from the words
 (`slug("two tenths")` → `two_tenths`), so nothing maintains a mapping and a pack

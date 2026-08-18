@@ -446,6 +446,8 @@ moved — sitting on the grid before the lights is stationary, on the racing
 line, with the whole field behind, which is every input the rejoin advice looks
 at.
 
+See [voicepacks.md](voicepacks.md) for generating a voice.
+
 ## Questions
 
 Distinct from routines, and the distinction is not bookkeeping. A routine is
