@@ -28,6 +28,7 @@ talking to Whisper in, and that is not necessarily what the tabs are in.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from pitradio import i18n
@@ -229,6 +230,41 @@ class Script:
             self.t("car stopped ahead"),
         ]
 
+    def flag_call(self, call: str) -> Utterance:
+        """A flag, or something stopped on the road.
+
+        `flags.py` returns the English form and this is where it becomes the
+        driver's language. A corner or sector number arrives inside the string,
+        so those two are matched rather than looked up whole — there is no
+        sensible way to enumerate every turn on every circuit.
+        """
+        fixed = {
+            "full course yellow": self.t("full course yellow"),
+            "green flag": self.t("green flag"),
+            "blue flag": self.t("blue flag"),
+            "car stopped ahead": self.t("car stopped ahead"),
+        }
+        if call in fixed:
+            return [fixed[call]]
+
+        match = re.fullmatch(r"car stopped in turn (\d+)", call)
+        if match:
+            return [self.t("car stopped in"),
+                    self.t("turn {number}").format(number=self.number(int(match[1])))]
+        match = re.fullmatch(r"car stopped in sector (\d+)", call)
+        if match:
+            return [self.t("car stopped in"), self.sector_name(int(match[1]))]
+        return [call]
+
+    def rejoin_call(self, clear: bool) -> Utterance:
+        """Whether there is room to pull out.
+
+        Two words either way. A driver stationary on a racing line is not
+        listening to a sentence, and the wrong half of a long one heard late is
+        how somebody pulls out in front of a car.
+        """
+        return [self.t("clear to go") if clear else self.t("hold")]
+
     def spotter_call(self, call: str) -> Utterance:
         """Left, right, both, a hazard ahead, or a side going clear.
 
@@ -331,6 +367,8 @@ FIXED_LINES = (
     "radio check", "car left", "car right", "two cars left", "two cars right",
     "three wide", "four wide", "clear", "clear left", "clear right",
     "clear all round", "still there", "car stopped ahead",
+    "full course yellow", "green flag", "blue flag", "car stopped in",
+    "clear to go", "hold",
     "{routine} running", "{routine} off",
     "sector {number}", "fastest lap of the session", "has the fastest lap",
     "fastest", "has taken", "best", "down", "up", "is ahead by",

@@ -388,3 +388,60 @@ rather than your taste:
 
 Car lengths and axis conventions differ between sims, so a number that suits
 one game is wrong in the next.
+
+## Flags and incidents
+
+A behaviour of its own, and separate from the spotter deliberately. Crew
+Chief's own sound folders draw the line and it is the right one: `car_left`,
+`still_there` and `clear_all_round` are in `spotter/`, while
+`stopped_car_in_turn_3`, `slow_car_ahead` and `local_yellow_ahead` are in
+`flags/`. The spotter answers "who is beside me", which is geometry. Flags
+answer "what has happened to the track", which is not.
+
+Deriving the second from the first is what produced a warning in every braking
+zone: PitRadio had a rule saying a car much slower than you was a hazard, and
+a braking zone is precisely where the car in front is much slower than you.
+That rule is gone.
+
+**Three sources, not equally trustworthy.**
+
+*Full-course yellow* and *blue* come from the sim and are reliable — LMU's
+`mGamePhase`, `mYellowFlagState` and per-car `mFlag` all read sanely against a
+live session.
+
+*Local yellows are derived*, because LMU's `mSectorFlag` is not usable. It is
+documented as "whether there are any local yellows at the moment in each
+sector" and reads `[11, 11, 1]` under a green flag, with the fields either side
+of it correct — so it is not an offset that has slipped, LMU simply publishes
+something else there. Read as booleans it would put a permanent yellow on the
+whole circuit. So an incident here means what a marshal means by one: a car has
+stopped on the road and has been there two seconds. That is a derivation from
+data the sim does publish honestly, in the same spirit as finding the corners
+in the speed trace rather than shipping a track map.
+
+The cost is that the call cannot precede the incident — a real yellow is out
+the moment the marshals see it, and this one waits to be sure. The benefit is
+that it is never wrong about a green track, which is the failure that makes
+people turn a feature off.
+
+**Incidents are named by corner, not by driver.** At the speed this matters
+"turn six" is something a driver can act on and a name is a syllable count they
+cannot. The numbering is the lap book's, so a driver hears one set of corner
+numbers rather than the coaching routines using one and the flags another; the
+corners are found once per reference lap and cached, because `find_corners`
+resamples a whole lap and this runs several times a second. With no reference
+lap yet the sector is named instead.
+
+**When you are the incident, the side calls stop.** Describing the cars going
+past a spun car back to its driver is noise; the only useful question is
+whether there is room to pull out, and [rejoin.py](../src/pitradio/engineer/rejoin.py)
+answers it — comparing *time to be safe* against *time until the next car
+arrives*, not distance against distance. A stationary car needs its whole
+acceleration back before the first arrival. That is why the naive "three
+seconds of clear track" answer gets people collected.
+
+Two guards, both learned rather than assumed: nothing is said in the pit lane,
+where being stationary is the point, and nothing before the car has ever
+moved — sitting on the grid before the lights is stationary, on the racing
+line, with the whole field behind, which is every input the rejoin advice looks
+at.

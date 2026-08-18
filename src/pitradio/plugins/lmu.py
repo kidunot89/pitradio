@@ -28,6 +28,7 @@ from pitradio import voice
 from pitradio.plugins import shared_memory
 from pitradio.plugins.base import (
     PROVIDES_FIELD,
+    PROVIDES_FLAGS,
     PROVIDES_LAPS,
     PROVIDES_POSITIONS,
     PROVIDES_SECTORS,
@@ -152,6 +153,51 @@ def _speed(local_velocity) -> float:
         return 0.0
 
 
+#: `mFlag` is per car and, per the block's own comment, currently only ever
+#: green or blue.
+BLUE_FLAG = 6
+
+#: `mGamePhase` when the whole circuit is under caution.
+PHASE_FULL_COURSE_YELLOW = 6
+
+#: `mYellowFlagState`: anything above this is a caution in progress. 0 is no
+#: flag and -1 is invalid; 1 (pending) onwards all mean one is running.
+YELLOW_STATE_NONE = 0
+
+
+# **`mSectorFlag` is not read, and deliberately.** The layout describes it as
+# "whether there are any local yellows at the moment in each sector", which
+# would be exactly what a spotter wants. Against a live session it reads
+# `[11, 11, 1]` — under a green flag, with `mGamePhase` at 5 and
+# `mYellowFlagState` at 0, and with the fields either side of it (`mNumVehicles`
+# 56, `mCurrentET`, `mInRealtime`) all correct, so this is not an offset that
+# has slipped. LMU publishes something else there.
+#
+# Read as booleans those values mean "a local yellow in all three sectors, at
+# all times", which is the kind of confident garbage that is worse than no
+# feature: it would put a permanent yellow on the whole circuit and there would
+# be nothing in the app to point at. Local yellows are derived from cars that
+# have actually stopped instead — see `engineer/flags.py`.
+
+
+def _full_course_yellow(info) -> bool:
+    """Whether the whole circuit is under caution.
+
+    Two fields, because they answer slightly different questions and either
+    alone has a hole. `mGamePhase` is the state the session is *in*, and
+    `mYellowFlagState` is what the caution is *doing* — pits closed, lead lap,
+    resume. A caution that is winding down leaves the phase behind before the
+    state clears, and a pending one raises the state before the phase moves.
+    """
+    try:
+        phase = int(info.mGamePhase)
+        state = ord(info.mYellowFlagState) if isinstance(
+            info.mYellowFlagState, bytes) else int(info.mYellowFlagState)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return phase == PHASE_FULL_COURSE_YELLOW or state > YELLOW_STATE_NONE
+
+
 def _close_mapping(handle, view) -> None:
     shared_memory.close(handle, view)
 
@@ -169,6 +215,7 @@ class LeMansUltimatePlugin(SessionPlugin):
     #: data, which is why this is the sim the engineer was built against.
     provides = frozenset({
         PROVIDES_POSITIONS, PROVIDES_LAPS, PROVIDES_SECTORS, PROVIDES_FIELD,
+        PROVIDES_FLAGS,
     })
     settings = (
         PluginSetting(
@@ -376,6 +423,7 @@ class LeMansUltimatePlugin(SessionPlugin):
                 # against another's, and two reads would be two moments.
                 track_length = max(0.0, float(info.mLapDist))
                 elapsed = float(info.mCurrentET)
+                caution = _full_course_yellow(info)
             except (AttributeError, ValueError) as exc:
                 self._fail(f"could not read the session block: {exc}")
                 return SessionInfo()
@@ -383,7 +431,7 @@ class LeMansUltimatePlugin(SessionPlugin):
         return SessionInfo(
             key=voice.session_key(address, port), track=track, cars=tuple(cars),
             focus_slot=self._focus_slot(), track_length=track_length,
-            elapsed=elapsed)
+            elapsed=elapsed, full_course_yellow=caution)
 
     def _focus_slot(self) -> int | None:
         """Which car the camera is on, from the game's own HTTP API.
@@ -454,6 +502,9 @@ class LeMansUltimatePlugin(SessionPlugin):
                     last_lap=max(0.0, float(vehicle.mLastLapTime)),
                     best_lap=max(0.0, float(vehicle.mBestLapTime)),
                     in_pits=bool(vehicle.mInPits),
+                    # 6 is blue, and 0 is green; the block's comment says
+                    # those are the only two it currently shows.
+                    blue_flag=int(vehicle.mFlag) == BLUE_FLAG,
                     # mSector numbers its sectors 0=third, 1=first, 2=second.
                     # Passed through as the block reports it rather than
                     # normalised here, so the one place that has to know the

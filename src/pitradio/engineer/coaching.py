@@ -270,6 +270,19 @@ ENTRY = "entry"
 EXIT = "exit"
 
 
+def corner_at(corners: list[Corner], distance: float) -> int:
+    """Which corner a point on the track is in, or 0 for the straights.
+
+    A plain lookup over corners already found, because `find_corners` resamples
+    a whole lap and must not run on a tick. Whoever holds the corners holds
+    them until the reference lap changes.
+    """
+    for corner in corners:
+        if corner.entry <= distance <= corner.exit:
+            return corner.number
+    return 0
+
+
 @dataclass(frozen=True)
 class PhaseDelta:
     """How the two laps compared through half a corner.

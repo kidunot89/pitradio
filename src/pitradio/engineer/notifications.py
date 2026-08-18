@@ -28,7 +28,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from pitradio.engineer import spotter
+from pitradio.engineer import coaching, rejoin, spotter
+from pitradio.engineer import flags as flags_mod
 from pitradio.plugins import base
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ LAP_TIME = "lap_time"
 FASTEST_LAP = "fastest_lap"
 FASTEST_SECTOR = "fastest_sector"
 SECTOR_PERFORMANCE = "sector_performance"
+FLAGS = "flags"
 
 
 @dataclass(frozen=True)
@@ -491,12 +493,154 @@ class SectorPerformanceNotification(Notification):
 #: Every behaviour that ships, in the order the tab shows them. Static, like
 #: plugins and routines, because a compiled build cannot discover a class it
 #: never imports.
+class FlagNotification(Notification):
+    """What has happened to the track, rather than who is beside you.
+
+    The division is Crew Chief's and it is the right one: `car_left` and
+    `still_there` are spotter calls about geometry, while `local_yellow_ahead`
+    and `stopped_car_in_turn_3` are flag calls about the circuit. Deriving the
+    second from the first is what put a warning in every braking zone.
+
+    Three things, in the order they interrupt: whether the session is under
+    caution, whether there is a car stopped on the road in front, and — when
+    you are the one who has stopped — whether there is room to pull out.
+    """
+
+    id = FLAGS
+    name = "Flags and incidents"
+    description = ("Calls full-course yellows and the green, cars stopped on "
+                   "the road ahead, and when it is safe to rejoin.")
+    #: The flags themselves are said once each, on the edge. This governs the
+    #: rejoin call, which is the one thing here worth repeating: a driver
+    #: waiting to pull out is waiting for it to change.
+    default_repeat = 2.0
+    default_enabled = False
+    repeat_help = ("a flag is said when it changes; this is how often the "
+                   "rejoin call repeats while you are waiting")
+    requires = (base.PROVIDES_POSITIONS,)
+
+    def supported(self, provided) -> bool:
+        """Positions are enough. Flags from the sim are a bonus.
+
+        The incidents and the rejoin advice are derived from where cars are and
+        how fast they are going, which every sim here publishes. A sim that
+        also reports a full-course caution gets those calls as well; one that
+        does not still gets the two that matter most.
+        """
+        if provided is None:
+            return True
+        return base.PROVIDES_POSITIONS in provided
+
+    def __init__(self) -> None:
+        self._incidents = flags_mod.Incidents()
+        self._watch = flags_mod.Watch()
+        #: The reference lap the corner numbers came from, and them. Held
+        #: because `find_corners` resamples a whole lap and this runs several
+        #: times a second.
+        self._reference: object = None
+        self._corners: list = []
+        #: Whether this car has turned a wheel yet.
+        #:
+        #: Sitting on the grid before the lights is stationary, on the racing
+        #: line, with the whole field behind — which is every input the rejoin
+        #: advice looks at, and it would say "hold" every two seconds until the
+        #: start. Stopping only means something once you have been going.
+        self._moved = False
+
+    def reset(self) -> None:
+        self._incidents.reset()
+        self._watch.reset()
+        self._reference, self._corners = None, []
+        self._moved = False
+
+    def check(self, context) -> list[Call]:
+        own = context.own_car()
+        if own is None:
+            self.reset()
+            return []
+
+        session = context.session
+        calls: list[Call] = []
+
+        # The caution, first: it changes what the driver may do, and everything
+        # else is advice about a lap they may not be about to drive.
+        text = self._watch.caution_changed(bool(session.full_course_yellow))
+        if text:
+            calls.append(Call(f"caution:{text}",
+                              context.script.flag_call(text), urgent=True))
+
+        if own.blue_flag:
+            text = self._watch.blue_changed(True)
+            if text:
+                calls.append(Call("blue", context.script.flag_call(text)))
+        else:
+            self._watch.blue_changed(False)
+
+        stopped = self._incidents.update(session.cars, session.elapsed)
+        self._watch.forget(stopped)
+
+        if float(getattr(own, "speed", 0.0) or 0.0) > rejoin.SAFE_SPEED:
+            self._moved = True
+
+        if self._moved and not own.in_pits and self._stationary(own):
+            # **You are the incident.** Calling the cars going past would be
+            # describing your own predicament back to you; the only useful
+            # thing now is whether there is room to go. Not in the pit lane,
+            # where being stationary is the point, and not before the car has
+            # ever moved — see `_moved`.
+            return calls + self._rejoin(context, own)
+
+        found = flags_mod.incidents(
+            own, session.cars, stopped, track_length=session.track_length,
+            corner_at=self._corner_at(context))
+        text = self._watch.incident_call(flags_mod.nearest_ahead(found))
+        if text:
+            calls.append(Call(f"incident:{text}",
+                              context.script.flag_call(text), urgent=True))
+        return calls
+
+    @staticmethod
+    def _stationary(own) -> bool:
+        return float(getattr(own, "speed", 0.0) or 0.0) <= spotter.STOPPED_SPEED
+
+    def _corner_at(self, context):
+        """The lap book's corner numbering, or None until a lap exists.
+
+        The book's, so a driver hears one set of corner numbers rather than the
+        coaching routines using one and the flags another. Recomputed only when
+        the reference lap itself changes — finding corners resamples the whole
+        lap, and this is on a tick.
+        """
+        reference = context.book.fastest()
+        if reference is None:
+            return None
+        if reference is not self._reference:
+            self._reference = reference
+            self._corners = coaching.find_corners(reference)
+        if not self._corners:
+            return None
+        return lambda distance: coaching.corner_at(self._corners, distance)
+
+    def _rejoin(self, context, own) -> list[Call]:
+        verdict = rejoin.safe_to_rejoin(
+            own, context.session.cars,
+            track_length=context.session.track_length)
+        if verdict.clear:
+            # Keyed on "clear" alone, so it is said once when the track opens
+            # up rather than every tick until the car is moving.
+            return [Call("rejoin:clear",
+                         context.script.rejoin_call(True), urgent=True)]
+        return [Call("rejoin:wait", context.script.rejoin_call(False),
+                     urgent=True)]
+
+
 BUILTIN: tuple[type[Notification], ...] = (
     LapTimeNotification,
     FastestLapNotification,
     FastestSectorNotification,
     SectorPerformanceNotification,
     SpotterNotification,
+    FlagNotification,
 )
 
 

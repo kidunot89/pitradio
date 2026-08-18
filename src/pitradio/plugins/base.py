@@ -55,6 +55,14 @@ PROVIDES_SPOTTER = "spotter"
 #: grid needs this as well as `PROVIDES_LAPS`.
 PROVIDES_FIELD = "field"
 
+#: Yellow flags, full-course cautions and blue flags.
+#:
+#: Separate from `PROVIDES_POSITIONS` because a sim can publish where every car
+#: is and still say nothing about whether the marshals have a flag out — and
+#: the difference matters: a stopped car is a fact about one car, a yellow is a
+#: fact about a piece of track, and only the sim knows the second one.
+PROVIDES_FLAGS = "flags"
+
 
 @dataclass(frozen=True)
 class PluginSetting:
@@ -134,6 +142,11 @@ class Car:
     last_sector1: float = 0.0
     last_sector2: float = 0.0
 
+    #: The flag being shown to *this* car. Blue is the one that is per-car
+    #: rather than per-track: it means somebody quicker is about to arrive,
+    #: and only the sim knows who it is being shown to.
+    blue_flag: bool = False
+
 
 @dataclass(frozen=True)
 class SessionInfo:
@@ -170,6 +183,16 @@ class SessionInfo:
     #: answer than any geometry: it is the sim's own, computed from the real
     #: car bodies rather than from a point and a guessed width.
     alongside: dict[str, int] | None = None
+
+    #: Which sectors have a local yellow out, indexed **the way a person counts
+    #: them**: 1, 2, 3. Empty when the sim does not publish flags at all, which
+    #: is not the same as an entry that is False — that means the sector is
+    #: known to be clear.
+    sector_yellow: dict[int, bool] = field(default_factory=dict)
+    #: Whether the whole circuit is under caution. Distinct from a local
+    #: yellow in every sector: it changes what the driver may do, not merely
+    #: where they must be careful.
+    full_course_yellow: bool = False
 
     def player(self) -> Car | None:
         """The car belonging to this installation, driven or not."""
