@@ -1,0 +1,505 @@
+<img src="docs/images/logo.png" alt="" width="96" align="left">
+
+# PitRadio
+
+Push-to-talk voice dictation into sim racing chat boxes.
+
+<br clear="left">
+
+Hold a key, say what you want, let go. PitRadio opens the game's chat box,
+transcribes what you said, types it, and sends it — without you taking a hand
+off the wheel. Speech recognition runs locally on the CPU; nothing you say
+leaves your machine.
+
+Built for wheel-mounted buttons: bind one directly, or map it to F13 with your
+wheel's own software) and PitRadio sees it as an ordinary key.
+
+> **Status:** early. Ships with a profile for Le Mans Ultimate. Other sims work
+> by adding a profile, which takes about a minute — see
+> [Adding your sim](#adding-your-sim).
+
+![The PitRadio window](docs/images/window.png)
+
+---
+
+## Install
+
+Download the latest `pitradio-setup-*.exe` from
+[Releases](https://github.com/kidunot89/pitradio/releases) and run it.
+
+**Windows will warn you about it.** Two separate things cause this, and both
+are expected:
+
+- **SmartScreen: "Windows protected your PC".** These builds aren't
+  code-signed, so Windows has no publisher to attribute them to. Choose **More
+  info → Run anyway**.
+- **Antivirus may flag or quarantine it.** PitRadio installs a global keyboard
+  hook and synthesises keystrokes. That is a keylogger's behavioural signature.
+  It is also precisely what push-to-talk dictation requires — there is no way to
+  swallow your trigger key and type into a game without it.
+
+If you'd rather not take that on trust, every release publishes
+[`SHA256SUMS`](https://github.com/kidunot89/pitradio/releases) so you can check that
+what you downloaded is what was built. Every release is also a portable `.zip`,
+if you would rather not run an installer at all.
+
+### It needs to run as administrator
+
+The installed build requests this automatically. It matters because of a
+Windows rule called UIPI: a normal-privilege process cannot send input to a
+window owned by an elevated one. If your sim or its launcher runs elevated and
+PitRadio doesn't, **every keystroke is silently discarded** — no error, no
+exception, nothing typed. This is the single most common cause of "it does
+nothing".
+
+The Status tab warns you if the app isn't elevated.
+
+---
+
+## First run
+
+1. Open PitRadio. On first launch it downloads the speech model (~250MB,
+   once). The window shows the progress.
+2. Go to **Audio**, pick your microphone, and press **Record 4s and
+   transcribe**. Nothing is typed anywhere — this just proves the mic and the
+   model work. If the level bar barely moves while you speak, raise
+   **Microphone gain**; the bar shows the signal after gain, which is what
+   Whisper actually receives.
+3. Sort out a trigger key — see below.
+4. Start your sim, hold the trigger, say something, release.
+
+### About F13
+
+The default trigger is **F13**, because no sim binds it, so holding it can never
+also do something in the game. Almost no keyboard has an F13 key — but you do
+not need one: bind a **wheel button** directly (below), or map one to F13 with
+your wheel's own software.
+
+You don't have to type key names. **Settings → Press a key…** binds whatever
+you press next, including combinations like `Ctrl+F12`, and the press is
+swallowed so binding Enter doesn't also do something behind the window.
+
+### Binding a wheel or gamepad button
+
+**PitRadio reads wheels and gamepads directly.** Open **Settings → Trigger**,
+click **Capture a wheel button**, and press the button you want to talk with.
+It is bound, and it survives a restart.
+
+The device is opened shared rather than seized, so the game keeps receiving the
+button as well — you can bind one the sim already uses, though a spare one is
+tidier. Presses arrive in about **4ms**.
+
+**If the button does nothing:**
+
+- **Press it during the fifteen seconds the capture is listening.** Buttons
+  already held down when capture starts are ignored, so a rotary or a switch
+  that rests in the "on" position has to be moved rather than found.
+- **Check the Status tab.** Press the button; the **Last trigger** row stamps
+  the time the moment a press is seen. If it updates, the binding works and the
+  rest is just Settings.
+- **Run as administrator.** The installed build self-elevates.
+
+**JoyToKey still works** if you would rather use it, or if your device does not
+appear: map the button to a keyboard key with
+**[JoyToKey](https://joytokey.net/)** and PitRadio sees an ordinary keypress.
+It is no longer required.
+- **Run both as administrator.** PitRadio's installed build self-elevates. If
+  JoyToKey is not elevated, Windows will not let its synthetic keypresses reach
+  an elevated PitRadio, and nothing happens with no error at all.
+- **Does the key work from the keyboard?** Bind the trigger to something you
+  can actually press, like `scrolllock`, and test that first. That separates a
+  JoyToKey problem from a PitRadio one.
+
+**Why not read the controller directly?** PitRadio used to, through four
+backends — SDL3, SDL2, XInput and the Windows multimedia API. Between them they
+still could not reliably read a Fanatec rim (79 inputs enumerated, no button
+press ever reported) or a Steam Controller, because both are held by software
+that will not share the device. The only way to see a Steam Controller at all
+was to take it away from Steam, which breaks the owner's own shortcuts. A
+dictation app has no business seizing your wheel. JoyToKey solves it at the
+layer that actually owns the device, and the keyboard hook has always worked.
+
+To try it at a desk with no wheel plugged in, `scrolllock` and `pause` are good
+choices: present on most keyboards, rarely bound by sims.
+
+Whatever you pick is **swallowed**: it never reaches the game, so don't use a
+key the sim needs.
+
+Closing the window minimises to the tray; the trigger key keeps working. Quit
+from the tray menu to actually stop the app.
+
+---
+
+## Checking a message before it goes out
+
+By default the message is sent as soon as it's typed. Whisper does mishear
+things, and in a public session a mistake is everyone's problem — so each
+profile has a **Send automatically** toggle (Profiles → *your sim*).
+
+With it off, the message is typed into the chat box and left there. Your
+trigger then controls what happens to it, without letting go of the wheel:
+
+| Gesture | What it does |
+| --- | --- |
+| **Tap** | Send it |
+| **Tap twice** | Clear it |
+| **Hold** | Clear it and record a replacement |
+
+The status bar shows **waiting to send** while a message is sitting there.
+
+If you have buttons to spare, **Settings → Trigger** also lets you bind keys
+directly to *Send waiting message* and *Clear waiting message*. Those act
+immediately, with no double-tap window to wait out, and work alongside the
+gestures rather than replacing them.
+
+Because a single tap might turn out to be the first half of a double, sending
+waits for the double-tap window to close — about a third of a second. If you'd
+rather not wait, set `review.double_tap_ms` to `0` in the config, which sends
+immediately and gives up clearing by double tap. `review.tap_ms` is the line
+between a tap and a hold.
+
+---
+
+## Using PitRadio
+
+> Screenshots are generated from the running app by
+> `python packaging/screenshots.py`, each cropped to the control being
+> described — so they stay correct as the layout moves.
+
+### The Status tab — is it actually listening?
+
+![Status](docs/images/status.png)
+
+Everything you need to answer "why did nothing happen?" is here.
+
+- **Listening for** — what the hook is armed with *right now*, read from the
+  hook rather than from the config file. A key you saved but that never applied
+  shows up here as the old one.
+- **Last trigger** — stamped the moment the key is detected, before any audio
+  or transcription work. If this updates and nothing else does, PitRadio saw
+  your key and the problem is downstream. If it doesn't update, the key never
+  reached it.
+- **Focused app** — the executable name, which is the profile key. This is how
+  you add a sim.
+
+Below it, the live log:
+
+![Log](docs/images/log.png)
+
+`pre-keys sent` means the chat box was asked to open. `transcribed` shows what
+Whisper heard, before any mention matching. `sent N chars` closes the cycle.
+
+### Settings → Trigger
+
+![Trigger](docs/images/trigger.png)
+
+Three key bindings. All are optional except the trigger itself.
+
+| Binding | What it does |
+| --- | --- |
+| **Trigger key** | hold to talk; swallowed, so it never reaches the game |
+| **Send waiting message** | sends a message left in the chat box |
+| **Clear waiting message** | discards it |
+
+**Press a key…** binds whatever you press next, including `Ctrl+F12`, and
+swallows it — so binding Enter doesn't also actuate whatever is behind the
+window.
+
+To use a wheel or gamepad button, map it to a key with JoyToKey first — see
+[Binding a wheel or gamepad button](#binding-a-wheel-or-gamepad-button).
+
+### Settings → Appearance
+
+![Appearance](docs/images/appearance.png)
+
+Light, dark, or follow the desktop. Applies on the next start.
+
+### Profiles — one per sim
+
+![Profiles](docs/images/profiles.png)
+
+The setting that matters most is **Chat open delay**: the chat box needs a few
+frames to open and take focus, and typing too early loses the opening
+characters. Start at 350ms and raise it if messages arrive truncated.
+
+**Send automatically** is off if you want to read a message before it goes out
+— see [Checking a message before it goes out](#checking-a-message-before-it-goes-out).
+
+**Session plugin** reads who is in the session so names transcribe correctly
+and become mentions. Leave it on *automatic* unless you have a reason.
+
+### Language
+
+![Language](docs/images/language.png)
+
+PitRadio picks your desktop's language the first time it runs. Whisper has no
+per-language models — the `.en` builds are English-only and the rest are
+multilingual — so choosing a language and a size here derives the model for
+you. Changing it downloads the new model on save.
+
+### Audio
+
+![Audio](docs/images/audio.png)
+
+Pick the microphone, then **Record 4s and transcribe**. Nothing is typed
+anywhere; it only proves the mic and the model work. If the level bar barely
+moves while you speak, raise **Microphone gain** — the bar shows the signal
+*after* gain, which is what Whisper actually receives.
+
+### Engineer
+
+A named voice that talks back: your lap times, cars alongside, and routines you
+start by saying something. Four engineers ship with it, each with its own voice,
+pace and how much it says.
+
+The one that ships targets a driver's quickest lap and, corner by corner, tells
+you how yours compared:
+
+> Chief, target P3
+>
+> *Targeting N.Tandy. Best lap, one twenty five point two seven.*
+>
+> *Turn one, N.Tandy was faster on the exit, six tenths.*
+
+It uses the same push-to-talk key as everything else, and it is off until you
+switch it on. Trigger phrases are yours to choose — if you would rather start
+the coach by saying "initiate build procedures", type that in.
+
+**[docs/engineer.md](docs/engineer.md)** is the full guide: talking to it,
+choosing a voice, writing your own routine phrases, other languages, and
+installing a recorded voice pack.
+
+### History
+
+![History](docs/images/history.png)
+
+Every message, with what was heard and what was typed. **Re-send** retypes one
+after a three-second countdown, which is there so you can focus the game first
+— without it the message goes into PitRadio's own window.
+
+---
+
+## Adding your sim
+
+Profiles are keyed on the game's executable name, and PitRadio tells you what
+that is:
+
+1. With the sim focused, tap the trigger key once.
+2. Alt-tab to PitRadio. The **Status** tab shows **Focused app** — that's the
+   executable name.
+3. Go to **Profiles → Add**, and it will offer that name.
+4. Set the keys your sim uses for chat. For most sims that's Enter to open and
+   Enter to send.
+
+Then tune it. The setting that matters is **Delay after opening chat**
+(`pre_delay_ms`): the chat box needs a few frames to open and take focus, and
+if PitRadio starts typing too early the opening characters vanish. Start at
+350ms; raise it if you lose the beginning of messages.
+
+Config changes take effect on the next trigger — no restart. The file lives at
+`%APPDATA%\pitradio\config.json` if you'd rather edit it directly; the GUI and
+a text editor write the same file.
+
+**Got a sim working?** A profile that works is genuinely useful to other people
+— please open an issue with the executable name and the keys.
+
+---
+
+## Nothing is typed into the game
+
+Work down this list; it's ordered by how often each one is the answer.
+
+1. **Is PitRadio running as administrator?** See above. This is most of them.
+2. **Is the game in borderless windowed mode?** Exclusive fullscreen swallows
+   synthetic input in some titles. Borderless is worth trying before anything
+   else here.
+3. **Does the chat box open at all?** Check the log (Status → Open log folder).
+   If you see `pre-keys sent` but no text appears, the keys are reaching the
+   game and the problem is the typing. If the chat box never opens, the
+   `pre_keys` are wrong for that sim.
+4. **Are the first characters missing?** Raise `pre_delay_ms`.
+5. **Does the chat box open but stay empty?** The game is ignoring Unicode
+   input. Set that profile's **Text injection** to `scancode`, which types
+   character by character using real key presses instead. Slower, and limited
+   to what your keyboard layout can produce, but some games accept nothing else.
+6. **Still nothing?** A few games read input below the level `SendInput` can
+   reach — usually anti-cheat related. The
+   [Interception driver](https://github.com/oblitum/Interception) is the only
+   real workaround, and it's a kernel driver, so treat it as a last resort.
+   PitRadio doesn't use it.
+
+The log records the executable name and per-stage timings for every trigger —
+when the chat box opened, how long transcription took, when the message was
+sent. That turns "it felt wrong" into something you can actually read.
+
+---
+
+## Session plugins
+
+A plugin reads live data from a sim. Today that means the driver list, which
+PitRadio uses two ways: it feeds the names to Whisper so they're transcribed
+correctly, and it can prefix them in the message — say "tell Tandy to box" and
+send `tell @Tandy to box`.
+
+**Le Mans Ultimate ships with one**, reading LMU's shared memory with no
+game-side plugin required. Assign it in **Profiles → Session plugin**; the
+bundled LMU profile already has it. The choice lives on the profile, so a plugin
+that suits two games can be assigned to both.
+
+However you say the name, the mention comes out in the form sims put on screen:
+
+| You say | It sends |
+| --- | --- |
+| "Geoff Taylor is quick" | `@G.Taylor is quick` |
+| "tell Taylor to box" | `tell @G.Taylor to box` |
+| "Geoff is quick" | `@G.Taylor is quick` |
+| "de Vries is catching" | `@N.de Vries is catching` |
+
+That's the point of replacing rather than just prefixing — `@G.Taylor` is what
+every other driver sees on their own HUD, so they know immediately who's meant.
+
+You can also refer to someone by their **standings position**, which is often
+easier than a name you can't pronounce or didn't catch:
+
+| You say | It sends |
+| --- | --- |
+| "tell P3 to move over" | `tell @N.de Vries to move over` |
+| "P1 is pulling away" | `@M.Verstappen is pulling away` |
+| "third place is quick" | `@N.de Vries is quick` |
+
+A position nobody is in — "P40" in a twenty-car race — is left as you said it.
+Turn this off under **Profiles → Le Mans Ultimate options**.
+
+First names that double as racing speech are never matched on their own:
+"max attack", "nick the inside line" and "will do" stay as they are. They're
+still recognised inside a full name. Turn first-name matching off entirely with
+`mentions.match_first_names`.
+
+Note on the `@`: it's plain text. Neither LMU nor rFactor 2 chat supports
+markup, so there's no bold and the game attaches no meaning to it — it's a human
+convention, like writing someone's name in caps.
+
+The accuracy half is the more valuable one. Whisper mangles proper nouns it has
+no reason to expect; telling it who's in the session beats any amount of
+matching after the fact.
+
+Plugins can expose their own options, which appear in the profile editor once
+the plugin is assigned. They're stored per profile, so the same plugin can be
+configured differently for two games.
+
+Plugins are compiled into the app — there's no way to add one after
+installing, and adding a sim means a new release. Say which sim and what it
+publishes in [an issue](https://github.com/kidunot89/pitradio/issues/new/choose).
+
+---
+
+## Accuracy
+
+The **Vocabulary** tab feeds Whisper a list of words to expect. Below the
+editable list it also shows the **runtime vocabulary** — terms plugins supply
+for the current session, and the exact prompt Whisper receives once the two are
+combined. If a name keeps coming out wrong, that panel tells you whether it was
+ever offered in the first place.
+
+ It ships with
+corner names, series terms and radio phrases, and it measurably improves proper
+nouns. Add your regular team mates' names, your series' jargon, tracks you run
+often.
+
+Transcription runs on the **CPU, deliberately** — the GPU belongs to the sim. A
+model grabbing VRAM mid-corner costs frames, and a few hundred milliseconds of
+CPU transcription doesn't.
+
+### Other languages
+
+The **Language** tab configures which languages you want and how large a model
+to use for each. Add a language, pick a size, press **Save and download**, and
+the models are fetched into the cache.
+
+Worth understanding, because it shapes the choices: **Whisper has no
+per-language models.** There are English-only builds (`tiny.en` … `medium.en`)
+and multilingual builds (`tiny` … `large-v3`), and every multilingual build
+handles all the languages. Picking a size per language is still useful —
+multilingual `small` is weaker than `small.en`, so a second language often wants
+a bigger model than English does. "Medium Spanish, small English" means `medium`
+when transcribing Spanish and `small.en` when transcribing English.
+
+Only one language is active at a time. The others stay configured and
+downloaded, so switching is instant.
+
+Sizes trade accuracy against latency, and latency is what you feel mid-stint:
+
+| Size | Download | Notes |
+| --- | --- | --- |
+| tiny | ~75 MB | fastest, least accurate |
+| base | ~145 MB | fast |
+| small | ~480 MB | the default; a good balance on CPU |
+| medium | ~1.5 GB | noticeably slower on CPU |
+| large | ~3 GB | often too slow to use between corners |
+
+Also replace the **Vocabulary** text when you change language: it ships as
+English racing terms, and a prompt in the wrong language works against you.
+
+---
+
+## Updates
+
+![Updates](docs/images/updates.png)
+
+PitRadio checks GitHub for new releases and can install them itself. Automatic
+installs are **off by default**, and always deferred while a sim is in focus —
+restarting the app mid-stint would be worse than updating a day later.
+
+**What the verification does and doesn't prove.** Downloads are checked against
+the `SHA256SUMS` published with the release before anything is run. That proves
+the download arrived intact. It does not prove who produced it — the builds
+aren't signed, so if the repository or a release were compromised, the updater
+would install whatever was there, with administrator rights. That is why
+auto-install is opt-in. Code signing would fix this properly and is the obvious
+next step for the project.
+
+Updating closes PitRadio, installs, and reopens it. Your config, logs and the
+cached speech model live outside the install directory, so none of them are
+touched — an update never re-downloads the model.
+
+Turn the check off entirely with `--no-update-check`, or in
+`config.json` under `updates`.
+
+---
+
+## Privacy
+
+- Speech recognition runs entirely on your machine. Audio is never uploaded and
+  never written to disk.
+- The app makes exactly two kinds of network request: downloading the speech
+  model on first run, and checking GitHub for updates.
+- Transcription history is kept in memory only, and goes away when you quit.
+- The keyboard hook only acts on the configured trigger key. Every other key is
+  passed straight through untouched.
+
+---
+
+## Reporting a fault
+
+[Open an issue](https://github.com/kidunot89/pitradio/issues/new/choose), and say
+what the Status tab shows. Almost everything in this app fails silently, so the
+log is usually the only thing that says why.
+
+Two contributions are worth more than any bug report, and neither needs code:
+
+- **A profile for a sim.** The Status tab shows the executable name; that plus
+  your sim's chat keys is a complete contribution.
+- **A translation.** Every string in the interface is one entry in one JSON
+  file, and a partial translation is fine.
+
+---
+
+## Licence
+
+PitRadio is proprietary software. Installing or using it means accepting the
+[end-user licence](LICENSE.md).
+
+Releases up to and including **v0.3.0** were published under the MIT
+licence and stay that way for anyone who has them — that grant cannot be
+withdrawn and is not being withdrawn. Later releases are under the licence
+above.

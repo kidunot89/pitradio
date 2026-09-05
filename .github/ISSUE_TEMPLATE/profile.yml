@@ -1,0 +1,24 @@
+name: A profile for a sim
+description: Make PitRadio work with a game it does not ship a profile for
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No code needed. Two facts are a complete contribution.
+  - type: input
+    id: executable
+    attributes:
+      label: The executable name
+      description: The Status tab logs it while the game has focus.
+    validations:
+      required: true
+  - type: textarea
+    id: keys
+    attributes:
+      label: How its chat box works
+      description: >
+        Which key opens it, whether there are separate keys for team and
+        all-chat, and which key sends. If it needs a moment to open, say
+        roughly how long.
+    validations:
+      required: true

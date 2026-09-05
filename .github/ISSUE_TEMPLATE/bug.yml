@@ -1,0 +1,35 @@
+name: Something is wrong
+description: It does not do what it says, or it does nothing at all
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else: **is PitRadio running as administrator?** If your
+        sim runs elevated and PitRadio does not, Windows discards every
+        keystroke it sends, with no error anywhere. The Status tab says so.
+  - type: input
+    id: version
+    attributes:
+      label: PitRadio version
+      description: The title bar, or Settings → Updates.
+    validations:
+      required: true
+  - type: input
+    id: sim
+    attributes:
+      label: Which sim, and its executable name
+      description: The Status tab logs the executable name of whatever has focus.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The log
+      description: >
+        `%LOCALAPPDATA%\pitradio\logs\pitradio.log`. The last few dozen lines
+        around the moment it went wrong are usually enough.
+      render: text
